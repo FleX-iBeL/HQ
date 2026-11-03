@@ -26267,7 +26267,7 @@ print("OK")
             out.append(h)
         return out
 
-    async def flow410(self) -> str:
+    async def flow420(self) -> str:
         """F79, no Claude: the estimate is built from what jobs like it really took. Made-up finished builds, small and
         big, that took 10 to 28 minutes, each with the call's guess at twice its time, and one that ran long through its
         own mistake (400 minutes). A planning row, a waiting job and a planned item for a build each get the group's
@@ -26280,9 +26280,9 @@ print("OK")
                      "mistake": {"what": "a made-up mistake", "at": 1790009000}, "about": "h999 on the hq roadmap: a long one"})
         o = self._f79("F79a", """
 import subprocess
-n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Build a small change to the status page button, flow 410', '--guess', '56'],
+n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Build a small change to the status page button, flow 420', '--guess', '56'],
                        capture_output=True, text=True).stdout.split()[1])
-i = int(subprocess.run(['python3', 'routine/schedule.py', 'add', 'tomorrow 10:00', 'Build a small change to the calendar colours, flow 410'],
+i = int(subprocess.run(['python3', 'routine/schedule.py', 'add', 'tomorrow 10:00', 'Build a small change to the calendar colours, flow 420'],
                        capture_output=True, text=True).stdout.split()[1])
 p = E.plan()
 out = {'row': row('H9001'), 'job': p['jobs'][str(n)], 'item': p['items'][str(i)], 'words': E.words(n, p), 'item_words': E.item_words(i, p),
@@ -26303,7 +26303,7 @@ print(json.dumps(out))
              "F79: the status page doesn't say how sure an estimate is, or a planning row's latest end")
         return f"a row, a job and an item from the 10 builds like it: about {o['row']['est']}, at the latest {o['row']['latest']}; the call's 56 moves the job to {j['est']}"
 
-    async def flow411(self) -> str:
+    async def flow421(self) -> str:
         """F79, no Claude: with too few measured jobs like it an estimate says so instead of passing a guess off as
         measured, and still has a number and a latest end, never none. Three made-up research jobs: a research job says
         too few finished jobs like it (3), keeps today's number (estimate.py's, under 3 of a kind the last jobs of any
@@ -26312,10 +26312,10 @@ print(json.dumps(out))
         hist = self._f79_jobs([10, 12, 14], kinds=("research",))
         script = """
 import subprocess
-n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Read the week 7 transcripts and write up what they say. Research only, flow 411'],
+n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Read the week 7 transcripts and write up what they say. Research only, flow 421'],
                        capture_output=True, text=True).stdout.split()[1])
 p = E.plan()
-d = E.job_estimate(n, 'Read the week 7 transcripts and write up what they say. Research only, flow 411')
+d = E.job_estimate(n, 'Read the week 7 transcripts and write up what they say. Research only, flow 421')
 print(json.dumps({'job': p['jobs'][str(n)], 'today': d['est'], 'words': E.words(n, p), 'row': row('H9001'), 'row_words': sprint.row_words(row('H9001'))}))
 """
         o = self._f79("F79b", script, hist)
@@ -26332,7 +26332,7 @@ print(json.dumps({'job': p['jobs'][str(n)], 'today': d['est'], 'words': E.words(
              f"F79: with nothing finished it doesn't say so: {o['words']} / {o['row_words']}")
         return "3 like it: today's number, its latest end, and too few said; none at all: 15 minutes, a latest end, said"
 
-    async def flow412(self) -> str:
+    async def flow422(self) -> str:
         """F79, no Claude: the usage is built from what jobs like it really used, at the plan's own rate (F107), and the
         gate holds what the page and the planning say. Six made-up builds with their own tokens (100k to 600k) and a
         made-up rate on Max 5x (100k a 5-hour point, 700k a weekly one): a build's usage is the middle job's (3.5 and
@@ -26345,14 +26345,14 @@ print(json.dumps({'job': p['jobs'][str(n)], 'today': d['est'], 'words': E.words(
                                      "rate": {"five": 100000, "weekly": 700000}, "at": 1790000000, "plan": "Max 5x"}}}
         o = self._f79("F79d", """
 import subprocess
-t = 'Build a small change to the status page button, flow 412'
+t = 'Build a small change to the status page button, flow 422'
 n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', t], capture_output=True, text=True).stdout.split()[1])
 p = E.plan()
 gm, gc = U.job_cost(n, t, latest=True)
 out = {'row': row('H9001'), 'job': p['jobs'][str(n)], 'gate': [gm, {k: gc[k] for k in ('five', 'weekly')}]}
-U.set_plan('Ultra', by='flow 412')
+U.set_plan('Ultra', by='flow 422')
 out['ultra'] = row('H9001')
-U.set_plan('Max 5x', by='flow 412')
+U.set_plan('Max 5x', by='flow 422')
 h = {'n': 950, 'kind': 'build', 'est': 5, 'actual': 60, 'done': 1790100000, 'how': 'seen', 'about': 'h950 on the hq roadmap: a big one',
      'tokens': {'opus': [2000000, 0, 0, 0]}}
 open(E.HISTORY, 'a').write(json.dumps(h) + '\\n')
@@ -26373,7 +26373,7 @@ print(json.dumps(out))
              f"F79: a finished job doesn't move the next estimate: {x['est']} -> {a['est']}, {x['cost']} -> {a['cost']}")
         return f"usage {x['cost']} with its range and top, the same on the row, the job and the gate; half on Ultra; {x['est']} -> {a['est']} min after one more"
 
-    async def flow413(self) -> str:
+    async def flow423(self) -> str:
         """F79, no Claude: the live check holds a job to the latest end it was given when it started. Twelve made-up
         builds: job 960 starts (its measured estimate kept), writes its own guess (made again with it), and finishes in
         20 minutes; its finished line carries the latest it was given then, how sure it was, and the measured likely
@@ -26384,7 +26384,7 @@ print(json.dumps(out))
             h["guess"] = h.pop("guess_call")
         o = self._f79("F79e", """
 import subprocess
-t = 'Build a small change to the status page button, flow 413'
+t = 'Build a small change to the status page button, flow 423'
 E.on_add(960, t)
 E.on_start(960, t)
 m0 = dict(E._load_state()['960'].get('m') or {})
@@ -27356,6 +27356,206 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+    async def flow410(self) -> str:
+        """H300, no Claude: a switch at the top of Donna's chat to Moneypenny's and back. A copy of the chat page on a
+        throwaway status server, in a headless browser at a phone's size (in the sheet, dark) and a laptop's: in Donna's
+        chat the switch sits at the top, inside the screen, naming Moneypenny; one tap opens her chat with her earlier
+        text in it, the sheet and the theme kept; a text sent there shows in her chat, lands in her thread (not Donna's)
+        and she answers there (canned, HQ_DIRECT_DRY); there the switch names Donna and one tap brings back Donna's
+        chat with Donna's earlier text and without his text to her. On an HQ without her line (HQ_TEAM_LINE=0) the
+        switch doesn't show, in Donna's chat or on ?line=team."""
+        import html as html_lib
+        import urllib.parse
+        import urllib.request
+        cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
+        cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
+        chrome = str(cands[-1]) if cands else "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        need(Path(chrome).exists(), "no headless browser found to run the chat page in")
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        site = self.tmp / "h300"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        for name in ("app", "routine", "workspace", "desktop", "template", ".venv"):
+            if (ROOT / name).exists():
+                (site / name).symlink_to(os.path.realpath(ROOT / name))
+        (site / ".status").mkdir()
+        (site / "scratch").mkdir()
+        d = site / "lines"
+        (d / "line").mkdir(parents=True)
+        (d / "team-line").mkdir()
+        now = time.time()
+        DONNA_SAID, HER_SAID, SENT = "Donna's earlier text: the laundry is done.", "Moneypenny's earlier text: item 12 is through QA.", "Anything stuck tonight?"
+        (d / "line/thread.jsonl").write_text(json.dumps({"at": now - 600, "from": "agent", "text": DONNA_SAID, "why": "hello"}) + "\n")
+        (d / "team-line/thread.jsonl").write_text(json.dumps({"at": now - 300, "from": "agent", "text": HER_SAID, "why": "jobs"}) + "\n")
+        page = site / "status/direct.html"
+        # her picture comes from the call line on this computer (7860): the copy never asks the real one
+        html = page.read_text().replace("'http://127.0.0.1:7860'", "''")
+        harness = r"""
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search), mode = q.get('h300run');
+  if (window.top !== window || !mode) return;
+  const out = { steps: [] }, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;border:0;z-index:99;background:#fff';
+  document.body.append(f);
+  const D = () => f.contentDocument;
+  const open = (go) => new Promise((r) => { f.onload = () => r(); go(); });
+  const until = async (fn, n = 60) => { for (let i = 0; i < n; i++) { try { if (fn()) return true; } catch {} await wait(250); } return false; };
+  const bubbles = () => [...D().querySelectorAll('#list .m')].map((m) => (m.classList.contains('me') ? 'me:' : 'her:')
+    + [...m.childNodes].filter((c) => !(c.classList && c.classList.contains('at'))).map((c) => c.textContent).join(''));
+  const who = () => D().getElementById('who').textContent;
+  const sw = () => D().getElementById('swap');
+  const look = () => {
+    const s = sw(), w = f.contentWindow.innerWidth;
+    if (!s) return { there: false };
+    const r = s.getBoundingClientRect(), h = D().querySelector('header').getBoundingClientRect();
+    return { there: true, shown: !s.hidden && r.width > 0, text: s.textContent, inside: r.left >= 0 && r.right <= w && r.top >= h.top && r.bottom <= h.bottom,
+      top: Math.round(r.top), fits: D().querySelector('header').scrollWidth <= D().querySelector('header').clientWidth + 1 && D().documentElement.scrollWidth <= w + 1 };
+  };
+  const step = (k, v) => { out[k] = v; out.steps.push(k); };
+  try {
+    if (mode === 'none') {
+      await open(() => { f.src = '/direct'; });
+      step('donnaLoaded', await until(() => bubbles().length > 0));
+      await wait(3000);
+      step('donnaSwap', look());
+      await open(() => { f.src = '/direct?line=team'; });
+      step('teamLoaded', await until(() => bubbles().length > 0));
+      await wait(3000);
+      step('teamSwap', look());
+    } else {
+      await open(() => { f.src = mode === 'phone' ? '/direct?sheet&theme=dark' : '/direct'; });
+      step('donnaReady', await until(() => bubbles().length > 0 && sw() && !sw().hidden));
+      step('donnaWho', who());
+      step('donnaBubbles', bubbles());
+      step('donnaSwap', look());
+      await open(() => sw().click());
+      step('teamReady', await until(() => who() === 'Moneypenny' && bubbles().length > 0 && sw() && !sw().hidden));
+      step('teamUrl', f.contentWindow.location.search);
+      step('teamBubbles', bubbles());
+      step('teamSwap', look());
+      if (mode === 'phone') {
+        D().getElementById('in').value = q.get('send');
+        D().getElementById('f').requestSubmit();
+        step('sentShown', await until(() => bubbles().includes('me:' + q.get('send'))));
+      }
+      await open(() => sw().click());
+      step('backReady', await until(() => who() === 'Donna' && bubbles().length > 0 && sw() && !sw().hidden));
+      step('backUrl', f.contentWindow.location.search);
+      step('backBubbles', bubbles());
+      step('backSwap', look());
+    }
+  } catch (e) { out.error = String(e); }
+  const pre = document.createElement('pre'); pre.id = 'h300'; pre.textContent = 'H300RESULT ' + JSON.stringify(out) + ' END';
+  document.body.appendChild(pre);
+})();
+</script>
+"""
+        page.write_text(html.replace("</body>", harness + "</body>", 1))
+
+        def serve(extra):
+            port = _free_port()
+            env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1", "HQ_DIRECT_DIR": str(d / "line"),
+                   "HQ_DIRECT_LOCAL": str(d / "local.json"), "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0", **extra}
+            for k in ("HQ_TEAM_LINE_DIR", "HQ_DIRECT_PUSH_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_TO"):
+                env.pop(k, None)
+            if "HQ_TEAM_LINE" not in extra:
+                env.pop("HQ_TEAM_LINE", None)
+            return subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], cwd=site, env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL), f"http://127.0.0.1:{port}"
+
+        def get(base, path):
+            with urllib.request.urlopen(base + path, timeout=60) as r:
+                return json.loads(r.read().decode())
+
+        async def up(base):
+            for _ in range(80):
+                try:
+                    await asyncio.to_thread(get, base, "/direct.json")
+                    return
+                except Exception:
+                    await asyncio.sleep(0.25)
+            need(False, "the throwaway status server didn't start")
+
+        async def browse(base, mode, size):
+            url = base + f"/direct?h300run={mode}&send={urllib.parse.quote(SENT)}"
+            r = await asyncio.to_thread(run, [chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
+                                              f"--user-data-dir={self.tmp / ('h300-' + mode)}", f"--window-size={size}",
+                                              "--virtual-time-budget=40000", "--dump-dom", url], timeout=150)
+            m = re.search(r'<pre id="h300">H300RESULT (.*?) END</pre>', r.stdout, re.S)
+            need(m, f"the chat page test ({mode}) didn't finish: {(r.stderr or r.stdout)[-300:]!r}")
+            res = json.loads(html_lib.unescape(m.group(1)))
+            say(f"   {mode}: {json.dumps(res)[:500]}")
+            need(res.get("donnaReady", True) or "error" not in res, f"{mode}: Donna's chat has no switch to Moneypenny at the top")
+            need("error" not in res, f"the chat page test ({mode}) broke: {res.get('error')}")
+            return res
+
+
+        def check_swap(res, key, name, size):
+            s = res.get(key) or {}
+            need(s.get("there") and s.get("shown"), f"{size}: no switch at the top of the chat ({key}: {s})")
+            need(s.get("text") == "⇄ " + name, f"{size}: the switch says {s.get('text')!r}, not {name}")
+            need(s.get("inside") and s.get("top", 999) < 80, f"{size}: the switch isn't at the top inside the screen: {s}")
+            need(s.get("fits"), f"{size}: the chat is wider than the screen with the switch: {s}")
+
+        srv, base = serve({})
+        try:
+            await up(base)
+            # the phone: Donna's chat in the sheet, dark; to her chat, a text to her, and back
+            ph = await browse(base, "phone", "390,844")
+            need(ph.get("donnaReady"), f"phone: Donna's chat has no switch to Moneypenny: {ph.get('donnaSwap')}")
+            need(ph["donnaWho"] == "Donna" and "her:" + DONNA_SAID in ph["donnaBubbles"], f"phone: Donna's chat isn't hers: {ph['donnaBubbles']}")
+            check_swap(ph, "donnaSwap", "Moneypenny", "phone")
+            need(ph.get("teamReady"), "phone: one tap didn't open Moneypenny's chat")
+            need("her:" + HER_SAID in ph["teamBubbles"] and "her:" + DONNA_SAID not in ph["teamBubbles"],
+                 f"phone: her chat doesn't have her earlier texts: {ph['teamBubbles']}")
+            tq = urllib.parse.parse_qs(ph["teamUrl"].lstrip("?"), keep_blank_values=True)
+            need(tq.get("line") == ["team"] and "sheet" in tq and tq.get("theme") == ["dark"], f"phone: her chat lost the sheet or the theme: {ph['teamUrl']}")
+            check_swap(ph, "teamSwap", "Donna", "phone")
+            need(ph.get("sentShown"), "phone: the text sent in her chat doesn't show there")
+            need(ph.get("backReady") and "her:" + DONNA_SAID in ph["backBubbles"] and "me:" + SENT not in ph["backBubbles"],
+                 f"phone: one tap didn't bring back Donna's chat: {ph.get('backBubbles')}")
+            bq = urllib.parse.parse_qs(ph["backUrl"].lstrip("?"), keep_blank_values=True)
+            need("line" not in bq and "sheet" in bq and bq.get("theme") == ["dark"], f"phone: back in Donna's chat on {ph['backUrl']}")
+            check_swap(ph, "backSwap", "Moneypenny", "phone")
+            # the text reached her, not Donna, and she answers on her line
+            th = []
+            for _ in range(200):
+                th = (await asyncio.to_thread(get, base, "/direct.json?line=team"))["messages"]
+                if th and th[-1]["from"] == "agent" and SENT in th[-1]["text"]:
+                    break
+                await asyncio.sleep(0.25)
+            need(any(x["from"] == "me" and x["text"] == SENT for x in th) and th[-1]["from"] == "agent" and SENT in th[-1]["text"],
+                 f"her answer isn't on her line: {th[-2:]}")
+            need(all(x["text"] != SENT for x in (await asyncio.to_thread(get, base, "/direct.json"))["messages"]), "his text to her landed in Donna's chat")
+            answer = th[-1]["text"]
+            # the laptop: Donna's chat, to hers (her answer there), and back
+            lp = await browse(base, "laptop", "1280,800")
+            need(lp.get("donnaReady"), f"laptop: Donna's chat has no switch to Moneypenny: {lp.get('donnaSwap')}")
+            check_swap(lp, "donnaSwap", "Moneypenny", "laptop")
+            need(lp.get("teamReady") and lp["teamUrl"] == "?line=team", f"laptop: one tap didn't open her chat: {lp.get('teamUrl')}")
+            need(lp["teamBubbles"][-2:] == ["me:" + SENT, "her:" + answer] and "her:" + HER_SAID in lp["teamBubbles"],
+                 f"laptop: her chat doesn't show the text and her answer: {lp['teamBubbles'][-3:]}")
+            check_swap(lp, "teamSwap", "Donna", "laptop")
+            need(lp.get("backReady") and lp["backUrl"] == "" and "her:" + DONNA_SAID in lp["backBubbles"], f"laptop: not back in Donna's chat: {lp.get('backUrl')}")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=5)
+        # an HQ without her line: no switch, in Donna's chat or on ?line=team
+        srv, base = serve({"HQ_TEAM_LINE": "0"})
+        try:
+            await up(base)
+            j = await asyncio.to_thread(get, base, "/direct.json?line=team")
+            need(j["line"] == "direct", f"without her line, ?line=team says {j['line']}")
+            no = await browse(base, "none", "390,844")
+            need(no.get("donnaLoaded") and no.get("teamLoaded"), f"without her line the chat didn't load: {no}")
+            for k in ("donnaSwap", "teamSwap"):
+                need(not no[k].get("shown"), f"without her line the switch shows ({k}): {no[k]}")
+        finally:
+            srv.terminate()
+            srv.wait(timeout=5)
+        return "phone and laptop: one tap from Donna's chat to Moneypenny's (her texts there, his text answered there) and back; no switch without her line"
 
     async def flow182(self) -> str:
         """F77, no Claude: the automatic review of new or changed planning rows, with a stand-in reviewer (HQ_REVIEW_FAKE:
@@ -34916,6 +35116,7 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    410: ("H300: at the top of Donna's chat one tap opens Moneypenny's chat, her texts in it, his text answered there, and back; on a phone and a laptop; no switch without her line", False, "flow410"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
@@ -35182,10 +35383,10 @@ FLOWS = {
     381: ("F113: later in the week the reserve still keeps his room: two days in it climbs out of its least, mid-week all 15 points are kept and the agents stop first", False, "flow381"),
     382: ("F113: a plan with a 5-hour window at minute 10: the team's line is 10 and the agents' 5, a small job fits, a big one waits in the window, the line never under 10", False, "flow382"),
     383: ("F113: a job running across a 5-hour reset isn't held for it: not on the number from before the reset, not on the fresh 2%; at its own line it is", False, "flow383"),
-    410: ("F79: an estimate built from what jobs like it really took: the group's middle, small and big builds together, a mistake left out, a guess by its place among the guesses, a latest end, and how many jobs like it it rests on, on the planning, a job and an item", False, "flow410"),
-    411: ("F79: too few jobs like it is said, never passed off as measured: today's number and a latest end stay, and with nothing finished 15 minutes, said", False, "flow411"),
-    412: ("F79: the usage of a job like it at the plan's own rate, its range and its top; the planning, the job and the gate say the same; half on Ultra; one more finished job moves the next", False, "flow412"),
-    413: ("F79: a job is held to the latest end it was given at its start, its own guess in it; its finished line keeps it; the replay runs on the record", False, "flow413"),
+    420: ("F79: an estimate built from what jobs like it really took: the group's middle, small and big builds together, a mistake left out, a guess by its place among the guesses, a latest end, and how many jobs like it it rests on, on the planning, a job and an item", False, "flow420"),
+    421: ("F79: too few jobs like it is said, never passed off as measured: today's number and a latest end stay, and with nothing finished 15 minutes, said", False, "flow421"),
+    422: ("F79: the usage of a job like it at the plan's own rate, its range and its top; the planning, the job and the gate say the same; half on Ultra; one more finished job moves the next", False, "flow422"),
+    423: ("F79: a job is held to the latest end it was given at its start, its own guess in it; its finished line keeps it; the replay runs on the record", False, "flow423"),
     231: ("F103: the record: an id given when the item is written, carried by the job, its QA, the release, a text and an incident; follow prints them all; the job's text names no row", False, "flow231"),
     232: ("F103: the ledger: a call with a correction adds one line with the agent and his words, from the program or the wrap-up, a quote that isn't his is refused, praise isn't counted, the file can't be written from a call, a refused mail is a line", False, "flow232"),
     233: ("F103: the score per agent and per hand-off from the ledger alone; a QA fail and a bug after a pass; the week's score with the switch off; turns, minutes and what each estimate stands on", False, "flow233"),
