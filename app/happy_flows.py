@@ -22772,6 +22772,122 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
                 f"{len(own)} lines of his that aren't that instruction open nothing; {len(acts) + 2} clear yeses with an action open, "
                 f"{len(holds)} held back don't")
 
+    def _h308(self, name: str, only: tuple = ("moneypenny",)):
+        """H308's flows: a throwaway workspace with the feature on (H298's fix round's), the steps on the planning, and the order lines in her ledger."""
+        b = self._hf(f"h308-{name}", only=only)
+        b.steps = lambda aid="moneypenny": re.findall(rf"^- Item (\d+) · [^\n]*Agent step: {aid} #\d+ \([^)]*\): (.*)$", b.rm(), re.M)
+        b.order_line = lambda words, aid="moneypenny": (re.search(rf'^- \S+ \S+ · start · "{re.escape(words)}" · (.*)$', b.led(aid), re.M) or [None, ""])[1]
+        b.tick = lambda at: b.py(f"out(cycles.tick(T({at!r})))")
+        b.give = lambda words, at, aid="moneypenny": b.py(f"out(cycles.order({aid!r}, 'start', {words!r}, False, T({at!r})))", extra={"HQ_DIRECT_AGENT": "pepper"})
+        return b
+
+    async def flow400(self) -> str:
+        """H308, no Claude: an order Pepper writes on Moneypenny's list at 10:00 is an item by her midday look the same day, and a later or a doubled look makes no second one."""
+        b = self._h308("midday")
+        b.tick(f"{b.thu} 09:00")  # her morning look: nothing on her list yet
+        w = "put the call line fix on the planning"
+        r = b.give(w, f"{b.thu} 10:00")
+        need("midday look" in r and "14:00" in r, f"the words back don't name her next look: {r}")
+        b.tick(f"{b.thu} 13:59")
+        need(not b.steps(), f"a step before her midday look: {b.steps()}")
+        b.tick(f"{b.thu} 14:00")
+        s = b.steps()
+        need(len(s) == 1 and s[0][1] == w, f"not a step by her midday look: {s} {b.led('moneypenny')[:600]}")
+        line = b.order_line(w)
+        need(line.startswith("planned") and f"item {s[0][0]}" in line and "midday look at 14:00" in line, f"the order doesn't carry its item's label: {line}")
+        for at in (f"{b.thu} 14:00", f"{b.thu} 14:05", f"{b.thu} 19:00"):
+            b.tick(at)
+        b.py(f"out(cycles._take_orders('moneypenny', cycles.agent_settings('moneypenny'), 'midday look at 14:00', '{b.thu} 14:00', T('{b.thu} 14:01'), None))")
+        need(len(b.steps()) == 1, f"a later or doubled look made a second item: {b.steps()}")
+        # its step held and sent back, and its record gone as the 30-day cut drops it: the order line still says it had an item
+        b.py("import ledger\nledger.set_order('moneypenny', 1, 'open', 'back for her next session: held while it ran')\nd = cycles._state()\ncycles._agent_state(d, 'moneypenny')['steps'] = {}\ncycles._save_state(d)")
+        b.tick(f"{b.fri} 09:00")
+        need(len(b.steps()) == 1 and b.order_line(w).startswith("open") and f"item {s[0][0]}, step #0" in b.order_line(w), f"sent back, it got a second item: {b.steps()} {b.order_line(w)}")
+        return f"10:00's order is item {s[0][0]} at her 14:00 look, the order says so, and three later looks and a doubled one make no second item"
+
+    async def flow401(self) -> str:
+        """H308, no Claude: an order written after her evening look waits for the night and is picked up at her next morning look."""
+        b = self._h308("evening")
+        old = (b.thu_at - timedelta(days=20)).strftime("%Y-%m-%d")
+        b.give("an order from before the looks", f"{old} 10:00")  # open on her list before the looks ever ran: it stays her bigger session's
+        b.tick(f"{b.thu} 19:00")  # her evening look has been
+        w = "check the night's QA marks"
+        r = b.give(w, f"{b.thu} 19:30")
+        need("morning look" in r and "09:00" in r, f"the words back don't name tomorrow's morning look: {r}")
+        for at in (f"{b.thu} 21:59", f"{b.fri} 07:00", f"{b.fri} 08:59"):
+            b.tick(at)
+        need(not b.steps(), f"picked up before her morning look: {b.steps()}")
+        b.tick(f"{b.fri} 09:00")
+        s = b.steps()
+        need(len(s) == 1 and s[0][1] == w and "morning look at 09:00" in b.order_line(w), f"not picked up the next morning: {s} {b.order_line(w)}")
+        need(b.order_line("an order from before the looks").startswith("open"), f"an order from before the looks went live was taken: {b.order_line('an order from before the looks')}")
+        return "19:30's order waits through the night and is a step at 9:00 the next morning"
+
+    async def flow402(self) -> str:
+        """H308, no Claude: two looks a day instead of three is one setting, and it takes effect the next day; today keeps its three."""
+        b = self._h308("two")
+        b.tick(f"{b.thu} 08:30")
+        r = b.cy("set", "moneypenny", "looks_a_day", "2")
+        need(r.returncode == 0 and "is now 2" in r.stdout and "tomorrow" in r.stdout, f"the setting: {r.stdout} {r.stderr[-300:]}")
+        need(json.loads((b.ws / "HQ/agents/cycles.json").read_text())["agents"]["moneypenny"]["looks_a_day"] == 2, "not written in her settings")
+        b.give("first", f"{b.thu} 10:00")
+        b.tick(f"{b.thu} 14:00")
+        need(len(b.steps()) == 1 and [x[1] for x in b.st("moneypenny")["looks_day"]["times"]] == ["09:00", "14:00", "19:00"], f"today's midday look didn't stay: {b.steps()} {b.st('moneypenny').get('looks_day')}")
+        b.tick(f"{b.fri} 08:30")
+        need(b.st("moneypenny")["looks_day"]["times"] == [["morning look", "09:00"], ["evening look", "19:00"]], f"tomorrow's looks: {b.st('moneypenny').get('looks_day')}")
+        b.give("second", f"{b.fri} 10:00")
+        b.tick(f"{b.fri} 14:00")
+        need(len(b.steps()) == 1, f"a midday look the day after the change: {b.steps()}")
+        b.tick(f"{b.fri} 19:00")
+        need(len(b.steps()) == 2 and b.steps()[1][1] == "second", f"her evening look: {b.steps()}")
+        return "set looks_a_day 2: Thursday keeps 9:00, 14:00 and 19:00, Friday has 9:00 and 19:00 and Friday's 10:00 order waits for 19:00"
+
+    async def flow403(self) -> str:
+        """H308, no Claude: a new agent from the template has three looks a day, and her list is picked up like the others'; the template names three for each of its own."""
+        tpl = json.loads((ROOT / "template/HQ/agents/cycles.json").read_text())
+        need(all(a.get("looks_a_day") == 3 for a in tpl["agents"].values()), f"the template's agents: {[(k, a.get('looks_a_day')) for k, a in tpl['agents'].items()]}")
+        b = self._h308("new", only=())
+        (b.ws / "HQ/agents/agents.json").write_text(json.dumps([{"id": "nova", "name": "Nova", "load": "quick"}]) + "\n")
+        r = b.cy("set", "nova", "on", "on")
+        need(r.returncode == 0, f"switching her on: {r.stdout} {r.stderr[-300:]}")
+        r = b.py("out(cycles.look_times(cycles.agent_settings('nova')))")
+        need(r == [["morning look", "09:00"], ["midday look", "14:00"], ["evening look", "19:00"]], f"the new agent's looks: {r}")
+        r = b.cy()
+        need("Nova" in r.stdout and "her list looked at 3 times a day (09:00, 14:00, 19:00)" in r.stdout, f"the words: {r.stdout[-600:]}")
+        b.tick(f"{b.thu} 09:00")
+        b.give("say hello to the team", f"{b.thu} 10:00", aid="nova")
+        b.tick(f"{b.thu} 14:00")
+        need(len(b.steps("nova")) == 1, f"the new agent's midday look: {b.steps('nova')} {b.led('nova')[:500]}")
+        # the switch off: no look is promised and nothing is written
+        (b.ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
+        sp = Path(b.env["HQ_CYCLES_STATE"])
+        was = sp.read_text()
+        r = b.give("one more", f"{b.fri} 10:00", aid="nova")
+        need("looks at her list are off while the agents' switch is off" in r and " look (" not in r, f"the switch off, the words back: {r}")
+        need(sp.read_text() == was, "the switch off, the state was written")
+        return "the template's three agents and a new one, Nova, each have three looks (9:00, 14:00, 19:00), and Nova's 10:00 order is a step at 14:00"
+
+    async def flow404(self) -> str:
+        """H308, no Claude: a look over her share waits until the next look and says so in her ledger, with the room it needed; with room again the next look picks it up."""
+        rule = (ROOT / "app/config.py").read_text()
+        need("or the next morning when it comes after her evening look" in rule and "she'll pick it up at her next look" in rule, "the cycles rule's words on her looks")
+        b = self._h308("share")
+        r = b.cy("set", "moneypenny", "daily", "0")
+        need(r.returncode == 0, r.stdout + r.stderr)
+        b.tick(f"{b.thu} 09:00")
+        w = "look at the failing night"
+        b.give(w, f"{b.thu} 10:00")
+        b.tick(f"{b.thu} 14:00")
+        led = b.led("moneypenny")
+        need(not b.steps() and "midday look at 14:00 waits" in led and "waits: over her daily share" in led
+             and re.search(r"the room it needed: about [\d.]+ points, for 1 order on her list", led) and "her evening look (Thursday 19:00) looks again" in led,
+             f"over her share it didn't wait and say so: {b.steps()} {led[-700:]}")
+        need(b.order_line(w).startswith("open"), f"the order isn't kept open: {b.order_line(w)}")
+        b.cy("set", "moneypenny", "daily", "2")
+        b.tick(f"{b.thu} 19:00")
+        need(len(b.steps()) == 1 and "evening look at 19:00" in b.order_line(w), f"the next look with room: {b.steps()} {b.order_line(w)}")
+        return "at a share of 0 her midday look waits, her ledger says why and the room it needed and names 19:00; with room, 19:00 makes the step"
+
     async def flow393(self) -> str:
         """F114, the second check, no Claude: a number tied to no line opens nothing, and words that name no line move none. "Yes add it,
         it's at 12 by the way" after a question about a note opens no line at 12; "put it back to moving" after a question naming no line
@@ -35492,6 +35608,11 @@ echo "ALL OK"
 """
 
 FLOWS = {
+    400: ("H308: an order Pepper writes on Moneypenny's list at 10:00 is an item by her midday look, and a later or doubled look makes no second one", False, "flow400"),
+    401: ("H308: an order written after her evening look is picked up at her next morning look", False, "flow401"),
+    402: ("H308: two looks a day instead of three is one setting, from the next day", False, "flow402"),
+    403: ("H308: a new agent from the template has three looks a day", False, "flow403"),
+    404: ("H308: a look over her share waits until the next look and says so in her ledger, with the room it needed", False, "flow404"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
