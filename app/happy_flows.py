@@ -20037,6 +20037,15 @@ print("OK")
         line = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/usageline.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT))  # noqa: E731
         r = line("least", "0")
         need(r.returncode == 0 and "**Team line at least: 0 points.**" in (ws / "HQ/roadmap.md").read_text(), r.stdout + r.stderr)
+        # F115: the main's own command line (and the status page's switch, which runs the same), with or without the routine's
+        # "write here" in its environment, is never taken for a hand-over from the other computer
+        for extra in ({"HQ_ROLE_HERE": "1"}, {"HQ_ROLE_HERE": ""}):
+            r = _sp.run([sys.executable, str(ROOT / "routine/usageline.py"), "least", "3"], capture_output=True, text=True,
+                        env={**env, **extra}, cwd=str(ROOT))
+            need(r.returncode == 0 and "**Team line at least: 3 points.**" in (ws / "HQ/roadmap.md").read_text(),
+                 f"the main's own least switch was refused ({extra}): {r.stdout + r.stderr}")
+        r = line("least", "0")
+        need(r.returncode == 0 and "**Team line at least: 0 points.**" in (ws / "HQ/roadmap.md").read_text(), r.stdout + r.stderr)
         need(gate("--reserve", "--need", "five=0,weekly=2").returncode == 2, "least 0 didn't bring back the whole reserve")
         need(line("least", "99").returncode == 2, "a least of 99")
         r = line("least", "15")

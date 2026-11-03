@@ -2741,7 +2741,9 @@ def main(argv: list[str]) -> int:
         return 2
     import role
     yes_n = int(rest[2]) if cmd == "yes" and len(rest) > 2 and rest[2].isdigit() else None
-    if cmd == "yes" and len(rest) >= 2 and os.environ.get("HQ_ROLE_HERE") and not _SAYS_NO.match(rest[1]):
+    if cmd == "yes" and len(rest) >= 2 and os.environ.get("HQ_ROLE_HERE") and not role.is_handed():
+        pass  # the routine's own run, or a flow's "write here": as before F115's doors, no check of words here
+    elif cmd == "yes" and len(rest) >= 2 and role.is_handed() and not _SAYS_NO.match(rest[1]):
         # F115 with F114 (the combined check): a handed yes stands on the words the backup checked, and fits a change by the main's own
         # holds, never by the backup's copy of them, which can be behind
         d = role.handed_words()

@@ -798,7 +798,7 @@ def _env(env):
 
 def _run_here(script, args, env=None, stdin=None):
     r = subprocess.run([PY, _script_path(script), *args], capture_output=True, text=True, timeout=120,
-                       env={**os.environ, **_env(env), "HQ_ROLE_HERE": "1"},
+                       env={**os.environ, **_env(env), "HQ_ROLE_HERE": "1", HANDED_MARK: "1"},
                        input=stdin if isinstance(stdin, str) else None)  # F115: a whole file goes in on stdin
     return r.returncode, r.stdout, r.stderr
 
@@ -933,9 +933,18 @@ def checked_env(said: str | None, hits: list | None = None) -> dict:
                                  "where": h.get("where") or ("his own hand" if said is None else ""), "at": time.time()})}
 
 
+HANDED_MARK = "HQ_HANDED"  # F115: set only when the main runs a request the other computer handed it (_run_here)
+
+
+def is_handed() -> bool:
+    """F115: this run is a request the other computer handed over (not HQ_ROLE_HERE alone, which the routine, its scripts and the
+    flows also set to mean "write here, don't hand it on")."""
+    return bool(os.environ.get(HANDED_MARK))
+
+
 def handed_words() -> dict | None:
     """F115 with F114: on the main, running a handed request: the words the backup checked, or None (not handed, or none carried)."""
-    if not os.environ.get("HQ_ROLE_HERE"):
+    if not is_handed():
         return None
     try:
         d = json.loads(os.environ.get(CHECKED) or "")
