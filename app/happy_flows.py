@@ -21160,6 +21160,71 @@ print(json.dumps(out))
             shutil.rmtree(base, ignore_errors=True)
         return ("with one-way sync on, synced files are the main's on the backup and its own files stay local; a Write of 90 KB or less "
                 "is handed whole as put and written by the main, a bigger one is a not yet, an Edit is made by the main")
+    async def flow474(self) -> str:
+        """The walkthrough on keeping HQ running, no Claude: MAINTAINING.md has its sections (the two computers, restarts, releases, the usage,
+        the doors, the status page, the tests, the privacy check, checkpoints, what never to do); Moneypenny's start carries its index, with the
+        briefing on and off, and Donna's doesn't; rules.py maintain prints each section; every HQ command it names is a real script, and each
+        word and option given to it is one the script knows. Every start stays under the cap."""
+        import shlex, subprocess as _sp
+        doc = ROOT / "MAINTAINING.md"
+        need(doc.is_file(), "there's no walkthrough on keeping HQ running (MAINTAINING.md)")
+        text = doc.read_text(encoding="utf8")
+        heads = re.findall(r"^## (\d+)\. (.+)$", text, re.M)
+        need([int(n) for n, _ in heads] == list(range(1, len(heads) + 1)) and len(heads) >= 10, f"the sections aren't numbered 1 to 10 or more: {heads}")
+        titles = " | ".join(t for _, t in heads).lower()
+        for word in ("two computers", "restart", "release", "usage", "doors", "status page", "test wall", "privacy", "checkpoint", "never"):
+            need(word in titles, f"no section about {word}: {titles}")
+        for word in ("kept-from-both", "handover", "Donna's warning first", "update.py restart-all", "release.py main", "update.py back",
+                     "update.py forward", "reserve", "this call or this chat, today", "incident", "Never send mail", "exact pid",
+                     "Never write the live workspace by hand", "private files", "checkpoint-N", "privacy.py --history", "Moneypenny delegates"):
+            need(word in text, f"the walkthrough doesn't cover {word!r}")
+        named, bad = [], []
+        for span in re.findall(r"`([^`\n]+)`", text):
+            try:
+                toks = shlex.split(span)
+            except ValueError:
+                continue
+            i = 1 if toks and toks[0] in ("python3", ".venv/bin/python", "bash", "sh", "node") else 0
+            if not toks or i >= len(toks) or not re.fullmatch(r"(?:app|routine|status|install|desktop)/[\w.-]+\.(?:py|sh|mjs)", toks[i]):
+                continue
+            named.append(span)
+            script = ROOT / toks[i]
+            if not script.is_file():
+                bad.append(f"{span}: no {toks[i]}")
+                continue
+            src = script.read_text(encoding="utf8", errors="replace")
+            for a in toks[i + 1:]:  # an option or a plain word is the script's own; a placeholder (N, LABEL, "HIS WORDS"), a number or a phrase isn't checked
+                if a.startswith("--") and a.split("=")[0] not in src:
+                    bad.append(f"{span}: {toks[i]} has no {a}")
+                elif re.fullmatch(r"[a-z][a-z0-9-]*", a) and not re.search(rf"[\"']{re.escape(a)}[\"']", src):
+                    bad.append(f"{span}: {toks[i]} doesn't take {a}")
+        need(len(named) >= 40 and not bad, f"the commands it names ({len(named)}): {bad}")
+        ws, env = self._h298_ws("walkthrough")
+        env.update({"HQ_UNDER_TEST": "1"})
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/app'); sys.path.insert(0, sys.argv[1] + '/routine')\n"
+                "import maintaining, quick_context; from pathlib import Path; ws = Path(sys.argv[2])\n"
+                "print(json.dumps({'index': maintaining.index(), 'build': quick_context.build(ws, context='build'), 'day': quick_context.build(ws, context='day')}))\n")
+        starts = {}
+        for on in ("1", "0"):
+            r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env={**env, "HQ_BACKEND_BRIEFING": on}, cwd=str(ROOT), timeout=120)
+            need(r.returncode == 0, f"a start couldn't be made (briefing {on}): {r.stderr[-600:]}")
+            starts[on] = json.loads(r.stdout.strip().splitlines()[-1])
+        idx = starts["1"]["index"]
+        need(idx and "rules.py\" maintain N" in idx and all(f"{n} {t}" in idx for n, t in heads), f"the index: {idx}")
+        for on, o in starts.items():
+            need(o["build"].count(idx) == 1, f"Moneypenny's start (briefing {on}) doesn't carry the walkthrough's index once")
+            need(idx not in o["day"], f"Donna's start (briefing {on}) carries the walkthrough's index")
+        r = _sp.run([sys.executable, str(ROOT / "app/rules.py"), "maintain"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0 and all(f"{n}. {t}" in r.stdout for n, t in heads), f"rules.py maintain: {r.stdout[:300]} {r.stderr[-300:]}")
+        for n, t in heads:
+            r = _sp.run([sys.executable, str(ROOT / "app/rules.py"), "maintain", n], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+            need(r.returncode == 0 and r.stdout.startswith(f"## {n}. {t}") and len(r.stdout) > 200, f"section {n}: {r.stdout[:200]} {r.stderr[-300:]}")
+        r = _sp.run([sys.executable, str(ROOT / "app/rules.py"), "maintain", "999"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 2, "an unknown section")
+        r = _sp.run([sys.executable, str(ROOT / "app/startsize.py"), "--check"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"a start over the cap with the index: {r.stdout} {r.stderr[-400:]}")
+        return (f"{len(heads)} sections, {len(named)} commands named, each a real script with words it takes; Moneypenny's start carries the index "
+                f"({len(idx.encode())} bytes) with the briefing on and off, Donna's doesn't; every section prints; every start under the cap")
 
     async def flow241(self) -> str:
         """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
@@ -37831,6 +37896,7 @@ FLOWS = {
     471: ("H235, gap 3: an extension's own flows have a home: a made-up one with a passing and a failing flow, each on its own copy; the command and the nightly's flow name the failure as the extension's", False, "flow471"),
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
+    474: ("The walkthrough on keeping HQ running: its sections, its index in Moneypenny's start (briefing on and off), each section printed, every command it names real", False, "flow474"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),

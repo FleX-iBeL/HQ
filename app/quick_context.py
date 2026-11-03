@@ -271,6 +271,11 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
     if not brief:
         brief = "The briefing couldn't be made just now; read what you need from the files."
     parts.append(brief.rstrip())
+    if context == "build":  # the walkthrough on keeping HQ running: its index, when the briefing didn't bring it
+        import maintaining
+        idx = maintaining.index()
+        if idx and idx not in brief:
+            parts.append(idx)
     mem = memory_dir(folder)
     if (mem / "MEMORY.md").exists():
         parts.append("Claude's memory for this folder (the index; a note is read when it's needed):\n\n"
@@ -350,6 +355,9 @@ def build(folder: Path, today: datetime.date | None = None, context: str = "day"
         extra = _planning(folder)
         if extra:
             parts.append(extra)
+        import maintaining  # the walkthrough on keeping HQ running: its index, a section read when needed
+        if maintaining.index():
+            parts.append(maintaining.index())
     mem = memory_dir(folder)
     if (mem / "MEMORY.md").exists():
         notes = [mem / "MEMORY.md"] + sorted(p for p in mem.glob("*.md") if p.name != "MEMORY.md")
