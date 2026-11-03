@@ -1257,6 +1257,13 @@ def main(argv):
                             "the roadmap's row for it, the status page) and pick up from there instead of starting "
                             "over; nothing of it was committed unless git says so. Then the job as it was: "
                             + j["text"]), "notes": j.get("notes") or []}
+            if j.get("item"):  # F138: the rerun is the same work: its item's id goes with it, on the record as a job added
+                new["item"] = dict(j["item"])
+                try:
+                    import trail
+                    trail.step(j["item"]["id"], "job", job=n, state="added", rerun_of=j["n"])
+                except Exception as e:
+                    print(f"(couldn't put the rerun on the record: {e!r})", file=sys.stderr)
             jobs.append(new)
             jobs = move(jobs, n, "top")
             try:  # F72: its saved steps go with it, so the rerun carries on at the next one

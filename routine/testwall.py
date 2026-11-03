@@ -566,7 +566,7 @@ def wall_env(wall: str, roots: list[str]) -> dict:
         "HQ_CLAUDE": claude, "HQ_CLAUDE_CLI": claude, "HQ_HELPER_CLAUDE": claude,
         "PYTHONPATH": os.pathsep.join(x for x in (os.path.join(wall, "py"), env.get("PYTHONPATH", "")) if x),
     })
-    for k in ("HQ_REAL_ROADMAP", "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", *CONNECTIONS):
+    for k in ("HQ_REAL_ROADMAP", "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", *CONNECTIONS, *hqpaths.PANE_VARS):  # F138: no pane's server inside
         env.pop(k, None)
     return env
 
@@ -606,11 +606,14 @@ def stop_left(wall: str) -> list[int]:
 
 
 def stop_tmux(wall: str) -> None:
+    """The run's own tmux server, by its own socket. F138: never by TMUX_TMPDIR alone: inside a job's pane tmux reads $TMUX first,
+    so that ended the job's own server, every session on it and the job (3 November 2026, job 497, signal 1)."""
     stop_left(wall)
     folder = tmux_dir(wall)
     if os.path.isdir(folder):
-        if shutil.which("tmux"):
-            subprocess.run(["tmux", "kill-server"], env={**os.environ, "TMUX_TMPDIR": folder}, capture_output=True)
+        sock = os.path.join(folder, f"tmux-{os.getuid()}", "default")
+        if shutil.which("tmux") and os.path.exists(sock):
+            subprocess.run(["tmux", "-S", sock, "kill-server"], env=hqpaths.tmux_env(TMUX_TMPDIR=folder), capture_output=True)
         shutil.rmtree(folder, ignore_errors=True)
 
 

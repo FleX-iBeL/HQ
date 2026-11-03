@@ -43,16 +43,29 @@ PAGE = "status/index.html"
 HOLD_UPS = ("her Thursday session brought to now", "the night's 22:00 brought to now", "the night's 2:00 brought to now",
             "his yes at the sprint planning", "his say-so for a build in his day hours", "his hours for her set to the whole day")
 OFF = ("HQ_UNDER_TEST", "HQ_ROADMAP", "HQ_SPRINT", "HQ_ROLE_HERE", "HQ_WORKSPACE", "HQ_TEST_PORT", "HQ_PORT", "HQ_STATUS_PORT", "HQ_UNIT", "HQ_SUPPORT",
-       "HQ_NO_WALL", "HQ_DIRECT_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_DIR", "HQ_CLAUDE_CLI", "HQ_CLAUDE")
+       "HQ_NO_WALL", "HQ_DIRECT_DIR", "HQ_DIRECT_AGENT", "HQ_DIRECT_TEAM", "HQ_DIRECT_PUSH_DIR", "HQ_CLAUDE_CLI", "HQ_CLAUDE",
+       "TMUX", "TMUX_PANE", "TMUX_TMPDIR")  # F138: the copy's job windows on a tmux server of its own, never on the one of a pane it's started from
+
+
+def tmux_dir(ports) -> str:
+    """F138: the copy's own tmux server, a short path (a socket's name has a limit): its jobs' windows live there, so nothing the copy
+    does to its windows reaches the main's, and nothing on the main's server reaches the copy's job."""
+    return f"/tmp/hqchain-{ports[0]}"
+
+
+def tmux_socket(ports) -> str:
+    return os.path.join(tmux_dir(ports), f"tmux-{os.getuid()}", "default")
 
 
 def _env(root: Path, ports=(7841, 4741), test_port: int = 7881) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in OFF}
-    env.update({"HQ_UNIT": f"hqchain{ports[0]}", "HQ_SUPPORT": str(root / "state"), "HQ_NO_PHONE": "1", "HQ_CALL_FIX": "off",
+    env.update({"HQ_UNIT": f"hqchain{ports[0]}", "HQ_SUPPORT": str(root / "state"), "HQ_NO_PHONE": "1", "HQ_CALL_FIX": "off", "TMUX_TMPDIR": tmux_dir(ports),
                 "HQ_PORT": str(ports[0]), "HQ_STATUS_PORT": str(ports[1]), "HQ_TEST_PORT": str(test_port), "HQ_LABEL": "chain copy",
                 "HQ_GITHUB_API": "http://127.0.0.1:9", "HQ_GITHUB_TOKEN_FILE": str(root / "no-token"),
                 "HQ_UPDATE_URL": str(root / "remote-hq.git"), "HQ_CLAUDE_JSON": str(root / "claude.json")})
     env.pop("HQ_GITHUB_TOKEN", None)
+    if not env["HQ_UNIT"].startswith("hqchain") or env.get("TMUX"):  # F138: never the real units (hq-routine, hq-watchdog) or a pane's server
+        raise RuntimeError("the copy's environment would reach the real HQ's units or windows")
     return env
 
 
@@ -80,6 +93,7 @@ def build(root: Path, workspace: str | None = None, standin: bool = True, ports=
     hq, ws = root / "HQ", root / "workspace"
     hq.mkdir(parents=True)
     (root / "state").mkdir()
+    os.makedirs(env["TMUX_TMPDIR"], mode=0o700, exist_ok=True)
     tar = subprocess.run(["tar", "-czf", "-", "-T", "-"], input=_hq_files(SRC), capture_output=True, cwd=str(SRC), env={**os.environ, "COPYFILE_DISABLE": "1"})
     if tar.returncode:
         raise RuntimeError(tar.stderr.decode()[:300])
@@ -265,6 +279,49 @@ def day_yes(env, root, n: int) -> bool:
     return r.returncode == 0
 
 
+def job_states(env, root) -> dict:
+    """The queue's jobs and their states, read the way the routine reads them: {n: state}."""
+    code = "import sys, json; sys.path.insert(0, 'routine')\nimport jobs\nprint(json.dumps({j['n']: j['state'] for j in jobs.read()[1]}))"
+    r = subprocess.run([PY, "-c", code], cwd=str(root / "HQ"), env=env, text=True, capture_output=True)
+    try:
+        return {int(k): v for k, v in json.loads(r.stdout or "{}").items()}
+    except ValueError:
+        return {}
+
+
+ENDED = ("ended", "stopped", "cancelled")
+
+
+def watch_job(env, root, lines, seen: dict, say, day: bool) -> str | None:
+    """F138: the item's job, from the record and the queue. His say-so typed once per job, only while it waits in his day hours;
+    a refusal said once. A job that ended without a done mark said once, in one line: when the routine queued it again, the rerun
+    is followed (its own say-so, once); when nothing brings it back, the run stops with that. Returns why to stop, or None."""
+    if any(d.get("step") == "job" and d.get("state") == "done" for d in lines):
+        return None
+    added = [d["job"] for d in lines if d.get("step") == "job" and d.get("state") == "added"]
+    if not added:
+        return None
+    n = added[-1]
+    state = job_states(env, root).get(n, "")
+    if state.startswith(ENDED):
+        if n in seen.setdefault("ended", set()):
+            return None
+        seen["ended"].add(n)
+        again = re.search(r"requeued as job (\d+)", state)
+        if again:
+            say(f"job {n} ended without a done mark ({state}); the routine queued it again, waiting for job {again.group(1)}")
+            return None
+        say(f"job {n} ended without a done mark ({state}); nothing brings it back, so the run stops here")
+        return f"job {n} ended without a done mark: {state}"
+    if day and (state == "ready" or state.startswith("held")) and n not in seen.setdefault("said", set()):
+        seen["said"].add(n)
+        if day_yes(env, root, n):
+            say(f"his say-so for job {n} in his day hours, typed by the driver")
+        else:
+            say(f"his say-so for job {n} was refused: {(root / 'now.out').read_text().strip()[-200:]}")
+    return None
+
+
 def tick(env, root) -> None:
     subprocess.run([PY, "routine/tick.py"], cwd=str(root / "HQ"), env=env, capture_output=True, timeout=240)
 
@@ -394,8 +451,9 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
     env["HQ_RELEASE_MINUTE"] = "0"
     his_text(env, root, WORDS, real=False)
     her_session(env, root)
-    t0, label, said, night_done, released, said_now = time.time(), None, False, False, False, False
+    t0, label, said, night_done, released, seen = time.time(), None, False, False, False, {}
     clock = time.time()
+    said_lines = []
     while time.time() - t0 < deadline_s:
         clock += 301  # the review's own clock: a round waits for five quiet minutes
         env["HQ_REVIEW_NOW"] = str(int(clock))
@@ -411,9 +469,9 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
                 return {"label": label, "missing": [f"the plan refused: {(r.stdout + r.stderr)[-200:]}"], "stopped": "planned"}
         if "planned" in have and "job" not in have:
             bring(env, root, f"{label} on the HQ roadmap")
-        added = next((d["job"] for d in follow(env, root, label) if d.get("step") == "job" and d.get("state") == "added"), None)
-        if added and not said_now and "job" in have and not any(d.get("step") == "job" and d.get("state") == "done" for d in follow(env, root, label)):
-            said_now = day_yes(env, root, added)
+        why = watch_job(env, root, follow(env, root, label), seen, said_lines.append, day=True)
+        if why:
+            return {"label": label, "missing": [why], "stopped": where_it_stands(env, root, label), "said": said_lines}
         if "qa" in have and any(d.get("state") == "passed" for d in follow(env, root, label)) and not released:
             night(env, root, real=False)
             r = _run(env, root, "routine/release.py", "main")
@@ -425,7 +483,7 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
     missing = hand_offs(env, root, label, want_round=True) if label else ["no row was written"]
     if "PROOF LEFT TO THE JOB" in (root / "standin.log").read_text():
         missing.append("the job was told to run the proof itself")
-    return {"label": label, "missing": missing, "stopped": where_it_stands(env, root, label)}
+    return {"label": label, "missing": missing, "stopped": where_it_stands(env, root, label), "said": said_lines}
 
 
 def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | None = None, ports=(7841, 4741), test_port=7881) -> dict:
@@ -447,7 +505,7 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | N
     say = lambda s: print(time.strftime("%H:%M"), s, flush=True)  # noqa: E731
     his_text(env, root, WORDS + " Can we change that?", real=True)
     say("his text is on Pepper's line")
-    t0, label, planned, nighted, released, said_now = time.time(), None, False, False, False, False
+    t0, label, planned, nighted, released, seen = time.time(), None, False, False, False, {}
     while time.time() - t0 < deadline_s:
         time.sleep(30)
         item, lab = order_item(env, root)
@@ -471,10 +529,11 @@ def real_run(root: Path, workspace: str, deadline_s: int = 14400, until: str | N
             say(f"his yes at the sprint planning for {label}, typed by the driver")
         if "planned" in have and "job" not in have and bring(env, root, f"{label} on the HQ roadmap"):
             say("the clock: the night's 22:00 brought to now")
-        added = next((d["job"] for d in lines if d.get("step") == "job" and d.get("state") == "added"), None)
-        if added and not said_now and dt.datetime.now().hour >= 8 and not any(d.get("step") == "job" and d.get("state") == "done" for d in lines):
-            said_now = day_yes(env, root, added)
-            say(f"his say-so for job {added} in his day hours, typed by the driver")
+        why = watch_job(env, root, lines, seen, say, day=8 <= dt.datetime.now().hour < 22)
+        if why:
+            missing = [why]
+            say(f"{label}: " + "; ".join(missing))
+            return {"label": label, "missing": missing, "released": False, "stopped": "job ended"}
         if any(d.get("step") == "qa" and d.get("state") == "passed" for d in lines) and not nighted:
             nighted = True
             say("the night's check starts on the copy")
@@ -497,6 +556,10 @@ def clean(root: Path, ports=(7841, 4741)) -> None:
                 os.kill(int(line), signal.SIGTERM)
             except (OSError, ValueError):
                 pass
+    sock = tmux_socket(ports)  # F138: the copy's own tmux server and every window on it, by its socket
+    if shutil.which("tmux") and os.path.exists(sock):
+        subprocess.run(["tmux", "-S", sock, "kill-server"], capture_output=True, env={k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")})
+    shutil.rmtree(tmux_dir(ports), ignore_errors=True)
     env = _env(root, ports)
     port = env["HQ_STATUS_PORT"]
     r = subprocess.run(["ss", "-Hltnp", f"sport = :{port}"], text=True, capture_output=True)
