@@ -733,6 +733,14 @@ _PIECE = re.compile(r"\bpiece \d+ of (\d+)\b", re.I)
 _COMPARED = re.compile(r"\d+\s*(?:of|/|out of)\s*\d+", re.I)
 
 
+def _in_commit(sha: str, head: str | None) -> bool:
+    """F121: whether a commit is in the one a record ran on."""
+    import proof
+    if not head:
+        return False
+    return subprocess.run(["git", "-C", str(proof.ROOT), "merge-base", "--is-ancestor", sha, head], capture_output=True).returncode == 0
+
+
 def proof_refuses(label: str, compared: str) -> str | None:
     """F101: QA's pass stands on what a program saw, never on what's typed: the build's green record, a comparison on
     real data that says what, how many and how many right, and for a piece, its switch on the hidden list."""
@@ -744,6 +752,11 @@ def proof_refuses(label: str, compared: str) -> str | None:
         return f"{label} has no record of a green run (routine/proof.py run), so there's nothing to pass."
     if not rec.get("green"):
         return f"the last run for {label} wasn't green: {'; '.join(rec.get('failed') or [])[:300]}."
+    # F121: the record has to hold every commit of the row: one made before a newer commit of it doesn't stand for it
+    newer = [c for c in proof.all_commits(label) if not _in_commit(c.split()[0], rec.get("head"))]
+    if newer:
+        return (f"the last green run for {label} was on {str(rec.get('head') or 'no commit')[:7]}, before {len(newer)} of its commits "
+                f"({', '.join(c.split()[0] for c in newer[:5])}): run it again on the commit HQ is on.")
     if not (compared and re.search(r"[A-Za-z]{3}", compared) and _COMPARED.search(compared)):
         return ("a pass names a comparison on real data: --compared \"what, how many, how many right\", like "
                 "\"open planning rows read whole, 61 of 61\".")

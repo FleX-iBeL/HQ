@@ -22,6 +22,18 @@ is a record as above plus "shared" (the run's id) and "rows" (every row of that 
 row's own flows all passed. `latest()` reads it by its "t" like a job's; `jobs.py done` still needs a job's own record. It takes
 ~/hq-fullrun.lock (HQ_FULLRUN_LOCK for a test's own), the lock the whole quick sets by hand take turns on, so two full runs never
 run at once. Exit 0 when every record is green, 1 when one is red, 2 when there was nothing to run.
+
+How it's started: alone (`.venv/bin/python routine/proof.py run-rows F120 F97`), or the house way, wrapped in that lock and a time
+limit: `flock ~/hq-fullrun.lock timeout 60m .venv/bin/python routine/proof.py run-rows F120 F97`. Wrapped, it sees the lock its
+wrapper holds (the open file flock hands down) and goes on; with `flock -o`, which hands nothing down, the wrapper sets
+HQ_FULLRUN_HELD=1. Either way it never waits on a lock its own parent holds.
+
+F121, second round: a record names the commit it tested. The commit is read first, the copy made of exactly that commit and the
+row's commits read up to it. A stop (the time limit's SIGTERM, a hang-up, Ctrl-C) is a normal end: the flows' own process group
+is stopped, the copy removed from git and from scratch, the clock's "since" cleared, no record written (exit 143). What a kill
+can't clean is cleaned by the next run, at its start: copies whose run is gone (their owner.json names a dead pid) are removed,
+their flows stopped if still running there, `git worktree prune` run, and a rows run's clock file of a dead pid removed. A named
+flow the quick set skips (a Claude flow) is kept under "skipped", not counted as ran.
 """
 from __future__ import annotations
 
@@ -29,6 +41,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -146,21 +159,126 @@ def _save(rec: dict, where: str | None = None) -> None:
     os.replace(tmp, where)
 
 
-def commits_of(label: str | None) -> list[str]:
-    """The commits on this branch that name the row, newest first."""
+def _base() -> str:
+    return "origin/main" if _git("rev-parse", "-q", "--verify", "origin/main") else "main"
+
+
+def commits_of(label: str | None, head: str = "HEAD") -> list[str]:
+    """The commits on this branch up to head that name the row, newest first."""
     if not label:
         return []
-    base = "origin/main" if _git("rev-parse", "-q", "--verify", "origin/main") else "main"
-    lines = _git("log", "--format=%h %s", f"{base}..HEAD").splitlines()
+    lines = _git("log", "--format=%h %s", f"{_base()}..{head}").splitlines()
     return [ln for ln in lines if re.match(rf"^\w+ [^:]*\b{re.escape(label)}\b", ln)][:40]
 
 
-def _copy() -> str:
-    """A throwaway worktree of this commit, with what git doesn't hold linked in. Never his live files' place to write."""
+class Stopped(Exception):
+    """F121: a stop (SIGTERM, SIGHUP) turned into a normal end, so every finally runs."""
+
+
+def _stop(signum, _frame):
+    for sig in (signal.SIGTERM, signal.SIGHUP):  # one stop is enough: a second must not cut the cleanup short
+        signal.signal(sig, signal.SIG_IGN)
+    raise Stopped(signal.Signals(signum).name)
+
+
+def _on_stop() -> dict:
+    """The stop signals turned into Stopped for this run; the old handlers back with _off_stop."""
+    was = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            was[sig] = signal.signal(sig, _stop)
+        except (ValueError, OSError):  # not the main thread: leave it
+            pass
+    return was
+
+
+def _off_stop(was: dict) -> None:
+    for sig, h in was.items():
+        try:
+            signal.signal(sig, h)
+        except (ValueError, OSError):
+            pass
+
+
+def _alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+STALE_NO_OWNER = 6 * 3600  # a copy from before owner.json counts as left behind after this long
+
+
+def clean_stale() -> list[str]:
+    """F121: what a killed run left: its copy (in git and in scratch), its flows still running there, its clock's since."""
+    gone = []
+    scratch = os.path.join(hqpaths.HQ, "scratch")
+    try:
+        names = [n for n in os.listdir(scratch) if n.startswith("proof-")]
+    except OSError:
+        names = []
+    for nm in names:
+        base = os.path.join(scratch, nm)
+        try:
+            own = json.load(open(os.path.join(base, "owner.json"), encoding="utf8"))
+        except (OSError, ValueError):
+            own = None
+        if own is not None:
+            if _alive(own.get("pid")):
+                continue
+        else:
+            try:
+                if time.time() - os.path.getmtime(base) < STALE_NO_OWNER:
+                    continue
+            except OSError:
+                continue
+        wt = os.path.join(base, "hq")
+        grp = (own or {}).get("group")
+        if grp and _alive(grp):
+            try:  # only a group whose leader still works in that copy: never a pid that came back as something else
+                if os.path.realpath(os.readlink(f"/proc/{int(grp)}/cwd")).startswith(os.path.realpath(base)):
+                    os.killpg(int(grp), signal.SIGKILL)
+            except (OSError, ValueError):
+                pass
+        subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
+        shutil.rmtree(base, ignore_errors=True)
+        gone.append(nm)
+    subprocess.run(["git", "-C", str(ROOT), "worktree", "prune"], capture_output=True)
+    try:
+        import wall
+        d = wall._dir()
+        for nm in os.listdir(d):
+            m = re.fullmatch(r"job-rows-.*-(\d+)-proof-time\.json", nm)
+            if m and not _alive(m.group(1)):
+                os.remove(os.path.join(d, nm))
+    except Exception:
+        pass
+    return gone
+
+
+def _owner(wt: str, **kv) -> None:
+    p = os.path.join(os.path.dirname(wt), "owner.json")
+    try:
+        d = json.load(open(p, encoding="utf8"))
+    except (OSError, ValueError):
+        d = {}
+    d.update(kv)
+    with open(p + ".tmp", "w", encoding="utf8") as f:
+        json.dump(d, f)
+    os.replace(p + ".tmp", p)
+
+
+def _copy(head: str = "HEAD") -> str:
+    """A throwaway worktree of exactly this commit, with what git doesn't hold linked in. Never his live files' place to write.
+    Its owner.json names the run (and, while they run, the flows' process group) so a later run knows it's left behind."""
     base = tempfile.mkdtemp(prefix="proof-", dir=os.path.join(hqpaths.HQ, "scratch"))
     wt = os.path.join(base, "hq")
-    r = subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach", wt, "HEAD"], capture_output=True, text=True)
+    _owner(wt, pid=os.getpid(), head=head)
+    r = subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach", wt, head], capture_output=True, text=True)
     if r.returncode:
+        shutil.rmtree(base, ignore_errors=True)
         raise RuntimeError(f"no copy: {r.stderr.strip()[:200]}")
     for name in ("workspace", "models", ".venv"):
         src = os.path.join(hqpaths.HQ, name)
@@ -170,18 +288,64 @@ def _copy() -> str:
     return wt
 
 
+def _uncopy(wt: str) -> None:
+    subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
+    shutil.rmtree(os.path.dirname(wt), ignore_errors=True)
+    subprocess.run(["git", "-C", str(ROOT), "worktree", "prune"], capture_output=True)
+
+
+def _killgroup(p) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            return
+        try:
+            p.wait(timeout=5)
+            if sig == signal.SIGTERM:
+                time.sleep(0.2)  # the group's others, a moment to go
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
     runner = os.environ.get("HQ_PROOF_RUNNER")
     cmd = [runner] if runner else [nightly._python(), os.path.join(wt, "app", "happy_flows.py")]
     # F111: the flows run behind the wall from the copy, and answer for the real HQ; this record's own log is written meanwhile
     env = {**os.environ, "HQ_REAL_HQ": hqpaths.HQ, "HQ_WALL_OWN": os.path.realpath(getattr(log, "name", "") or os.devnull)}
-    r = subprocess.run(cmd + args, cwd=wt, capture_output=True, text=True, env=env)
-    out = r.stdout + r.stderr
+    # F121: in a process group of their own, so a stop ends them all, and the copy's owner.json names it for a later run
+    p = subprocess.Popen(cmd + args, cwd=wt, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+    _owner(wt, group=p.pid)
+    try:
+        so, se = p.communicate()
+    except BaseException:
+        _killgroup(p)
+        raise
+    _killgroup(p)  # what the flows left running in their group
+    _owner(wt, group=None)
+    out = so + se
     log.write(out)
-    return r.returncode, out
+    return p.returncode, out
+
+
+def skipped_flows(out: str) -> list[int]:
+    """F121: the flows the run's result says were skipped under --quick (a Claude flow): named, not ran."""
+    tail = out.rpartition("\n== Result")[2]
+    return sorted({int(x) for x in re.findall(r"^\s*(\d+): skipped \(--quick\)", tail, re.M)})
 
 
 def run(n: int) -> int:
+    was = _on_stop()
+    try:
+        return _run(n)
+    except Stopped as e:
+        print(f"Job {n}: stopped ({e}); the copy is cleaned up, no record written.")
+        return 143
+    finally:
+        _off_stop(was)
+
+
+def _run(n: int) -> int:
     text, jobs, _ = q.read()
     j = next((x for x in jobs if x["n"] == n), None)
     if not j:
@@ -190,24 +354,27 @@ def run(n: int) -> int:
     if subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD"]).returncode:
         print("HQ has changes that aren't committed: commit them first; a record stands for a commit.")
         return 2
+    clean_stale()
+    head = _git("rev-parse", "HEAD")  # F121: read first; the copy and the commits are of exactly this one
     label = label_of(j)
     rowtext = (j["text"] + " " + row_of(text, label))
     named = named_flows(rowtext)
-    head = _git("rev-parse", "HEAD")
-    rec = {"n": n, "label": label, "item": (j.get("item") or {}).get("id"), "head": head, "commits": commits_of(label), "named": named, "ran": 0, "passed": 0,
-           "failed": [], "green": False, "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
-    wt = _copy()
+    rec = {"n": n, "label": label, "item": (j.get("item") or {}).get("id"), "head": head, "commits": commits_of(label, head), "named": named,
+           "skipped": [], "ran": 0, "passed": 0, "failed": [], "green": False, "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
     logpath = path(n)[:-5] + ".log"
     os.makedirs(folder(), exist_ok=True)
     import wall
+    wt = None
     wall.proof_start(n)  # F100: the box counts the job's own work, not the test run that proves it
     try:
+        wt = _copy(head)
         with open(logpath, "w", encoding="utf8") as log:
             if named:
                 # F105: a flow with Claude turns needs a live voice and usage; a row that only mentions one doesn't turn the record red
                 code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, named))], log)
                 p, r_ = nightly.summary(out)
                 rec["ran"], rec["passed"] = r_, p
+                rec["skipped"] = [x for x in skipped_flows(out) if x in named]
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}"])
             if not rec["failed"]:
                 code, out = _flows(wt, nightly.flow_args(), log)
@@ -218,11 +385,12 @@ def run(n: int) -> int:
         rec["green"] = not rec["failed"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
     finally:
         wall.proof_end(n)
-        subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
-        shutil.rmtree(os.path.dirname(wt), ignore_errors=True)
+        if wt:
+            _uncopy(wt)
     _save(rec)
     print(f"Job {n}: {rec['passed']} of {rec['ran']} passed on a copy of {head[:7]}"
-          + (f", named flows {named}" if named else "") + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'])[:600]}"))
+          + (f", named flows {named}" if named else "") + (f", skipped {rec['skipped']}" if rec["skipped"] else "")
+          + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'])[:600]}"))
     return 0 if rec["green"] else 1
 
 
@@ -236,24 +404,67 @@ def lock_path() -> str:
     return os.path.expanduser("~/hq-fullrun.lock")
 
 
-def listed_commits(label: str) -> list[str]:
-    """F121: the commits qa.COMMITS_FOR gives this row that are on this branch, written as commits_of writes them."""
+def listed_commits(label: str, head: str = "HEAD") -> list[str]:
+    """F121: the commits qa.COMMITS_FOR gives this row that are on this branch up to head, written as commits_of writes them. Only
+    where the gate counts it for this row alone (qa.commit_labels): a listed commit whose own subject names a row is that row's."""
     import qa
-    base = "origin/main" if _git("rev-parse", "-q", "--verify", "origin/main") else "main"
+    base = _base()
     out = []
     for sha, entry in qa.COMMITS_FOR.items():
         if entry.get("row") != label:
             continue
-        if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True).returncode:
+        if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, head], capture_output=True).returncode:
             continue
         if not subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, base], capture_output=True).returncode:
             continue  # already on the release line, which commits_of leaves out too
-        if qa.listed_row(str(ROOT), sha)[0] == label:
+        if qa.commit_labels(str(ROOT), sha, _git("log", "-1", "--format=%s", sha)) == [label]:
             out.append(_git("log", "-1", "--format=%h %s", sha))
     return out
 
 
+def all_commits(label: str, head: str = "HEAD") -> list[str]:
+    """F121: every commit of the row up to head: named in its subject, or listed for it."""
+    commits = commits_of(label, head)
+    return commits + [c for c in listed_commits(label, head) if c not in commits]
+
+
+def _held_by_parent(path_: str) -> int | None:
+    """F121: an open file on the lock handed down by a wrapper (flock FILE command ...), whose lock is this run's already. The fd, or None."""
+    import fcntl
+    try:
+        st = os.stat(path_)
+    except OSError:
+        return None
+    try:
+        fds = [int(x) for x in os.listdir("/proc/self/fd")]
+    except OSError:
+        fds = list(range(3, 256))
+    for fd in fds:
+        try:
+            f = os.fstat(fd)
+        except OSError:
+            continue
+        if (f.st_dev, f.st_ino) == (st.st_dev, st.st_ino):
+            try:  # the same open file as the wrapper's: locking it again is a no-op when it's held there, refused when it isn't ours
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return fd
+            except OSError:
+                continue
+    return None
+
+
 def run_rows(labels: list[str]) -> int:
+    was = _on_stop()
+    try:
+        return _run_rows(labels)
+    except Stopped as e:
+        print(f"Stopped ({e}): the copy is cleaned up, no record written.", flush=True)
+        return 143
+    finally:
+        _off_stop(was)
+
+
+def _run_rows(labels: list[str]) -> int:
     """F121: one run on the commit HQ is on stands as the proof for every row it holds."""
     import fcntl
     import qa
@@ -262,21 +473,26 @@ def run_rows(labels: list[str]) -> int:
     if not labels or bad:
         print("Which rows? Give their labels, like F121" + (f": not {', '.join(bad)}." if bad else "."))
         return 2
-    lock = open(lock_path(), "a")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        print(f"Another full run holds {lock_path()}: waiting for it.", flush=True)
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    lock = None
+    if os.environ.get("HQ_FULLRUN_HELD") == "1" or _held_by_parent(lock_path()) is not None:
+        print(f"The lock {lock_path()} is held by the run that started this one: going on.", flush=True)
+    else:
+        lock = open(lock_path(), "a")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            print(f"Another full run holds {lock_path()}: waiting for it.", flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
     try:  # what's in the commit is read once it's this run's turn: HQ may have moved on while it waited
         if subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD"]).returncode:
             print("HQ has changes that aren't committed: commit them first; a record stands for a commit.")
             return 2
+        clean_stale()
+        head = _git("rev-parse", "HEAD")  # read first: the copy, the commits and the record are all of exactly this one
         text = q.read()[0]
         rows, none = {}, []
         for label in labels:
-            commits = commits_of(label)
-            commits += [c for c in listed_commits(label) if c not in commits]
+            commits = all_commits(label, head)
             if commits:
                 rows[label] = {"commits": commits, "named": named_flows(row_of(text, label))}
             else:
@@ -286,35 +502,35 @@ def run_rows(labels: list[str]) -> int:
         if not rows:
             print("Nothing to run.")
             return 2
-        head = _git("rev-parse", "HEAD")
         runid = time.strftime("%Y%m%d-%H%M%S") + "-" + head[:7]
         at, t = time.strftime("%Y-%m-%d %H:%M"), time.time()
         own_job = os.environ.get("HQ_JOB") or ""
-        key = own_job or f"rows-{runid}"  # a job that runs it keeps its box still, as with its own run
+        key = own_job or f"rows-{runid}-{os.getpid()}"  # a job that runs it keeps its box still; else the pid says when it's left behind
         shared = {"ran": 0, "passed": 0, "failed": []}
-        wt = _copy()
         os.makedirs(folder(), exist_ok=True)
         import wall
+        wt = None
         wall.proof_start(key)
         try:
+            wt = _copy(head)
             with open(os.path.join(folder(), f"rows-{runid}.log"), "w", encoding="utf8") as log:
                 code, out = _flows(wt, nightly.flow_args(), log)
                 p, r_ = nightly.summary(out)
                 shared.update(ran=r_, passed=p, failed=nightly.failures(out)
                               or ([] if code == 0 and r_ else [f"the quick set ended with exit {code}, {p} of {r_}"]))
                 for label, row in rows.items():
-                    row.update(ran=0, passed=0, failed=[])
+                    row.update(ran=0, passed=0, failed=[], skipped=[])
                     if row["named"]:
                         code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, row["named"]))], log)
                         p, r_ = nightly.summary(out)
-                        row.update(ran=r_, passed=p, failed=nightly.failures(out)
+                        row.update(ran=r_, passed=p, skipped=[x for x in skipped_flows(out) if x in row["named"]], failed=nightly.failures(out)
                                    or ([] if code == 0 else [f"the named flows {row['named']} ended with exit {code}, {p} of {r_}"]))
         finally:
             wall.proof_end(key)
             if not own_job:
                 wall.forget(key)
-            subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
-            shutil.rmtree(os.path.dirname(wt), ignore_errors=True)
+            if wt:
+                _uncopy(wt)
         sgreen = not shared["failed"] and shared["ran"] > 0 and shared["passed"] == shared["ran"]
         red = 0
         for label, row in rows.items():
@@ -322,17 +538,20 @@ def run_rows(labels: list[str]) -> int:
             failed = shared["failed"] + row["failed"]
             green = sgreen and not row["failed"] and row["passed"] == row["ran"]
             rec = {"n": None, "label": label, "item": None, "head": head, "commits": row["commits"][:40], "named": row["named"],
-                   "ran": ran, "passed": passed, "failed": failed, "green": green, "at": at, "t": t, "shared": runid, "rows": list(rows)}
+                   "skipped": row["skipped"], "ran": ran, "passed": passed, "failed": failed, "green": green, "at": at, "t": t,
+                   "shared": runid, "rows": list(rows)}
             _save(rec, os.path.join(folder(), f"rows-{runid}-{label}.json"))
             red += not green
             print(f"{label}: {passed} of {ran} passed on a copy of {head[:7]}" + (f", named flows {row['named']}" if row["named"] else "")
+                  + (f", skipped {row['skipped']}" if row["skipped"] else "")
                   + (": green." if green else f". Failed: {'; '.join(failed)[:600]}"))
         print(f"One run ({runid}): the quick set {shared['passed']} of {shared['ran']}, {len(rows)} record{'' if len(rows) == 1 else 's'}"
               + (f", {red} red." if red else ", all green."))
         return 1 if red else 0
     finally:
-        fcntl.flock(lock, fcntl.LOCK_UN)
-        lock.close()
+        if lock:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
 
 
 def main(argv: list[str]) -> int:

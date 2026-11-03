@@ -21746,26 +21746,50 @@ print(r["weekly"]["pct"])
         once and each row's own flows: two rows with commits both get a green record from one run, under one id; a row with no
         commits gets none and is named; one row's own flow red makes only that row red; a red quick set makes both red; a row's
         commit listed in qa.COMMITS_FOR counts; qa.py pass takes the record; jobs.py done still asks for a job's own record; and
-        it waits its turn on the full runs' lock."""
+        it waits its turn on the full runs' lock. Second round: it goes on under a lock its wrapper holds; a stop cleans up its copy,
+        its flows and its clock, and what a kill leaves the next run cleans; the record names the commit it tested; QA refuses a
+        record from before a newer commit of the row; a listed commit whose subject names another row isn't this one's; a named
+        flow the quick set skips is kept as skipped."""
         import fcntl
         import subprocess as _sp
+        import signal as _sig
         ws, env, repo, fails = self._proof_env("f121")
         env.pop("HQ_JOB", None)
+        st = self.tmp / "f121-standin"
+        st.mkdir()
+        (st / "skip").write_text("")
+        runner = self.tmp / "f121-runner"
+        runner.write_text("#!/usr/bin/env python3\nimport os, subprocess, sys, time\n"
+                          f"D = {str(st)!r}\nbad = open({str(fails)!r}).read().split()\nskip = open(D + '/skip').read().split()\n"
+                          "args = sys.argv[1:]\nonly = args[args.index('--only') + 1].split(',') if '--only' in args else ['1', '2']\n"
+                          "open(D + '/heads', 'a').write(subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip() + chr(10))\n"
+                          "if os.path.exists(D + '/slow'):\n"
+                          "    kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+                          "    open(D + '/pids.tmp', 'w').write(f'{os.getpid()} {kid.pid}')\n    os.replace(D + '/pids.tmp', D + '/pids')\n    time.sleep(120)\n"
+                          "ran = [n for n in only if n not in skip]\nhit = [n for n in ran if n in bad]\nprint('== Result')\n"
+                          "for n in only:\n    print(f'      {n}: skipped (--quick)' if n in skip else (f'      {n}: FAILED - a stand-in failure' if n in hit else f'      {n}: fine'))\n"
+                          "print(f'{len(ran) - len(hit)} of {len(ran)} passed')\nsys.exit(1 if hit else 0)\n")
+        runner.chmod(0o755)
+        env["HQ_PROOF_RUNNER"] = str(runner)
         lockf = self.tmp / "f121-fullrun.lock"
         env["HQ_FULLRUN_LOCK"] = str(lockf)
         rm = ws / "HQ/roadmap.md"
         rows = ("| ⬜ | F9701 A row | What's wrong: x. Flow 901 must hold. | | | |\n| ⬜ | F9702 Another row | What's wrong: y. Happy flow 902. | | | |\n"
-                "| ⬜ | F9703 A row with no commits | What's wrong: z. Flow 903. | | | |\n| ⬜ | F9704 A row with a listed commit | What's wrong: w. | | | |\n")
+                "| ⬜ | F9703 A row with no commits | What's wrong: z. Flow 903. | | | |\n| ⬜ | F9704 A row with a listed commit | What's wrong: w. | | | |\n"
+                "| ⬜ | F9705 A row naming a Claude flow | What's wrong: v. Flows 905 and 906. | | | |\n")
         t = rm.read_text()
         head_ = "| | Step | What you get | Model |\n|---|---|---|---|\n"
         need(head_ in t, "no bugs phase")
         rm.write_text(t.replace(head_, head_ + rows, 1))
         g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()
         g("checkout", "-q", "-b", "dev")
-        for name, subject in (("b.py", "F9701: the first row's change"), ("c.py", "F9702: the second row's change"), ("d.py", "a small list")):
+        sha = {}
+        for name, subject in (("b.py", "F9701: the first row's change"), ("c.py", "F9702: the second row's change"), ("e.py", "F9705: the fifth row's change"),
+                              ("d.py", "a small list")):
             (repo / name).write_text(f"# {subject}\n")
             g("add", name)
             g("commit", "-q", "-m", subject)
+            sha[subject.split(":")[0]] = g("rev-parse", "HEAD")
         listed = g("rev-parse", "HEAD")
         pdir = Path(env["HQ_PROOF_DIR"])
         def proof(*a):
@@ -21797,6 +21821,11 @@ print(r["weekly"]["pct"])
         need(r.returncode == 0 and "QA passed" in r.stdout, f"QA's pass refused a rows record: {r.stdout} {r.stderr[-300:]}")
         r = qa("F9703", "--compared", "rows read whole, 4 of 4")
         need(r.returncode == 2 and "no record" in r.stdout, f"a row with no commits passed: {r.stdout}")
+        # a green record from before a newer commit of the row doesn't pass QA
+        (repo / "c.py").write_text("# F9702 again\n")
+        g("commit", "-qam", "F9702: a later change")
+        r = qa("F9702", "--compared", "rows read whole, 4 of 4")
+        need(r.returncode == 2 and "run it again" in r.stdout, f"a record from before the row's newer commit passed QA: {r.stdout} {r.stderr[-300:]}")
         # one row's own flow red: only that row
         time.sleep(1.1)
         fails.write_text("902")
@@ -21823,9 +21852,19 @@ print(r["weekly"]["pct"])
                        "sys.exit(proof.main(['run-rows', 'F9704']))\n")
         r = _sp.run([sys.executable, str(drv), str(ROOT), listed, "0000000000000000"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
         need(r.returncode == 2 and "F9704" in r.stdout and "F9704" not in recs(), f"a listed commit whose changes aren't the list's counted: {r.stdout} {r.stderr[-300:]}")
+        r = _sp.run([sys.executable, str(drv), str(ROOT), sha["F9702"]], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 2 and "F9704" not in recs(), f"a listed commit whose subject names F9702 counted for F9704: {r.stdout} {r.stderr[-300:]}")
         r = _sp.run([sys.executable, str(drv), str(ROOT), listed], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
         need(r.returncode == 0 and recs().get("F9704", {}).get("green"), f"a listed commit didn't count for its row: {r.stdout} {r.stderr[-300:]}")
         need(any("a small list" in c for c in recs()["F9704"]["commits"]), f"the listed commit isn't in the record: {recs()['F9704']}")
+        # a named flow the quick set skips is kept as skipped, not as ran
+        (st / "skip").write_text("906")
+        time.sleep(1.1)
+        r = proof("run-rows", "F9705")
+        e5 = latest("F9705")
+        need(r.returncode == 0 and e5.get("named") == [905, 906] and e5.get("skipped") == [906] and e5.get("ran") == 3 and e5.get("green"),
+             f"a skipped named flow: {e5} {r.stdout}")
+        (st / "skip").write_text("")
         # a job still needs its own record
         def jobs(*a_):
             return _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a_], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -21849,8 +21888,111 @@ print(r["weekly"]["pct"])
             held.close()
         out, err = pr.communicate(timeout=300)
         need(pr.returncode == 0 and "waiting" in out, f"after the lock: {out} {err[-300:]}")
+        # wrapped the house way (flock FILE run-rows ...): the lock its wrapper holds and hands down is its own
+        held = open(lockf, "a")
+        fcntl.flock(held, fcntl.LOCK_EX)
+        try:
+            pr = _sp.Popen([sys.executable, str(ROOT / "routine/proof.py"), "run-rows", "F9701"], stdout=_sp.PIPE, stderr=_sp.PIPE, text=True,
+                           env=env, cwd=str(ROOT), pass_fds=(held.fileno(),))
+            try:
+                out, err = pr.communicate(timeout=60)
+            except _sp.TimeoutExpired:
+                pr.kill()
+                out, err = pr.communicate()
+                raise Failed("under its wrapper's lock it waited on that same lock")
+        finally:
+            fcntl.flock(held, fcntl.LOCK_UN)
+            held.close()
+        need(pr.returncode == 0 and "held by the run that started" in out, f"under its wrapper's lock: {out} {err[-300:]}")
+        # the record names the commit it tested, even when HQ moves on while it starts
+        realgit = shutil.which("git")
+        shim = self.tmp / "f121-bin"
+        shim.mkdir()
+        trig = self.tmp / "f121-trigger"
+        (shim / "git").write_text("#!/bin/sh\n"
+                                  f"if [ \"$3\" = rev-parse ] && [ \"$4\" = HEAD ] && [ $# -eq 4 ] && [ -f {trig} ]; then\n"
+                                  f"  {realgit} \"$@\"; c=$?; rm -f {trig}\n"
+                                  f"  (cd {repo} && echo '# later' >> b.py && {realgit} commit -qam 'F9701: a later change') >/dev/null 2>&1\n  exit $c\nfi\n"
+                                  f"exec {realgit} \"$@\"\n")
+        (shim / "git").chmod(0o755)
+        trig.write_text("")
+        (st / "heads").write_text("")
+        time.sleep(1.1)
+        r = _sp.run([sys.executable, str(ROOT / "routine/proof.py"), "run-rows", "F9701"], capture_output=True, text=True, timeout=300, cwd=str(ROOT),
+                    env={**env, "PATH": f"{shim}{os.pathsep}{env.get('PATH') or os.environ.get('PATH', '')}"})
+        e1 = latest("F9701")
+        seen = set((st / "heads").read_text().split())
+        need(not trig.exists() and g("rev-parse", "HEAD") != e1.get("head"), f"the commit didn't move under it: {r.stdout} {r.stderr[-300:]}")
+        need(r.returncode == 0 and seen == {e1.get("head")} and not any("later change" in c and "F9701" in c for c in e1.get("commits", [])),
+             f"the record names {str(e1.get('head'))[:7]} but the copy tested {sorted(x[:7] for x in seen)}: {e1.get('commits')}")
+        # a stop (the time limit's SIGTERM) is a normal end: the copy, the flows and the clock cleaned up, no record
+        def wall_dir():
+            c = f"import sys; sys.path.insert(0, {str(ROOT / 'routine')!r}); import wall; print(wall._dir())"
+            return Path(_sp.run([sys.executable, "-c", c], capture_output=True, text=True, env=env).stdout.strip())
+        def mine(pid):
+            out_ = []
+            for d in (ROOT / "scratch").glob("proof-*"):
+                try:
+                    if json.loads((d / "owner.json").read_text()).get("pid") == pid:
+                        out_.append(d.name)
+                except (OSError, ValueError):
+                    pass
+            return out_
+        def alive(pid):
+            try:
+                os.kill(pid, 0)
+                return True
+            except OSError:
+                return False
+        def worktrees():
+            return [ln for ln in g("worktree", "list", "--porcelain").splitlines() if ln.startswith("worktree ")]
+        def slow_start():
+            (st / "pids").unlink(missing_ok=True)
+            (st / "slow").write_text("")
+            pr_ = _sp.Popen([sys.executable, str(ROOT / "routine/proof.py"), "run-rows", "F9701"], stdout=_sp.PIPE, stderr=_sp.PIPE, text=True,
+                            env=env, cwd=str(ROOT), start_new_session=True)
+            for _ in range(300):
+                if (st / "pids").exists():
+                    break
+                time.sleep(0.1)
+            need((st / "pids").exists(), "the slow stand-in never started")
+            return pr_, [int(x) for x in (st / "pids").read_text().split()]
+        wdir = wall_dir()
+        before = len(worktrees())
+        t5 = time.time()
+        pr, kids = slow_start()
+        pr.send_signal(_sig.SIGTERM)
+        try:
+            out, err = pr.communicate(timeout=60)
+        except _sp.TimeoutExpired:
+            pr.kill()
+            raise Failed("a SIGTERM didn't end it")
+        time.sleep(0.5)
+        need(pr.returncode == 143 and "Stopped" in out, f"a SIGTERM isn't a normal end: {pr.returncode} {out} {err[-300:]}")
+        need(not any(alive(k) for k in kids), f"its flows ran on after the stop: {kids}")
+        need(len(worktrees()) == before and not mine(pr.pid), f"the copy is left behind: {worktrees()} {mine(pr.pid)}")
+        need(not list(wdir.glob(f"job-rows-*-{pr.pid}-proof-time.json")), "the clock still says since")
+        need(latest("F9701").get("t", 0) < t5, "a stopped run wrote a record")
+        # a kill can't clean up: the next run does
+        pr, kids = slow_start()
+        os.kill(pr.pid, _sig.SIGKILL)
+        pr.communicate(timeout=30)
+        need(mine(pr.pid) and len(worktrees()) == before + 1, f"a kill left nothing to clean: {mine(pr.pid)} {worktrees()}")
+        need(list(wdir.glob(f"job-rows-*-{pr.pid}-proof-time.json")), "a kill left no clock")
+        (st / "slow").unlink()
+        if sys.platform != "linux":  # the left flows are found by their working folder, in /proc
+            for k in kids:
+                os.kill(k, _sig.SIGKILL)
+        r = proof("run-rows", "F9701")
+        time.sleep(0.5)
+        need(r.returncode == 0, f"the run after a kill: {r.stdout} {r.stderr[-300:]}")
+        need(not any(alive(k) for k in kids), f"the killed run's flows still run: {kids}")
+        need(not mine(pr.pid) and len(worktrees()) == before, f"the killed run's copy is still there: {mine(pr.pid)} {worktrees()}")
+        need(not list(wdir.glob(f"job-rows-*-{pr.pid}-proof-time.json")), "the killed run's clock is still there")
         return ("one run gives two rows a green record each under one id; a row with no commits gets none; one row's flow red makes only it "
-                "red, a red quick set both; a listed commit counts; QA passes on it; a job still needs its own; it waits for the lock")
+                "red, a red quick set both; a listed commit counts, not one naming another row; QA passes on it, not on one from before a newer "
+                "commit; a job still needs its own; it waits for the lock, not for its wrapper's; the record names what it tested; a stop and "
+                "a kill leave nothing behind; a skipped flow stays skipped")
 
     async def flow206(self) -> str:
         """F101, no Claude: QA's pass stands on a program's run. Refused with no record, with a red record, with no comparison
