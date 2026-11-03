@@ -34521,7 +34521,10 @@ print("H88OUT " + json.dumps(out))
     async def flow75(self) -> str:
         """F18, no Claude: the status page on the phone only scrolls up and down. A copy of the status page in a
         headless browser at phone widths, with a job and a roadmap note that hold a long path and a key (no space
-        to break at), every fold opened: no element's right edge is past the screen and the page is no wider than it."""
+        to break at), every fold opened: no element's right edge is past the screen and the page is no wider than it.
+        A wide table in a note scrolls inside its own box: the box fits, what's inside it may be wider. Its roadmap is
+        its own, from HQ's blank template, so what's in his real roadmap never decides it (F119: it went red on
+        3 November when his roadmap got a wide note table, drawn right, in its own scrolling box)."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -34535,11 +34538,19 @@ print("H88OUT " + json.dumps(out))
         (site / ".status").mkdir()
         long_path = "/home/someone/HQ/workspace/HQ/roadmap.sync-conflict-20261012-223405-5Q2D7XN-and-a-long-tail.md"
         key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAwk8/o+vb4By0L7LRCWdxgnYI7o0qc/Lund+DC/zojPxxxxxxxxxxxxxxxx"
-        rm = ROADMAP.read_text()
-        need("\n## The queue\n" in rm and "\n## The schedule\n" in rm, "the roadmap has no queue or schedule to add to")
+        rm = (ROOT / "template/HQ/roadmap.md").read_text(encoding="utf8")
+        need("\n## The queue\n" in rm and "\n# The roadmap\n" in rm, "HQ's blank roadmap has no queue to add to")
+        if "\n## The schedule\n" not in rm:
+            rm = rm.replace("\n# The roadmap\n", "\n## The schedule\n\nWork planned ahead for a day and a time (H43).\n\n# The roadmap\n", 1)
+        rm = rm.replace("\n**Routine:** on\n", "\n- Job 9000 · ready · agreed 2026-10-13 11:00 · A short test job.\n\n**Routine:** on\n", 1)
         rm = rm.replace("\n## The schedule\n", f"\n- Job 9001 · waiting · agreed 2026-10-13 12:00 · Merge {long_path} into the roadmap.\n\n## The schedule\n", 1)
         rm = rm.replace("\n## The schedule\n", f"\n## The schedule\n\n- Item 9001 · waiting · at 2026-12-31 23:59 · added 2026-10-13 12:00 · Look at {long_path}.\n", 1)
         rm += f"\n\n## Phase Z · Test\n\n| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | Z1 A long word | The key `{key}` and the file `{long_path}` | Sonnet |\n"
+        # A note under the phase with a table wider than a phone: it scrolls inside its own box (status/index.html, .prose .scroll).
+        rm += "\nA note with a wide table:\n\n| Row | File | Branch | Commit | When | Also |\n|---|---|---|---|---|---|\n" + "".join(
+            f"| ⏸Z{i} A row | routine/flowsets-and-more-{i}.py | nightfix-and-a-long-branch-{i} | d794ce6e189c2d10a239 | 2026-11-03T02:00:0{i} "
+            f"| /home/someone/HQ/workspace/HQ/roadmap-{i}.md |\n"
+            for i in range(2, 6))
         site_roadmap(site).write_text(rm)
         harness = r"""
 <script>
@@ -34552,11 +34563,15 @@ print("H88OUT " + json.dumps(out))
   const W = document.documentElement.clientWidth, out = [];
   out.push('page:' + document.documentElement.scrollWidth + '/' + W);
   const wide = [];
+  let boxed = 0;
   for (const el of document.querySelectorAll('main *')) {
     const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.right > W + 1 && el.parentElement && el.parentElement.closest('.scroll')) { boxed++; continue; }
     if (r.width > 0 && r.right > W + 1) wide.push(el.tagName + '.' + el.className + ' ' + Math.round(r.right) + ' ' + el.textContent.slice(0, 40).replace(/[|:]/g, ' '));
   }
   out.push('wide:' + wide.length + (wide.length ? ' ' + wide.slice(0, 3).join(' ; ') : ''));
+  const sc = document.querySelector('.prose .scroll');
+  out.push('boxed:' + boxed + '/' + (sc ? getComputedStyle(sc).overflowX + ' ' + (sc.scrollWidth > sc.clientWidth ? 'scrolls' : 'fits') : 'none'));
   out.push('found:' + (document.body.textContent.includes('sync-conflict-20261012') ? 'yes' : 'no'));
   out.push('key:' + (document.body.textContent.includes('Lund+DC/zojPxxxx') ? 'yes' : 'no'));
   const pre = document.createElement('pre'); pre.id = 'f18'; pre.textContent = 'F18RESULT ' + out.join(' | ') + ' END';
@@ -34567,7 +34582,11 @@ print("H88OUT " + json.dumps(out))
         idx = site / "status/index.html"
         idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
         port = 4798
-        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
+        env ={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1", "HQ_SUPPORT": str(site / "support"), "HQ_LAPTOP": "0", "HQ_PEER_USAGE_CACHE": "0"}
+        for k in ("HQ_ROADMAP", "HQ_WORKSPACE", "HQ_CYCLES_STATE", "HQ_CYCLES_FOLDER", "HQ_CYCLES_OLD_STATE", "HQ_HELPERS", "HQ_LABEL", "HQ_USAGE",
+                  "HQ_DIRECT_DIR", "HQ_TEAM_LINE_DIR"):
+            env.pop(k, None)  # F119: only its own copy, never what the run around it points at
+        (site / "support").mkdir(exist_ok=True)
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         seen = []
@@ -34593,11 +34612,14 @@ print("H88OUT " + json.dumps(out))
                 sw, cw = (int(x) for x in res["page"].split("/"))
                 need(sw <= cw, f"at {w} the page is {sw} wide on a {cw} screen: it swipes sideways")
                 need(res["wide"] == "0", f"at {w} something sticks out past the screen: {res['wide']}")
+                bn, bw = res["boxed"].split("/", 1)
+                need(bw == "auto scrolls" and int(bn) > 0, f"at {w} the wide note table doesn't scroll inside its own box: {res['boxed']}")
                 seen.append(f"{w}: {sw}/{cw}")
         finally:
             proc.terminate()
             proc.wait(timeout=10)
-        return "with a long path in a job and the schedule and a key in a roadmap note, every fold open: " + ", ".join(seen) + " wide, nothing sticks out; the redraw only scrolls back when it moved"
+        return ("on its own roadmap, with a long path in a job and the schedule, a key in a roadmap note and a wide note table, every fold open: "
+                + ", ".join(seen) + " wide, nothing sticks out, the wide table scrolls in its own box; the redraw only scrolls back when it moved")
 
     async def flow74(self) -> str:
         """H100, no Claude: the coaching log keeps three hours. On a throwaway workspace: entries older than three hours
