@@ -19816,6 +19816,145 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             p.terminate()
         return "a running helper stands on the page in one line, in words; finished, past its box or gone it doesn't"
 
+    async def flow440(self) -> str:
+        """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
+        minute runs none on the brand-new folder and going back never undoes one it never had. An existing list is never written over."""
+        import shutil as _sh, subprocess as _sp
+        tmp = self.tmp / "small4-install"
+        hq = tmp / "HQ"
+        hq.mkdir(parents=True)
+        skip = _sh.ignore_patterns("__pycache__")
+        for d in ("install", "template", "routine"):
+            _sh.copytree(ROOT / d, hq / d, ignore=skip, symlinks=True)
+        ws, sup = tmp / "ws", tmp / "support"
+        sup.mkdir()
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+        env.update({"HQ_WORKSPACE": str(ws), "HQ_SUPPORT": str(sup), "HQ_INSTALL_FAKE": "1", "HQ_UNDER_TEST": "1"})
+        code = ("import importlib.util, json, sys, types\n"
+                "spec = importlib.util.spec_from_file_location('hq_install', sys.argv[1] + '/install/install.py')\n"
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+                "print(json.dumps(m.Installer(types.SimpleNamespace(skip='')).workspace()))\n")
+        r = _sp.run([sys.executable, "-c", code, str(hq)], capture_output=True, text=True, env=env, cwd=str(hq), timeout=120)
+        need(r.returncode == 0 and ws.is_dir(), f"the workspace step: {r.stdout[-300:]} {r.stderr[-600:]}")
+        names = sorted(p.stem for p in (hq / "routine/datachanges").glob("*.py") if not p.name.startswith("_"))
+        need(names, "this HQ has no data changes to count")
+        f = ws / "HQ/data-changes.json"
+        need(f.exists(), "a fresh install has no list of what has run: the first minute runs every data change on the new folder")
+        have = json.loads(f.read_text())["applied"]
+        need(sorted(have) == names, f"what counts as run on a fresh install: {have}, this HQ has {names}")
+        look = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import datachange as D\n"
+                "print(json.dumps({'applied': D.applied(sys.argv[2]), 'baseline': D.baseline(sys.argv[2], sys.argv[1])}))\n")
+        f.write_text('{"applied": ["001-features-said-before-the-gate"]}')
+        r = _sp.run([sys.executable, "-c", look, str(hq), str(ws)], capture_output=True, text=True, env=env, timeout=60)
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1])["applied"] == ["001-features-said-before-the-gate"]
+             and json.loads(f.read_text())["applied"] == ["001-features-said-before-the-gate"], f"a list that's there was written over: {r.stdout[-300:]} {r.stderr[-300:]}")
+        return f"a fresh workspace counts {', '.join(names)} as run; a list that's there stays as it is"
+
+    async def flow441(self) -> str:
+        """The small list, no Claude: a friend's copy that came as a download. Without git it says plainly why it can't go back yet, never that
+        there's no version before it; made a git copy by its update with only its own version's tag, one version back is found on GitHub."""
+        import subprocess as _sp
+        f = self._friend("small4-dl")
+        hub, tmp = f["hub"], f["tmp"]
+        c = f["make"]()
+        env = c["env"]
+        said = lambda r: json.loads(r.stdout.strip().splitlines()[-1])
+        dl = tmp / "download"
+        dl.mkdir()
+        arch = _sp.run(["git", "--git-dir", str(hub), "archive", "v1.1.0"], capture_output=True, check=True).stdout
+        _sp.run(["tar", "-x", "-C", str(dl)], input=arch, check=True)
+        need(not (dl / ".git").exists() and (dl / "VERSION").read_text().strip() == "1.1.0", "the download isn't one")
+        r = _sp.run([sys.executable, str(dl / "routine/update.py"), "back"], capture_output=True, text=True, env=env, cwd=str(dl), timeout=120)
+        out = said(r)
+        need(not out.get("ok") and "no version before" not in out.get("said", "") and "download" in out.get("said", "")
+             and "Nothing moved" in out.get("said", ""), f"a download going back: {r.stdout[-300:]} {r.stderr[-300:]}")
+        code = ("import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import update\n"
+                "print(update.ensure_repo('1.1.0', 'v1.1.0'))\nprint(update.previous())\n")
+        r = _sp.run([sys.executable, "-c", code, str(dl)], capture_output=True, text=True, env=env, cwd=str(dl), timeout=180)
+        lines = r.stdout.strip().splitlines()
+        need(r.returncode == 0 and lines[:1] == ["v1.1.0"], f"made a git copy: {r.stdout[-300:]} {r.stderr[-500:]}")
+        need(lines[-1] == "v1.0.0", f"one version back on a copy made from a download: {lines[-1]}")
+        return "a download says why it can't go back yet; made a git copy with one tag, one version back is found on GitHub"
+
+    async def flow442(self) -> str:
+        """The small list, no Claude: going forward again brings back what she hadn't committed when she went back (a changed file and a new
+        one), and says so; the backup branch stays. Where it can't land as it was, it stays on its branch and the words name it."""
+        f = self._friend("small4-fw")
+        c = f["make"]()
+        import subprocess as _sp
+        up = lambda *x: _sp.run([sys.executable, str(c["hq"] / "routine/update.py"), *x], capture_output=True, text=True, env=c["env"], cwd=str(c["hq"]), timeout=120)
+        said = lambda r: json.loads(r.stdout.strip().splitlines()[-1])
+        mine, changed = c["hq"] / "mine-not-committed.txt", c["hq"] / "app/tour.py"
+        mine.write_text("hers, not committed\n")
+        was = changed.read_text()
+        changed.write_text(was + "# a line of hers\n")
+        at = c["g"]("rev-parse", "HEAD")
+        r = await asyncio.to_thread(up, "back")
+        need(said(r).get("ok") and not mine.exists() and changed.read_text() == was, f"back: {r.stdout[-300:]} {r.stderr[-300:]}")
+        branch = json.loads((c["hq"] / ".status/back.json").read_text()).get("changes", "")
+        r = await asyncio.to_thread(up, "forward")
+        out = said(r)
+        need(out.get("ok") and c["g"]("rev-parse", "HEAD") == at, f"forward: {r.stdout[-300:]} {r.stderr[-300:]}")
+        need(mine.exists() and mine.read_text() == "hers, not committed\n" and changed.read_text() == was + "# a line of hers\n",
+             f"forward didn't bring back what she hadn't committed: {out.get('said')}")
+        need("are back" in out.get("said", "") and branch and branch in out.get("said", "") and c["g"]("rev-parse", "-q", "--verify", f"refs/heads/{branch}"),
+             f"the words or the branch: {out.get('said')} {branch}")
+        # where it can't land as it was (something of hers changed on the old version too): it stays on its branch, nothing lost
+        c = f["make"]()
+        mine = c["hq"] / "mine-not-committed.txt"
+        mine.write_text("hers, not committed\n")
+        r = await asyncio.to_thread(up, "back")
+        need(said(r).get("ok"), f"back again: {r.stdout[-300:]}")
+        (c["hq"] / "app/tour.py").write_text((c["hq"] / "app/tour.py").read_text() + "# changed on the old version\n")
+        r = await asyncio.to_thread(up, "forward")
+        out = said(r)
+        need(out.get("ok") and "git stash apply" in out.get("said", "") and not mine.exists(), f"a folder that wasn't clean: {r.stdout[-300:]} {r.stderr[-300:]}")
+        return "forward brings back her uncommitted changes and says so, the branch kept; a folder that changed meanwhile leaves them on the branch, named"
+
+    async def flow443(self) -> str:
+        """The small list, no Claude: a call's start on a friend's workspace without backend switches, filled the way flow 241 fills one, is over
+        the cap; the data change gives it the briefing, and then every agent's start is under it; its undo takes back only the file it made. A
+        Deep call's start is measured as the whole folder it loads and named Deep, never counted as a Quick one."""
+        import importlib.util, subprocess as _sp
+        ws, env = self._h298_ws("small4-start")
+        env.update({"HQ_UNDER_TEST": "1"})
+        (ws / "current-situation.md").write_text("# Where things stand\n\nMADEUPSITUATION " + "a line about how things stand. " * 900)
+        (ws / "where-things-go.md").write_text("# Where things go\n\nMADEUPWHERE " + "a line about where things go. " * 500)
+        (ws / "day-in-the-life.md").write_text("# A day\n\nMADEUPDAY " + "a line of the day. " * 300)
+        (ws / "HQ/backend.json").unlink()
+        check = lambda: _sp.run([sys.executable, str(ROOT / "app/startsize.py"), "--check"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        r = check()
+        need(r.returncode == 1, f"without switches the start was under the cap anyway, so this shows nothing: {r.stdout}")
+        p = next((ROOT / "routine/datachanges").glob("002-*.py"), None)
+        need(p is not None, "no data change for a workspace without backend switches")
+        spec = importlib.util.spec_from_file_location("small4_002", p)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        m.do(ws)
+        need(json.loads((ws / "HQ/backend.json").read_text())["on"] == ["briefing"], "the briefing isn't on")
+        r = check()
+        need(r.returncode == 0 and r.stdout.count("bytes of") >= 3, f"with the briefing a start is still over the cap: {r.stdout} {r.stderr[-400:]}")
+        m.undo(ws)
+        need(not (ws / "HQ/backend.json").exists(), "the undo left the file it made")
+        (ws / "HQ/backend.json").write_text('{"on": ["briefing"]}\n')
+        m.do(ws); m.undo(ws)
+        need((ws / "HQ/backend.json").read_text() == '{"on": ["briefing"]}\n', "a file of hers was changed or taken away")
+        m.do(ws)
+        need((ws / "HQ/backend.json").read_text() == '{"on": ["briefing"]}\n', "a file that was there was written over")
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/app'); sys.path.insert(0, sys.argv[1] + '/routine')\n"
+                "import agents, startsize; from pathlib import Path; ws = Path(sys.argv[2])\n"
+                "donna = next(a for a in agents.visible(ws) if a['id'] == 'donna')\n"
+                "q, d = startsize.start_of(donna, ws), startsize.start_of(donna, ws, load='deep')\n"
+                "print(json.dumps({'quick': q, 'deep': d, 'whole': len(startsize.whole_folder(ws).encode())}))\n")
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"a Deep call's start can't be measured: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["deep"]["context"] == "all" and o["deep"]["deep"] and o["deep"]["start"] == o["whole"] and o["deep"]["start"] > o["quick"]["start"]
+             and not o["quick"]["deep"], f"a Deep call measured as a Quick one: {o['quick']['start']} {o['deep']}")
+        r = _sp.run([sys.executable, str(ROOT / "app/startsize.py")], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need("donna on a Deep call: the whole folder" in r.stdout, f"the report doesn't name a Deep start: {r.stdout}")
+        return f"without switches over the cap, with the briefing under it, the undo only its own file; a Deep start measured whole ({o['deep']['total']} bytes)"
+
     async def flow241(self) -> str:
         """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
         to-do list, a long status block, many planning rows, a big handbook. No life file is loaded whole; nothing of the rules is lost: every
@@ -35854,6 +35993,10 @@ FLOWS = {
     403: ("H308: a new agent from the template has three looks a day", False, "flow403"),
     404: ("H308: a look over her share waits until the next look and says so in her ledger, with the room it needed", False, "flow404"),
     410: ("H300: at the top of Donna's chat one tap opens Moneypenny's chat, her texts in it, his text answered there, and back; on a phone and a laptop; no switch without her line", False, "flow410"),
+    440: ("The small list: a fresh install counts every data change as run, so none runs on the new folder; a list that's there stays", False, "flow440"),
+    441: ("The small list: a download says why it can't go back yet, never that there's no version before; made a git copy with one tag, one back is found", False, "flow441"),
+    442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
+    443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),

@@ -93,6 +93,16 @@ def _save(have: list[str], base=None) -> None:
     os.replace(tmp, p)
 
 
+def baseline(base=None, root=None) -> list[str]:
+    """The small list: a workspace made fresh from the template is already in this version's shape, so every change this HQ has counts as
+    run there. Without this the first minute ran them all on it, and going back undid changes it never had. Never over a list that's there."""
+    if (_base(base) / STATE).exists():
+        return applied(base)
+    have = names(root)
+    _save(have, base)
+    return have
+
+
 def _git(root, *args: str) -> str:
     """What git prints, or "" when it says no or can't be asked: what can't be told isn't run on real data."""
     try:

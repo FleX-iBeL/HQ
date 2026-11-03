@@ -406,6 +406,11 @@ class Installer:
         if not os.path.isdir(TEMPLATE):
             raise Fail("the template folder is missing from HQ", "Download HQ again (git pull or a fresh clone).")
         shutil.copytree(TEMPLATE, WORKSPACE, symlinks=True)
+        try:  # the small list: a fresh workspace is in this version's shape, so its data changes count as run
+            import datachange
+            datachange.baseline(WORKSPACE, HQ)
+        except Exception as e:
+            log(f"the data changes' baseline: {e!r}")
         r = subprocess.run(["git", "init", "-q"], cwd=WORKSPACE, capture_output=True, text=True)
         if r.returncode == 0:
             subprocess.run(["git", "add", "-A"], cwd=WORKSPACE, capture_output=True)
