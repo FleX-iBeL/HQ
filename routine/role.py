@@ -200,12 +200,37 @@ def _log(msg):
 def _test_on_real_pairing() -> bool:
     """A test (HQ_UNDER_TEST) whose HQ memory is this computer's real one, so it would read the real role.json:
     only throwaway HQs with their own HQ_SUPPORT may pair under a test (flow 65).
-    F137: whether this is the real memory is decided by the path itself (hqpaths.own_support_dirs), whatever
-    HQ_REAL_SUPPORT says; HQ_REAL_SUPPORT only adds one more place that counts as real (flow 67's stand-in)."""
+    F137: whether this is the real memory is decided by the place itself (hqpaths.own_support_dirs), whatever
+    HQ_REAL_SUPPORT says; HQ_REAL_SUPPORT only adds one more place that counts as real (flow 67's stand-in). The same
+    folder by another spelling (a Mac's disk doesn't tell case apart), by a link, or a role.json that is the real
+    one's file (a hard link) all count as the real memory.
+    So under a test, a memory in the default place (from HOME or XDG_STATE_HOME) always reads as unpaired: a flow that
+    needs a pairing makes a throwaway one and names it with HQ_SUPPORT."""
     if not hqpaths.under_test():
         return False
-    here = os.path.realpath(SUPPORT)
-    return here == hqpaths.real_support() or here in hqpaths.own_support_dirs()
+    return _is_real_memory(SUPPORT)
+
+
+def _is_real_memory(path) -> bool:
+    """F137: PATH is this computer's real HQ memory, or its role.json is the real one's file."""
+    here = os.path.realpath(path)
+    fold = str.casefold if hqpaths.IS_MAC else (lambda p: p)
+    mine = os.path.join(here, "role.json")
+    for real in {hqpaths.real_support(), *hqpaths.own_support_dirs()}:
+        if fold(here) == fold(real):
+            return True
+        for a, b in ((here, real), (mine, os.path.join(real, "role.json"))):
+            try:
+                if os.path.samefile(a, b):  # the same file on disk (st_dev, st_ino), however it's spelled or linked
+                    return True
+            except OSError:
+                pass
+    return False
+
+
+def _refuse_on_real_pairing() -> str:
+    """F137: the plain refusal for a test that would change this computer's real pairing, or '' when it may."""
+    return "Refused (F17): a test may not change this computer's real pairing.\n" if _test_on_real_pairing() else ""
 
 
 def config() -> dict:
@@ -374,6 +399,8 @@ def online() -> bool:
 def choose(who: str) -> str:
     """Make `who` the main (here, other, or a name), now. Tells the other HQ right away when it answers; when
     it doesn't, it learns the newer choice the first time it can see this one again."""
+    if _refuse_on_real_pairing():  # F137
+        return _refuse_on_real_pairing().strip()
     c = _load(CONFIG, {})
     if not c.get("peer"):
         return "This HQ is on its own, so it's always the main one. There's no other HQ set up."
@@ -480,6 +507,8 @@ def _beat():
 
 def adopt(main: str, chosen_at: float) -> bool:
     """The other HQ's choice, when it's newer than this one's (POST /api/role, or seen on a look)."""
+    if _test_on_real_pairing():  # F137: a test never rewrites the real pairing
+        return False
     c = _load(CONFIG, {})
     if not c.get("peer") or not main or float(chosen_at or 0) <= float(c.get("chosen_at") or 0):
         return False
@@ -1160,6 +1189,9 @@ def main(argv):
     if cmd in ("-h", "--help"):
         print(__doc__)
         return 0
+    if cmd in ("main", "setup", "alone") and _refuse_on_real_pairing():  # F137: never the real role.json under a test
+        sys.stderr.write(_refuse_on_real_pairing())
+        return 3
     if cmd == "main" and args:
         print(choose(args[0]))
         return 0

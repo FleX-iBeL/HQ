@@ -23718,7 +23718,10 @@ print(json.dumps({"lost": lost}))
         is in a home, paired as the backup with a main that listens on this computer), and HQ_REAL_SUPPORT naming a throwaway
         as the wall has it, the way flow 376 ran on the laptop on 3 November: todo.py add, with HQ_SUPPORT on the stand-in and
         with HQ_SUPPORT dropped, is refused the hand-over and written on the test's own list; nothing reaches the main, nothing
-        is kept for it. Outside a test the same stand-in reads as paired, so the refusal is the guard's."""
+        is kept for it. The same with the stand-in spelt in another case (on a Mac, whose disk doesn't tell case apart), through a
+        link to its folder and through a hard link to its role.json. role.py setup, alone and main, and adopt and choose, are
+        refused there too: the stand-in's role.json and role-state.json stay as they were. Outside a test the same stand-in
+        reads as paired, so the refusal is the guard's."""
         import socket
         import subprocess as sp
         T = self.tmp / "f137-real-pairing"
@@ -23733,7 +23736,15 @@ print(json.dumps({"lost": lost}))
         pairing = json.dumps({"name": "laptop", "peer": f"https://127.0.0.1:{port}/", "peer_name": "server", "main": "server",
                               "chosen_at": 1})
         (stand / "role.json").write_text(pairing)
-        (stand / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        state = json.dumps({"acting": "backup"})
+        (stand / "role-state.json").write_text(state)
+        linked = T / "linked"  # a role.json that is the stand-in's own file, through a hard link
+        linked.mkdir()
+        os.link(stand / "role.json", linked / "role.json")
+        (linked / "role-state.json").write_text(state)
+        folder_link = T / "folder-link"
+        folder_link.symlink_to(stand, target_is_directory=True)
+        cased = home / ("library/application support/hq" if sys.platform == "darwin" else ".LOCAL/state/hq")
         f = T / "challenges.md"
         shutil.copy(ROOT / "template/challenges.md", f)
         base = {k: v for k, v in os.environ.items() if (not k.startswith("HQ_") or k in ("HQ_UNDER_TEST", "HQ_NO_WALL", "HQ_REAL_ROADMAP"))
@@ -23745,7 +23756,14 @@ print(json.dumps({"lost": lost}))
                  "print(json.dumps([role._test_on_real_pairing(), bool(role.config()), role.acting(), h[0], h[3], 'F17' in h[2],"
                  " hqpaths.real_support() == role.SUPPORT]))")
         notes = []
-        for how, env in (("on the stand-in", {**base, "HQ_SUPPORT": str(stand)}), ("with HQ_SUPPORT dropped", base)):
+        cases = [("on the stand-in", {**base, "HQ_SUPPORT": str(stand)}), ("with HQ_SUPPORT dropped", base),
+                 ("through a link to its folder", {**base, "HQ_SUPPORT": str(folder_link)}),
+                 ("through a hard link to its role.json", {**base, "HQ_SUPPORT": str(linked)})]
+        if (cased / "role.json").exists():  # a disk that doesn't tell case apart (a Mac's, as a rule)
+            cases.append(("spelt in another case", {**base, "HQ_SUPPORT": str(cased)}))
+        else:
+            notes_skip = "a disk that tells case apart, so the other spelling is another folder"
+        for how, env in cases:
             try:
                 r = await asyncio.to_thread(sp.run, [sys.executable, "-c", probe, str(ROOT / "routine")], env=env,
                                             capture_output=True, text=True, timeout=60)
@@ -23762,6 +23780,19 @@ print(json.dumps({"lost": lost}))
                  f"{r.returncode} {r.stdout[-300:]} {r.stderr[-300:]}")
             need("handed" not in r.stdout and "backup" not in r.stdout, f"{how}: the add says it went to the main: {r.stdout[-300:]}")
             notes.append(how)
+        # The pairing itself: setup, alone and main from the command line, adopt and choose from code, never change it.
+        for how, env in cases:
+            for cmd in (["setup", f"https://127.0.0.1:{port}/", "--name", "laptop", "--main", "here"], ["main", "here"], ["alone"]):
+                r = await asyncio.to_thread(sp.run, [sys.executable, str(ROOT / "routine/role.py"), *cmd], env=env,
+                                            capture_output=True, text=True, timeout=60)
+                need(r.returncode == 3 and "F17" in r.stderr, f"{how}: role.py {cmd[0]} wasn't refused under a test: "
+                     f"{r.returncode} {r.stdout[-200:]} {r.stderr[-200:]}")
+            r = await asyncio.to_thread(sp.run, [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; "
+                                                 "print(role.adopt('laptop', 99), role.choose('here').startswith('Refused'))",
+                                                 str(ROOT / "routine")], env=env, capture_output=True, text=True, timeout=60)
+            need(r.stdout.split() == ["False", "True"], f"{how}: adopt or choose changed the pairing under a test: {r.stdout} {r.stderr[-200:]}")
+            need((stand / "role.json").read_text() == pairing and (stand / "role-state.json").read_text() == state,
+                 f"{how}: the stand-in's pairing was changed or removed")
         reached = 0
         while True:
             try:
@@ -23772,16 +23803,19 @@ print(json.dumps({"lost": lost}))
                 break
         lst.close()
         need(reached == 0, f"the stand-in's main was reached {reached} times from a test")
-        need(not (stand / "role-pending.jsonl").exists(), "a test's request was kept to be handed to the main")
+        need(not (stand / "role-pending.jsonl").exists() and not (linked / "role-pending.jsonl").exists(),
+             "a test's request was kept to be handed to the main")
         need((stand / "role.json").read_text() == pairing, "the stand-in's pairing was changed")
         outside = {k: v for k, v in base.items() if k != "HQ_UNDER_TEST"}
         r = await asyncio.to_thread(sp.run, [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import role; "
                                              "print(bool(role.config()), role.acting())", str(ROOT / "routine")],
                                     env=outside, capture_output=True, text=True, timeout=60)
         need(r.stdout.split() == ["True", "backup"], f"outside a test the stand-in should read as paired: {r.stdout} {r.stderr[-200:]}")
-        return (f"a test on a stand-in of this computer's own HQ memory, paired as the backup ({' and '.join(notes)}), "
+        return (f"a test on a stand-in of this computer's own HQ memory, paired as the backup ({', '.join(notes)}), "
                 "with HQ_REAL_SUPPORT on a throwaway: no pairing read, the hand-over refused (F17), todo.py's add on its own list, "
-                "the main never reached, nothing kept; outside a test the same stand-in reads as paired")
+                "role.py setup, alone and main refused, adopt and choose too, the pairing as it was, the main never reached, "
+                "nothing kept; outside a test the same stand-in reads as paired"
+                + (f" ({notes_skip})" if len(cases) < 5 else ""))
 
     # -- F114: the doors hold on calls and texts too ------------------------------------------------------------------------------
 
@@ -38381,7 +38415,7 @@ FLOWS = {
     374: ("F115: 60 switches at once lose none", False, "flow374"),
     375: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow375"),
     376: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow376"),
-    475: ("F137: a test never hands a write to the real main: on a stand-in of this computer's own HQ memory, paired, with HQ_REAL_SUPPORT on a throwaway, todo.py's add is refused the hand-over and stays on its own list; the main never reached", False, "flow475"),
+    475: ("F137: a test never hands a write to the real main: on a stand-in of this computer's own HQ memory, paired, with HQ_REAL_SUPPORT on a throwaway, todo.py's add is refused the hand-over and stays on its own list, also by another case, a link or a hard link; setup, alone and main refused; the main never reached", False, "flow475"),
     185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
