@@ -21176,7 +21176,8 @@ print(json.dumps(out))
             need(word in titles, f"no section about {word}: {titles}")
         for word in ("kept-from-both", "handover", "Donna's warning first", "update.py restart-all", "release.py main", "update.py back",
                      "update.py forward", "reserve", "this call or this chat, today", "incident", "Never send mail", "exact pid",
-                     "Never write the live workspace by hand", "private files", "checkpoint-N", "privacy.py --history", "Moneypenny delegates"):
+                     "Never write the live workspace by hand", "private files", "checkpoint-N", "privacy.py --history", "Moneypenny delegates",
+                     "carries the team's findings back", "backend.py off NAME", "routine/misses.py", "extensions.py flows", "One whole run at a time"):
             need(word in text, f"the walkthrough doesn't cover {word!r}")
         named, bad = [], []
         for span in re.findall(r"`([^`\n]+)`", text):
