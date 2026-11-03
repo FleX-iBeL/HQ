@@ -1023,7 +1023,18 @@ def run() -> int:
 def previous() -> str | None:
     """F104: one version back: the newest version tag under where HQ stands; on the work line past a version, that version. On a friend's
     copy her own commits past a tag count as standing on that tag: one version back is the one below it, or she'd stay on the same version.
-    Commits of dev's past it aren't hers: that's the work line, on her copy too."""
+    Commits of dev's past it aren't hers: that's the work line, on her copy too. The small list: a copy that came as a download got only
+    the tags its update needed, so with none found here the version tags are fetched from GitHub first and it looks again."""
+    if not has_git():
+        return None
+    tag = _previous()
+    if tag is None:
+        fetch_tags()
+        tag = _previous()
+    return tag
+
+
+def _previous() -> str | None:
     at = set(git("tag", "--points-at", "HEAD", timeout=10).stdout.split())
     older = [t for t in git("tag", "--merged", "HEAD", timeout=10).stdout.split() if vtuple(t) and t not in at]
     if not older:
@@ -1119,6 +1130,9 @@ def back(tag: str | None = None, tell: bool = True, first: bool = False) -> dict
     """F104: one version back, here and on the other computer, in one step. The work happens in the background (it ends what runs,
     so also the shell a call started this from). Returns what was started. The main goes first, whichever computer it's started on:
     only the main's undo can fail, and the other computer hears only once it held. `first`: the backup asked for this."""
+    if not has_git():  # the small list: a download has versions before it, but no git to go back with
+        return {"ok": False, "said": "This HQ came as a download, without its git history, so it can't go back a version yet. "
+                                     "Its first update makes it a git copy; from then on going back works. Nothing moved."}
     tag = tag or previous()
     if not tag or not vtuple(tag):
         return {"ok": False, "said": "There's no version before this one."}
@@ -1192,8 +1206,11 @@ def back_run(tag: str, tell: bool, guard: bool = False) -> int:
         changed = [f for f in git("diff", "--name-only", before, "HEAD", timeout=30).stdout.splitlines() if f]
         prior = gone_back()
         if not guard:
+            # the small list: what she hadn't committed where she went back from, so forward brings it back there
+            changes = prior.get("changes") or (saved.get("changes") or {}).get("branch")
             write_json(BACK_FILE, {"to": vname(tag), "from": prior.get("from") or old, "branch": prior.get("branch") or branch,
-                                   "head": prior.get("head") or before, "at": time.time(), **({"no_forward": True} if old_way else {})})
+                                   "head": prior.get("head") or before, "at": time.time(), **({"no_forward": True} if old_way else {}),
+                                   **({"changes": changes} if changes else {})})
         if tell:  # only now: what failed above left this computer where it was, and the other one with it
             tell_later(["back-here", tag])  # kept first: whatever happens to this run, the routine's minute tells it until it's told
             told = tell_now(["back-here", tag])
@@ -1254,10 +1271,26 @@ def forward(tell: bool = True) -> dict:
         git("checkout", "--quiet", d["branch"], timeout=60, check=True)
     else:
         git("checkout", "--quiet", "--detach", d.get("head") or "HEAD", timeout=60, check=True)
+    kept = _changes_back(d.get("changes") or "")
     os.remove(BACK_FILE)
     if not os.environ.get("HQ_UPDATE_WAIT"):
         _spawn("restart-all")
-    return {"ok": True, "said": f"Forward again, on {git('describe', '--tags', '--always', timeout=10).stdout.strip()}."}
+    return {"ok": True, "said": f"Forward again, on {git('describe', '--tags', '--always', timeout=10).stdout.strip()}.{kept}"}
+
+
+def _changes_back(branch: str) -> str:
+    """The small list: forward puts back what going back saved of hers that wasn't committed, only where it came from and onto a clean
+    folder, so it lands as it was. Otherwise it stays on its branch and the words say so. The branch is kept either way."""
+    if not branch or git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", timeout=10).returncode:
+        return ""
+    base = git("rev-parse", f"{branch}^1", timeout=10).stdout.strip()
+    if base == git("rev-parse", "HEAD", timeout=10).stdout.strip() and not changed_outside_local():
+        r = git(*IDENTITY, "stash", "apply", branch, timeout=60)
+        if not r.returncode:
+            return f" Your changes that weren't committed are back (still saved on {branch} too)."
+        git("reset", "-q", "--hard", "HEAD", timeout=60)  # the folder was clean a moment ago: nothing of hers is lost, it's on the branch
+        log(f"forward: {branch} didn't apply: {(r.stderr or r.stdout).strip()[-300:]}")
+    return f" Your changes that weren't committed are saved on {branch}: git stash apply {branch} brings them back."
 
 
 # ---- F104: the guard on the release -----------------------------------------------------------------------------
