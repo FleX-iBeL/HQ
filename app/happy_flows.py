@@ -28410,10 +28410,13 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         def sh(*args, extra=None, timeout=120):
             return _sp.run([py, *args], capture_output=True, text=True, timeout=timeout, env={**env, **(extra or {})})
 
-        # 1. the switches: on a fresh install the briefing and headless jobs on, the rest off; on, off, listed; a computer's own setting wins
+        # 1. the switches: on a fresh install all five on (H301, the stable version; the hand-over too); on, off, listed; a computer's own setting wins
         r = sh(root / "app" / "backend.py")
-        need(r.returncode == 0 and r.stdout.count(": off.") == 3 and "briefing: on" in r.stdout and "headless_jobs: on" in r.stdout,
-             f"a fresh install: the briefing and headless jobs on (F104, F106), the rest off: {r.stdout}")
+        need(r.returncode == 0 and r.stdout.count(": off.") == 0
+             and all(f"{k}: on" in r.stdout for k in ("briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index")),
+             f"a fresh install: all five switches on (H301): {r.stdout}")
+        need(sh(root / "app" / "backend.py", "off", "open_line").returncode == 0 and "open_line: off." in sh(root / "app" / "backend.py").stdout,
+             "a switch on by default can't be turned off")
         need(sh(root / "app" / "backend.py", "on", "briefing").returncode == 0, "the switch couldn't be turned on")
         need(": on." in sh(root / "app" / "backend.py").stdout, "the switch doesn't show on")
         need(sh(root / "app" / "backend.py", "on", "nonsense").returncode == 2, "an unknown switch was accepted")
@@ -28922,7 +28925,7 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             need(pol.decide("Bash", {"command": cmd}).verdict == "allow", "H266: Moneypenny can't text on her own line")
             import agents as _agents
             mp = [a for a in _agents.DEFAULTS if a["id"] == "moneypenny"][0]
-            need("direct_line.py team" in mp["craft"] and len(mp["craft"]) <= 8000, "H266: her craft doesn't say how to text him")
+            need("direct_line.py team" in mp["craft"] and len(mp["craft"]) <= _agents.CRAFT_MAX, "H266: her craft doesn't say how to text him")
             csrc = (ROOT / "app/call.py").read_text()
             need(csrc.count("policy.team_texts") >= 2, "H266: a call with her doesn't let her text")
             need("HQ/team-line/" in (ROOT / "routine/role.py").read_text(), "H266: the backup doesn't keep her line its own")
