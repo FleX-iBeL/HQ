@@ -669,10 +669,10 @@ def mail_ext_text():
         return "(no extensions add steps)"
 
 
-def mail_instructions():
-    """The hourly mail check's instructions as its run gets them: routine/mail-check.md filled in for this workspace. H125: with
-    Donna's open mail watches in it, and the one command that keeps a match for her to text."""
-    return (open(os.path.join(HERE, "mail-check.md")).read().replace("{WORKSPACE}", FOLDER)
+def mail_instructions(text=None):
+    """The hourly mail check's instructions as its run gets them: routine/mail-check.md (or the text given, an older version for a
+    test) filled in for this workspace. H125: with Donna's open mail watches in it, and the one command that keeps a match for her to text."""
+    return ((open(os.path.join(HERE, "mail-check.md")).read() if text is None else text).replace("{WORKSPACE}", FOLDER)
             .replace("{WATCHES}", mail_watches()).replace("{PINGS}", os.path.join(JV, "routine", "pings.py"))
             .replace("{SORTING}", mail_sort_text()).replace("{MAILSORT}", os.path.join(JV, "routine", "mailsort.py"))
             .replace("{QUIET}", mail_quiet_text()).replace("{EXTENSIONS}", mail_ext_text()).replace("{SEARCHES}", mailguard.search_text())

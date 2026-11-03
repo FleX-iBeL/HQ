@@ -56,7 +56,7 @@ Tests: HQ_EXTENSIONS_FOLDER (the extensions folder itself), HQ_EXTENSIONS_STATE 
 HQ_EXTENSIONS_CHECK (the check's file), HQ_EXTENSIONS_DRY=1 (clash chat and team only say what they'd do).
 [Claude's choices: the folder's place and the file names; a routine runs at most once a minute and at most ten
 minutes; a script at most two minutes; the check reads an extension's own files up to 200 KB each; one of its own flows at
-most two minutes, and it runs on a copy of the extension in a throwaway workspace made from HQ's template.]
+most two minutes, run from a throwaway copy of HQ with its own workspace, memory and home folder.]
 """
 from __future__ import annotations
 
@@ -250,7 +250,10 @@ def mail_steps() -> str:
                          + "\n".join("   " + ln for ln in e["mail"].splitlines())
                          + ("\n   Its scripts you may run, each as exactly one Bash command:\n" + "\n".join("   " + s for s in sc)
                             if sc else ""))
-    return "\n".join(parts) if parts else "(no extensions add steps)"
+    if not parts:
+        return "(no extensions add steps)"
+    return "\n".join(parts) + ("\n   These steps run on a quiet hour too (step 3 says how), and an extension's step never moves the marker:"
+                               " that's Gmail's.")
 
 
 QUIET_STOP = "If nothing is newer than the marker, stop: change nothing, commit nothing."
@@ -310,45 +313,97 @@ def run(ext_id: str, name: str, args: list[str]) -> int:
 
 # ---- their own flows (gap 3) --------------------------------------------------------------------------------
 
-def _flow_workspace(e: dict, tmp: Path) -> tuple[Path, Path]:
-    """A throwaway workspace for one extension's flows: HQ's blank template with a copy of this extension in its
-    HQ/extensions, so a flow can run its scripts the usual way and nothing it writes reaches the real workspace."""
+def _hq_files() -> list[str]:
+    """HQ's own files (what git has and what isn't ignored), never the workspace: what a copy of HQ for a flow holds."""
+    try:
+        r = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-co", "--exclude-standard"], capture_output=True, text=True, timeout=60)
+        files = [f for f in r.stdout.splitlines() if f] if r.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired):
+        files = []
+    if not files:  # a copy that came as a download, without git
+        skip = {"workspace", ".git", ".venv", "models", "scratch", ".status", "local"}
+        files = [str(p.relative_to(ROOT)) for p in ROOT.rglob("*") if p.is_file() and p.relative_to(ROOT).parts[0] not in skip]
+    return [f for f in files if not f.startswith(("workspace/", ".venv/")) and f != "workspace"]
+
+
+def _flow_hq(e: dict, tmp: Path, files: list[str]) -> tuple[Path, Path, Path]:
+    """Gap 3: a throwaway HQ for one of an extension's flows: a copy of HQ's own files whose workspace is a real folder made
+    from HQ's blank template (never a link to the real one), with a copy of this extension in its HQ/extensions. So a flow
+    runs its scripts the usual way, and nothing it writes, inside HQ or in the workspace, reaches the real ones."""
     import shutil
-    ws = tmp / "workspace"
+    hq = tmp / "HQ"
+    for rel in files:
+        src = ROOT / rel
+        if src.is_file() and not src.is_symlink():
+            dst = hq / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+    if (ROOT / ".venv").is_dir():
+        (hq / ".venv").symlink_to((ROOT / ".venv").resolve())  # Python's packages only, read as they are
+    ws = hq / "workspace"
     shutil.copytree(ROOT / "template", ws, ignore=shutil.ignore_patterns(".git"))
     mine = ws / "HQ" / "extensions" / e["id"]
     shutil.copytree(e["dir"], mine, ignore=shutil.ignore_patterns(".git", "__pycache__"))
-    return ws, mine
+    return hq, ws, mine
+
+
+def _flow_env(t: Path, hq: Path, ws: Path, mine: Path) -> dict:
+    """Nothing of the real HQ's own settings (no HQ_ variable at all, HQ_REAL_* included), and every place HQ or the person's
+    computer keeps things inside the throwaway folder: HQ's memory (HQ_SUPPORT), the home folder, the status files. A flow
+    never texts anyone."""
+    home = t / "home"
+    for sub in ("tmp", "status", "support", "home", "home/.local/state", "home/.config"):
+        (t / sub).mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_", "XDG_"))}
+    env.update({"HOME": str(home), "XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config"),
+                "HQ_ROOT": str(hq), "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_EXTENSION": str(mine),
+                "HQ_EXTENSIONS_FOLDER": str(ws / "HQ" / "extensions"), "HQ_ROADMAP": str(ws / "HQ" / "roadmap.md"),
+                "HQ_SUPPORT": str(t / "support"), "HQ_STATUS_DIR": str(t / "status"),
+                "HQ_EXTENSIONS_STATE": str(t / "state.json"), "HQ_EXTENSIONS_CHECK": str(t / "check.json"),
+                "HQ_UNDER_TEST": "1", "HQ_FLOW_TMP": str(t / "tmp"), "HQ_TEXT": f"{sys.executable} -c pass"})
+    return env
+
+
+def _end_group(pid: int) -> None:
+    """Gap 3: the flow ran in a process group of its own; whatever of it is still there (a background child, a hung step) goes."""
+    import signal
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
 
 
 def flows(only: str | None = None) -> list[dict]:
-    """Every extension's own test flows that's on (or only that one), each run on a throwaway workspace: one result each,
-    {"ext", "name", "flow", "ok", "exit", "said"}. A flow passes when it exits 0. Used by the nightly run (happy flow 472)
-    and by `extensions.py flows`."""
+    """Every extension's own test flows that's on (or only that one), each run from a throwaway copy of HQ (_flow_hq) in a
+    process group of its own, at most FLOW_MAX seconds: one result each, {"ext", "name", "flow", "ok", "exit", "said"}. A
+    flow passes when it exits 0. Used by the nightly run (happy flow 472) and by `extensions.py flows`."""
     import tempfile
-    out = []
+    out, files = [], None
     for e in on():
         if only and e["id"] != only:
             continue
         for path in e["flows"]:
             rel = os.path.relpath(path, e["dir"])
+            files = files if files is not None else _hq_files()
             with tempfile.TemporaryDirectory(prefix=f"hq-ext-{e['id']}-") as t:
-                ws, mine = _flow_workspace(e, Path(t))
-                # Nothing of the real HQ's own settings comes along (but the markers that keep a test off real files); every
-                # place HQ writes to is inside the throwaway folder, and a flow never texts anyone.
-                env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_") or k.startswith("HQ_REAL_") or k == "HQ_NO_WALL"}
-                env.update({"HQ_ROOT": str(ROOT), "HQ_WORKSPACE": str(ws), "HQ_FOLDER": str(ws), "HQ_EXTENSION": str(mine),
-                            "HQ_EXTENSIONS_FOLDER": str(ws / "HQ" / "extensions"), "HQ_ROADMAP": str(ws / "HQ" / "roadmap.md"),
-                            "HQ_STATUS_DIR": str(Path(t) / "status"), "HQ_EXTENSIONS_STATE": str(Path(t) / "state.json"),
-                            "HQ_EXTENSIONS_CHECK": str(Path(t) / "check.json"), "HQ_UNDER_TEST": "1",
-                            "HQ_FLOW_TMP": str(Path(t) / "tmp"), "HQ_TEXT": f"{sys.executable} -c pass"})
-                for sub in ("tmp", "status"):
-                    (Path(t) / sub).mkdir()
+                t = Path(t)
+                hq, ws, mine = _flow_hq(e, t, files)
+                log = t / "out.log"
+                code = None
                 try:
-                    r = subprocess.run(_cmd(str(mine / rel)), cwd=str(mine), env=env, capture_output=True, text=True, timeout=FLOW_MAX)
-                    code, said = r.returncode, (r.stdout + r.stderr).strip()
-                except subprocess.TimeoutExpired:
-                    code, said = 124, f"ran over {FLOW_MAX} seconds and was stopped"
+                    with open(log, "w") as f:
+                        p = subprocess.Popen(_cmd(str(mine / rel)), cwd=str(mine), env=_flow_env(t, hq, ws, mine), stdin=subprocess.DEVNULL,
+                                             stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
+                    try:
+                        code = p.wait(timeout=FLOW_MAX)
+                    except subprocess.TimeoutExpired:
+                        _end_group(p.pid)
+                        p.wait()
+                        code = 124
+                    _end_group(p.pid)  # a background child it left behind goes too
+                    said = log.read_text(errors="replace").strip()
+                    if code == 124:
+                        said = f"ran over {FLOW_MAX} seconds and was stopped"
                 except OSError as x:
                     code, said = 126, f"couldn't start: {x}"
             last = " ".join(said.splitlines()[-1:])[:300]

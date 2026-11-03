@@ -26,7 +26,7 @@ Run the hourly mail check for the user's private workspace: {WORKSPACE}
    Only these label changes, only for mail that fits a rule, never any other label (no read marks, no stars, no trash, no spam). When unsure whether a mail fits, leave it. A sorted mail is still judged for inbox.md as usual; when it goes there, add `(sorted into <label>)` to its line.
 6b. Their own extensions (H235): steps the user added to the mail check themselves. HQ's steps above and the hard limits below always come first; an extension's step never sends, drafts, labels or changes mail, and changes no file but inbox.md.
 {EXTENSIONS}
-   With no extension steps, skip this. They run on a quiet hour too (step 3 says how), and an extension's step never moves the marker: that's Gmail's.
+   With no extension steps, skip this.
 7. If inbox.md changed, commit and push it with exactly this one Bash command, run from the folder itself, nothing added before or after it (no `cd`, no `&&`), so it matches the pre-approved permission and nobody gets asked:
    `sh .claude/mail-commit.sh`
    Never run git commands yourself. If the script fails, leave the change in the file; the next chat will commit it.

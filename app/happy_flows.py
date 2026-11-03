@@ -7664,12 +7664,19 @@ __EXTRA__</script>""")
             plain = base / "no-mail-step"
             (plain / "plain").mkdir(parents=True)
             (plain / "plain" / "extension.json").write_text(json.dumps({"name": "Plain", "what": "Adds no mail step."}))
+            need("These steps run on a quiet hour too" in tick.mail_instructions(), "with a mail step, 6b doesn't say it runs on a quiet hour")
+            # Without one, the run gets exactly what it got before: the whole built text, byte for byte, the same as dev's
+            # instructions built the same way.
+            r = sp.run(["git", "-C", str(ROOT), "show", "refs/remotes/origin/dev:routine/mail-check.md"], capture_output=True, text=True)
+            need(r.returncode == 0 and r.stdout, f"dev's mail check can't be read to compare with: {r.stderr[-200:]}")
             for f_ in (plain, base / "none-at-all"):
                 os.environ["HQ_EXTENSIONS_FOLDER"] = str(f_)
-                text = tick.mail_instructions()
+                text, dev = tick.mail_instructions(), tick.mail_instructions(r.stdout)
                 s3, s4 = text.index("\n3. "), text.index("\n4. ")
                 need(ex.QUIET_STOP in text[s3:s4] and ex.QUIET_EXTENSIONS not in text and "(no extensions add steps)" in text,
                      f"a quiet hour without an extension's mail step doesn't stop as before ({f_.name})")
+                need(text == dev, lambda: "without an extension's mail step the instructions differ from dev's: " + next(
+                    (f"{a!r} / dev {b!r}" for a, b in zip(text.splitlines(), dev.splitlines()) if a != b), "in length"))
             os.environ["HQ_EXTENSIONS_FOLDER"] = str(ext)
             # A script: only the declared ones; on a call, "ask" asks.
             r = sp.run([sys.executable, str(APP / "extensions.py"), "run", "demo-mail", "read", "a", "b"], capture_output=True, text=True, env=os.environ)
@@ -20443,6 +20450,49 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             r = sp.run([sys.executable, str(APP / "extensions.py"), "flows", "gone"], capture_output=True, text=True, env=os.environ, timeout=60)
             need(r.returncode == 0 and "No extension has flows of its own" in r.stdout, f"only one extension's flows: {r.stdout}")
             need("its own flows: flows/a_pass.py, flows/b_fail.sh" in ex.summary(), "the list doesn't show an extension's flows")
+            # Kept away from real data: a probe aims at the real workspace, the home folder and HQ's memory and reaches none of
+            # them; no HQ_REAL_ setting comes along; a flow that hangs, and one that leaves a child behind, leave nothing running.
+            tag = f"h235probe{os.getpid()}"
+            g = ext / "demo-guard"
+            (g / "flows").mkdir(parents=True)
+            (g / "extension.json").write_text(json.dumps({"name": "Demo Guard", "what": "Made-up probes for flow 471.", "flows": "flows"}))
+            (g / "flows" / "probe.py").write_text(
+                "import os, sys, tempfile\n"
+                "root = os.environ['HQ_ROOT']; tag = %r\n"
+                "assert not [k for k in os.environ if k.startswith('HQ_REAL_')], 'a real setting came along'\n"
+                "assert os.path.realpath(root).startswith(os.path.realpath(tempfile.gettempdir())), root\n"
+                "assert os.path.realpath(os.path.join(root, 'workspace')) == os.path.join(os.path.realpath(root), 'workspace'), 'the workspace is a link'\n"
+                "sys.path.insert(0, os.path.join(root, 'routine')); import hqpaths\n"
+                "for d in (os.path.join(root, 'workspace'), os.path.expanduser('~'), hqpaths.support_dir(), hqpaths.real_support()):\n"
+                "    os.makedirs(d, exist_ok=True); open(os.path.join(d, tag), 'w').write('x')\n"
+                "print('wrote into the copy only')\n" % tag)
+            (g / "flows" / "bg.sh").write_text("sleep 333.49 &\necho 'left a child'\nexit 0\n")
+            (g / "flows" / "hang.sh").write_text("sleep 333.47 &\nsleep 333.48\n")
+            sys.path.insert(0, str(ROOT / "routine"))
+            import hqpaths as _hq
+            real = [ROOT / "workspace", Path(config.FOLDER), Path.home(), Path(_hq.support_dir()), Path(_hq.real_support())]
+            keep_max = ex.FLOW_MAX
+            ex.FLOW_MAX = 4
+            try:
+                res = {r["flow"]: r for r in await asyncio.to_thread(ex.flows, "demo-guard")}
+            finally:
+                ex.FLOW_MAX = keep_max
+            need(res["flows/probe.py"]["ok"], f"the probe didn't run clean in its copy: {res['flows/probe.py']}")
+            hit = [str(d) for d in real if (d / tag).exists()]
+            for d in hit:
+                (Path(d) / tag).unlink()
+            need(not hit, f"an extension's flow wrote into the real {hit}")
+            need(res["flows/bg.sh"]["ok"] and not res["flows/hang.sh"]["ok"] and res["flows/hang.sh"]["exit"] == 124
+                 and "ran over 4 seconds" in res["flows/hang.sh"]["said"], f"the hanging flow wasn't stopped: {res['flows/hang.sh']}")
+            await asyncio.sleep(0.5)
+            left = sp.run(["pgrep", "-f", "sleep 333.4[789]"], capture_output=True, text=True).stdout.split()
+            for pid in left:  # only this flow's own made-up sleeps, by their exact pid
+                try:
+                    os.kill(int(pid), 9)
+                except OSError:
+                    pass
+            need(not left, f"a flow left something running: {left}")
+            _sh.rmtree(g)
             # The nightly's flow, on this folder: failed, named as the extension's, never HQ's; green once its flows are.
             try:
                 await self.flow472()
@@ -20458,7 +20508,8 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             need(passed == "1 flow of 1 extension passes", f"the nightly's flow once the extension's flows pass: {passed}")
             need(not FLOWS[472][1] and str(472) not in __import__("flowsets").MAC_ONLY.split(","), "the nightly set doesn't run the extensions' flows")
             doc = (ROOT / "EXTENSIONS.md").read_text()
-            need("**flows**" in doc and "happy flow 472" in doc and "extensions.py flows" in doc and "throwaway workspace" in doc,
+            need("**flows**" in doc and "happy flow 472" in doc and "extensions.py flows" in doc and "throwaway copy of HQ" in doc
+                 and "process group of its own" in doc and "What isn't stopped" in doc,
                  "EXTENSIONS.md doesn't say how an extension's flows work")
         finally:
             for k, v in keep.items():
