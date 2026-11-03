@@ -6,7 +6,7 @@ are on her desk and she opens the one she needs. Before this, a call or a text s
 here, every minute, without Claude, from the files; it's 15 to 30 KB: today and tomorrow in the calendar, the
 very important mail, the open commitments and the last hours' notes, the open to-do items one line each, the open
 nudges, the game's score, the map's status lines; for a build call the planning's status block, the open jobs and
-the open items. Written to HQ's `.status/briefing-<context>.md` (day, coach, build), one per role, never by hand,
+the open items, and the index of the walkthrough on keeping HQ running (app/maintaining.py). Written to HQ's `.status/briefing-<context>.md` (day, coach, build), one per role, never by hand,
 never committed. The rest of the files is the library: `briefing.py layer N` prints one layer of the map,
 `todo.py show WORDS` one item with its details, `sprint.py show LABEL` one planning row.
 
@@ -233,6 +233,15 @@ def planning_part(folder: Path | None = None) -> str:
         return f"The planning couldn't be read: {e!r}"
 
 
+def maintain_part() -> str:
+    """For a build start: the index of the walkthrough on keeping HQ running (app/maintaining.py), a section read when needed."""
+    try:
+        import maintaining
+        return maintaining.index()
+    except Exception:
+        return ""
+
+
 def situation_part(folder: Path | None = None) -> str:
     """F106: a lookup now: a life file isn't loaded whole at a start."""
     text = _read("current-situation.md", folder)
@@ -248,6 +257,7 @@ def build(context: str = "day", now: dt.datetime | None = None, folder: Path | N
     parts = [head]
     if context == "build":
         parts.append(planning_part(folder))
+        parts.append(maintain_part())
     else:
         parts += [calendar_part(now, folder), mail_part(folder), commitments_part(now, folder), todo_part(folder, short=context == "coach"),
                   nudges_part(), games_part()]
