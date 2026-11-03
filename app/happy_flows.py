@@ -26233,6 +26233,178 @@ print("OK")
                 "step 2 it carries on at step 3 in its own chat and in a fresh one, 1 and 2 untouched; changed steps keep "
                 "the done ones; a crash rerun carries on at step 3; the held minutes don't count")
 
+    def _f79(self, tag, script, hist=None, rate=None):
+        """F79: a made-up planning (_sprint_env), its estimates' folder holding made-up finished jobs (and a made-up rate),
+        no looks, and a script run there; its last line as JSON."""
+        import subprocess as sp
+        rm, env = self._sprint_env(tag)
+        env.update(HQ_LOOK="0", HQ_ROLE_HERE="1")
+        env.pop("HQ_LOOK_FAKE", None)
+        d = Path(str(rm)[:-3] + "-estimates")
+        d.mkdir(parents=True, exist_ok=True)
+        if hist is not None:
+            (d / "job-estimates-history.jsonl").write_text("".join(json.dumps(h) + "\n" for h in hist))
+        if rate is not None:
+            (d / "usage-rate.json").write_text(json.dumps(rate))
+        head = ("import json, os, sys, time\nsys.path.insert(0, 'routine')\nimport estimate as E, sprint, usagecost as U, jobs as q\n"
+                "def row(label):\n    return next(r for r in sprint.plan()['rows'] if r['label'] == label)\n")
+        r = sp.run(["python3", "-c", head + script], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=240)
+        need(r.returncode == 0, f"F79: the check didn't run: {r.stderr[-1200:]}")
+        return json.loads(r.stdout.strip().split("\n")[-1])
+
+    @staticmethod
+    def _f79_jobs(acts, kinds=("build", "bigbuild"), start=800, guess=None, tokens=None):
+        """F79: made-up finished jobs, oldest first: each took acts[i] minutes, measured; guess: the call's guess as a
+        factor of the real time; tokens: each one's input tokens."""
+        out = []
+        for i, a in enumerate(acts):
+            h = {"n": start + i, "kind": kinds[i % len(kinds)], "est": 5, "actual": a, "done": 1790000000 + i * 600, "how": "seen",
+                 "about": f"h9{i:02d} on the hq roadmap: a made-up change number {i}"}
+            if guess:
+                h["guess_call"] = round(guess * a)
+            if tokens:
+                h["tokens"] = {"opus": [tokens[i], 0, 0, 0]}
+            out.append(h)
+        return out
+
+    async def flow410(self) -> str:
+        """F79, no Claude: the estimate is built from what jobs like it really took. Made-up finished builds, small and
+        big, that took 10 to 28 minutes, each with the call's guess at twice its time, and one that ran long through its
+        own mistake (400 minutes). A planning row, a waiting job and a planned item for a build each get the group's
+        middle (19, small and big learning together, the mistake left out), a latest end above it and at most six times
+        it, and say they rest on 10 jobs like it. A call's guess of 56 moves the waiting job by its place among the
+        group's guesses (to 25), never by its size, and says the computed one (19). The list and the status page say
+        how sure it is. Before F79 none of them said it."""
+        hist = self._f79_jobs(list(range(10, 30, 2)), guess=2)
+        hist.append({"n": 899, "kind": "build", "est": 5, "actual": 400, "done": 1790009000, "how": "seen",
+                     "mistake": {"what": "a made-up mistake", "at": 1790009000}, "about": "h999 on the hq roadmap: a long one"})
+        o = self._f79("F79a", """
+import subprocess
+n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Build a small change to the status page button, flow 410', '--guess', '56'],
+                       capture_output=True, text=True).stdout.split()[1])
+i = int(subprocess.run(['python3', 'routine/schedule.py', 'add', 'tomorrow 10:00', 'Build a small change to the calendar colours, flow 410'],
+                       capture_output=True, text=True).stdout.split()[1])
+p = E.plan()
+out = {'row': row('H9001'), 'job': p['jobs'][str(n)], 'item': p['items'][str(i)], 'words': E.words(n, p), 'item_words': E.item_words(i, p),
+       'row_words': sprint.row_words(row('H9001'))}
+print(json.dumps(out))
+""", hist)
+        for k in ("row", "item"):
+            x = o[k]
+            need(x.get("sure") == {"ok": True, "jobs": 10, "group": "build"} and x["est"] == 19 and x["est"] < x["latest"] <= 6 * x["est"],
+                 f"F79: the {k} isn't built from the 10 builds like it (19, a latest end above it, resting on 10): {x}")
+        j = o["job"]
+        need(j.get("sure", {}).get("ok") and j["est"] == 25 and j.get("computed") == 19 and j.get("guess_used") == "guess_call"
+             and j["est"] < j["latest"] <= 6 * j["est"], f"F79: the call's guess doesn't move the job by its place among the guesses: {j}")
+        for k in ("words", "item_words", "row_words"):
+            need("from 10 finished jobs like it" in o[k] and "at the latest" in o[k], f"F79: the {k} don't say how sure: {o[k]}")
+        page = (ROOT / "status" / "index.html").read_text()
+        need("sureWords(" in page and "too few finished jobs like it" in page and "latestWords(x)" in page,
+             "F79: the status page doesn't say how sure an estimate is, or a planning row's latest end")
+        return f"a row, a job and an item from the 10 builds like it: about {o['row']['est']}, at the latest {o['row']['latest']}; the call's 56 moves the job to {j['est']}"
+
+    async def flow411(self) -> str:
+        """F79, no Claude: with too few measured jobs like it an estimate says so instead of passing a guess off as
+        measured, and still has a number and a latest end, never none. Three made-up research jobs: a research job says
+        too few finished jobs like it (3), keeps today's number (estimate.py's, under 3 of a kind the last jobs of any
+        kind) and a latest end above it. With no finished jobs at all: 15 minutes, a latest end, and it says no
+        finished jobs like it yet. The planning row the same."""
+        hist = self._f79_jobs([10, 12, 14], kinds=("research",))
+        script = """
+import subprocess
+n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', 'Read the week 7 transcripts and write up what they say. Research only, flow 411'],
+                       capture_output=True, text=True).stdout.split()[1])
+p = E.plan()
+d = E.job_estimate(n, 'Read the week 7 transcripts and write up what they say. Research only, flow 411')
+print(json.dumps({'job': p['jobs'][str(n)], 'today': d['est'], 'words': E.words(n, p), 'row': row('H9001'), 'row_words': sprint.row_words(row('H9001'))}))
+"""
+        o = self._f79("F79b", script, hist)
+        j = o["job"]
+        need(j.get("sure") == {"ok": False, "jobs": 3, "group": "research"} and j["est"] == o["today"] and j["latest"] > j["est"],
+             f"F79: a job with 3 like it doesn't say too few, or lost today's number or its latest end: {j} (today {o['today']})")
+        need("too few finished jobs like it (3), so a rough number" in o["words"], f"F79: the words don't say too few: {o['words']}")
+        need(o["row"].get("sure", {}).get("ok") is False and o["row"]["latest"] > o["row"]["est"], f"F79: the planning row with too few: {o['row']}")
+        o = self._f79("F79c", script, [])
+        j = o["job"]
+        need(j.get("sure") == {"ok": False, "jobs": 0, "group": "research"} and j["est"] == 15 and j["latest"] > 15,
+             f"F79: with no finished jobs there's no number or no latest end: {j}")
+        need("no finished jobs like it yet" in o["words"] and "no finished jobs like it yet" in o["row_words"],
+             f"F79: with nothing finished it doesn't say so: {o['words']} / {o['row_words']}")
+        return "3 like it: today's number, its latest end, and too few said; none at all: 15 minutes, a latest end, said"
+
+    async def flow412(self) -> str:
+        """F79, no Claude: the usage is built from what jobs like it really used, at the plan's own rate (F107), and the
+        gate holds what the page and the planning say. Six made-up builds with their own tokens (100k to 600k) and a
+        made-up rate on Max 5x (100k a 5-hour point, 700k a weekly one): a build's usage is the middle job's (3.5 and
+        0.5), its range the tenth to the ninetieth (1.0 to 6.0 on the 5-hour), its latest the top. The planning row, the
+        waiting job and the gate (usagecost.job_cost by the latest end) say the same. On Ultra (twice Max 5x) the same
+        tokens are half the points. One more finished build that used 2 million tokens and took 60 minutes moves the
+        next estimate up: it gets better as jobs finish."""
+        hist = self._f79_jobs([10, 12, 14, 16, 18, 20], kinds=("build",), tokens=[100000 * k for k in range(1, 7)])
+        rate = {"plans": {"Max 5x": {"weights": {"in": 1.0, "out": 5.0, "cr": 0.1, "cw": 1.6}, "models": {"opus": 1.0, "other": 1.0},
+                                     "rate": {"five": 100000, "weekly": 700000}, "at": 1790000000, "plan": "Max 5x"}}}
+        o = self._f79("F79d", """
+import subprocess
+t = 'Build a small change to the status page button, flow 412'
+n = int(subprocess.run(['python3', 'routine/jobs.py', 'add', t], capture_output=True, text=True).stdout.split()[1])
+p = E.plan()
+gm, gc = U.job_cost(n, t, latest=True)
+out = {'row': row('H9001'), 'job': p['jobs'][str(n)], 'gate': [gm, {k: gc[k] for k in ('five', 'weekly')}]}
+U.set_plan('Ultra', by='flow 412')
+out['ultra'] = row('H9001')
+U.set_plan('Max 5x', by='flow 412')
+h = {'n': 950, 'kind': 'build', 'est': 5, 'actual': 60, 'done': 1790100000, 'how': 'seen', 'about': 'h950 on the hq roadmap: a big one',
+     'tokens': {'opus': [2000000, 0, 0, 0]}}
+open(E.HISTORY, 'a').write(json.dumps(h) + '\\n')
+out['after'] = row('H9001')
+print(json.dumps(out))
+""", hist, rate)
+        x = o["row"]
+        need(x.get("cost_how") == "measured" and x["cost"] == {"five": 3.5, "weekly": 0.5} and x.get("cost_latest") == {"five": 6.0, "weekly": 0.9}
+             and x.get("cost_range", {}).get("five") == [1.0, 6.0], f"F79: the row's usage isn't the middle job's, with its range and top: {x}")
+        j = o["job"]
+        need(j.get("cost") == x["cost"] and j.get("cost_latest") == x["cost_latest"] and j["latest"] == x["latest"],
+             f"F79: the waiting job and the planning row say different things: {j} / {x}")
+        need(o["gate"] == [j["latest"], j["cost_latest"]], f"F79: the gate doesn't hold what the page says: {o['gate']} / {j}")
+        u = o["ultra"]
+        need(u["cost"] == {"five": 1.8, "weekly": 0.2} and u["est"] == x["est"], f"F79: on Ultra the same tokens aren't half the points: {u}")
+        a = o["after"]
+        need(a["est"] > x["est"] and a["sure"]["jobs"] == 7 and a["cost"]["five"] > x["cost"]["five"],
+             f"F79: a finished job doesn't move the next estimate: {x['est']} -> {a['est']}, {x['cost']} -> {a['cost']}")
+        return f"usage {x['cost']} with its range and top, the same on the row, the job and the gate; half on Ultra; {x['est']} -> {a['est']} min after one more"
+
+    async def flow413(self) -> str:
+        """F79, no Claude: the live check holds a job to the latest end it was given when it started. Twelve made-up
+        builds: job 960 starts (its measured estimate kept), writes its own guess (made again with it), and finishes in
+        20 minutes; its finished line carries the latest it was given then, how sure it was, and the measured likely
+        time. The replay (measured.py replay) runs on the made-up records and says, at the start and on the planning,
+        how many landed between half and double and by their latest end."""
+        hist = self._f79_jobs([10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32], guess=3)
+        for h in hist:
+            h["guess"] = h.pop("guess_call")
+        o = self._f79("F79e", """
+import subprocess
+t = 'Build a small change to the status page button, flow 413'
+E.on_add(960, t)
+E.on_start(960, t)
+m0 = dict(E._load_state()['960'].get('m') or {})
+E.on_guess(960, 90, t)
+m1 = dict(E._load_state()['960'].get('m') or {})
+st = E._load_state()['960']['started']
+rec = E.on_done(960, t, at=st + 20 * 60)
+line = [h for h in E.history() if h.get('n') == 960][-1]
+r = subprocess.run(['python3', 'routine/measured.py', 'replay'], capture_output=True, text=True)
+print(json.dumps({'m0': m0, 'm1': m1, 'line': {k: line.get(k) for k in ('latest', 'm_est', 'sure', 'actual')}, 'replay': r.stdout, 'rc': r.returncode}))
+""", hist)
+        m0, m1, line = o["m0"], o["m1"], o["line"]
+        need(m0.get("sure", {}).get("ok") and m0.get("est") and m0["latest"] > m0["est"], f"F79: no measured estimate kept at the start: {m0}")
+        need(m1["est"] > m0["est"] and m1.get("guess_used") == "guess", f"F79: the team's guess at the start isn't in the estimate it's held to: {m0} -> {m1}")
+        need(line["latest"] == m1["latest"] and line["m_est"] == m1["est"] and (line.get("sure") or {}).get("ok") and line["actual"] == 20,
+             f"F79: the finished line doesn't carry the latest it was given at the start: {line} / {m1}")
+        need(o["rc"] == 0 and "At the start:" in o["replay"] and "by their latest end" in o["replay"] and "When added or on the planning:" in o["replay"],
+             f"F79: the replay doesn't run or say its shares: {o['replay']}")
+        return f"started at {m0['est']} (latest {m0['latest']}), its guess made it {m1['est']} (latest {m1['latest']}), the line keeps that latest; the replay runs"
+
     async def flow173(self) -> str:
         """F66, no Claude: the estimate counts the steps the work names, each with its own known time, and every
         estimate is a range. On 27 and 28 October the daily release that had to run the full test set first was
@@ -35010,6 +35182,10 @@ FLOWS = {
     381: ("F113: later in the week the reserve still keeps his room: two days in it climbs out of its least, mid-week all 15 points are kept and the agents stop first", False, "flow381"),
     382: ("F113: a plan with a 5-hour window at minute 10: the team's line is 10 and the agents' 5, a small job fits, a big one waits in the window, the line never under 10", False, "flow382"),
     383: ("F113: a job running across a 5-hour reset isn't held for it: not on the number from before the reset, not on the fresh 2%; at its own line it is", False, "flow383"),
+    410: ("F79: an estimate built from what jobs like it really took: the group's middle, small and big builds together, a mistake left out, a guess by its place among the guesses, a latest end, and how many jobs like it it rests on, on the planning, a job and an item", False, "flow410"),
+    411: ("F79: too few jobs like it is said, never passed off as measured: today's number and a latest end stay, and with nothing finished 15 minutes, said", False, "flow411"),
+    412: ("F79: the usage of a job like it at the plan's own rate, its range and its top; the planning, the job and the gate say the same; half on Ultra; one more finished job moves the next", False, "flow412"),
+    413: ("F79: a job is held to the latest end it was given at its start, its own guess in it; its finished line keeps it; the replay runs on the record", False, "flow413"),
     231: ("F103: the record: an id given when the item is written, carried by the job, its QA, the release, a text and an incident; follow prints them all; the job's text names no row", False, "flow231"),
     232: ("F103: the ledger: a call with a correction adds one line with the agent and his words, from the program or the wrap-up, a quote that isn't his is refused, praise isn't counted, the file can't be written from a call, a refused mail is a line", False, "flow232"),
     233: ("F103: the score per agent and per hand-off from the ledger alone; a QA fail and a bug after a pass; the week's score with the switch off; turns, minutes and what each estimate stands on", False, "flow233"),

@@ -1501,6 +1501,7 @@ def on_start(n, text=""):
     except Exception:
         pass
     e["started"] = int(time.time())
+    _measured_start(e, text)
     st[str(n)] = e
     _save_state(st)
     try:  # H172: its usage counted from now, next to its time
@@ -1508,6 +1509,22 @@ def on_start(n, text=""):
         usagecost.start(n, text)
     except Exception as ex:
         print(f"(the usage count couldn't start: {ex!r})", file=sys.stderr)
+
+
+def _measured_start(e, text):
+    """F79: the estimate a job starts with, built from what jobs like it really took (measured.py), with the guesses it
+    has by then: kept as e["m"] {"est", "latest", "sure", "based", "computed", "guess_used"}. Its latest goes on its
+    finished line, so the live check holds it to the latest it was given when it started."""
+    try:
+        import measured
+        hist = all_history()
+        g, _, gf = pick_guess(e, guess_fits(hist))
+        est = with_guess(e.get("est") or DEFAULT, g, gf)
+        x = measured.apply({"est": est, "latest": latest_of(est, e.get("kind"), hist)}, e.get("kind"), _about(text), e,
+                           hist, "start")
+        e["m"] = {k: x[k] for k in ("est", "latest", "sure", "based", "computed", "guess_used") if k in x}
+    except Exception as ex:
+        print(f"(F79: the measured estimate couldn't be made at the start: {ex!r})", file=sys.stderr)
 
 
 def on_guess(n, minutes, text=""):
@@ -1520,6 +1537,8 @@ def on_guess(n, minutes, text=""):
         st = _load_state()
     e = st[str(n)]
     e["guess"], e["guess_at"] = int(minutes), int(time.time())
+    if e.get("started"):
+        _measured_start(e, text)  # F79: its own guess at its start is in the latest it's held to
     st[str(n)] = e
     _save_state(st)
     return e
@@ -1985,6 +2004,9 @@ def on_done(n, text="", started_hhmm=None, at=None):
         rec["latest"] = latest_of(rec.get("with_guess") or rec["est"], rec["kind"])
     except Exception:
         pass
+    if isinstance(e.get("m"), dict) and e["m"].get("latest"):  # F79: what it was given when it started, measured
+        rec["m_est"], rec["latest"] = e["m"]["est"], e["m"]["latest"]
+        rec["sure"] = e["m"].get("sure")
     try:  # H172: its real usage next to its time, and the usage it was estimated to take
         import usagecost
         u = usagecost.finish(n, now)
@@ -2242,12 +2264,17 @@ def plan(now=None):
         computed = est
         guess, gkey, gf = pick_guess(e, gfits)  # H168, H190: the team's, else the call's, else the look's, once it has a record
         est = with_guess(est, guess, gf)
+        m79 = e.get("m") if isinstance(e.get("m"), dict) and e["m"].get("est") else None
+        if m79:  # F79: the estimate it started with, measured, and the latest end it's held to
+            est = m79["est"]
+            if (m79.get("sure") or {}).get("ok"):
+                computed, gkey = m79.get("computed", est), m79.get("guess_used") or gkey
         # H286: a job that had to start fixing redid its own estimate (its line on the planning says so, also on the
         # other computer); that one counts from then on, so the end time moved once, with why.
         redone = j.get("redone") or ({"est": e["redone"]["est"], "was": e["redone"].get("was"), "why": e["redone"].get("why", "")}
                                      if isinstance(e.get("redone"), dict) else None)
         if redone and redone.get("est"):
-            est, guess = int(redone["est"]), None
+            est, guess, m79 = int(redone["est"]), None, None
         samples = _samples() if samples is None else samples
         seen = _minutes_seen(j["n"], samples)
         m = re.match(r"running since (\d\d:\d\d)", j["state"])
@@ -2260,7 +2287,7 @@ def plan(now=None):
         nxt = left if left > 0 else 2  # running longer than estimated: a couple of minutes more, at least
         cursor += nxt * 60
         left_total += nxt
-        lat = latest_of(est, kind_for(j["text"], e.get("kind")), hist)  # F66
+        lat = m79["latest"] if m79 else latest_of(est, kind_for(j["text"], e.get("kind")), hist)  # F66, F79
         late_total += max(lat - done_min, nxt)
         parts["running_min"] += nxt
         parts["guess_in"] |= bool(guess) and est != computed
@@ -2268,6 +2295,10 @@ def plan(now=None):
                                     "left": left, "over": over, "eta": None if waits else int(cursor),
                                     "latest": lat, "eta_latest": None if waits else int(now + late_total * 60)}
         out["jobs"][str(j["n"])].update(guess_detail(e))  # H168, H190
+        if m79:  # F79
+            out["jobs"][str(j["n"])]["sure"] = m79.get("sure")
+            if (m79.get("sure") or {}).get("ok"):
+                out["jobs"][str(j["n"])]["based"] = m79.get("based")
         if redone and redone.get("est"):
             out["jobs"][str(j["n"])]["redone"] = {"est": int(redone["est"]), "was": redone.get("was"), "why": redone.get("why", ""),
                                                   "at": redone.get("at")}
@@ -2281,6 +2312,8 @@ def plan(now=None):
             used = U._so_far(rec) if rec.get("seg") else {}
             out["jobs"][str(j["n"])]["cost"] = {k: c.get(k, 0) for k in U.KEYS}
             out["jobs"][str(j["n"])]["cost_latest"] = U.at_latest(c, est, lat)  # F66
+            if c.get("how") == "measured" and all(c.get(k + "_range") for k in U.KEYS):  # F79: the top of its own range
+                out["jobs"][str(j["n"])]["cost_latest"] = {k: c[k + "_range"][1] for k in U.KEYS}
             for k in ("five", "weekly"):
                 parts[k + "_latest"] = parts.get(k + "_latest", 0.0) + max(0.0, out["jobs"][str(j["n"])]["cost_latest"][k] - round(used.get(k, 0), 1)) if used else parts.get(k + "_latest", 0.0) + out["jobs"][str(j["n"])]["cost_latest"][k]
             if used:
@@ -2299,6 +2332,14 @@ def plan(now=None):
         ke = known(j["n"])
         guess, gkey, gf = pick_guess(ke, gfits)  # H190: a waiting job's guesses are in its estimate from the start
         computed, est = est, with_guess(est, guess, gf)
+        mx = {}
+        try:  # F79: built from what jobs like it really took, with its range and how sure it is
+            import measured
+            mx = measured.apply({"est": est, "latest": latest_of(est, kind, hist)}, kind, _about(j["text"]), ke, hist)
+            if mx["sure"]["ok"]:
+                est, computed, gkey = mx["est"], mx.get("computed", mx["est"]), mx.get("guess_used") or gkey
+        except Exception as ex:
+            print(f"(F79: the measured estimate couldn't be made for job {j['n']}: {ex!r})", file=sys.stderr)
         try:  # F78: a held job that carries on in its own chat counts what's left of it, as the gate does
             samples = _samples() if samples is None else samples
             hl = held_left(j, hist, samples)
@@ -2319,6 +2360,15 @@ def plan(now=None):
         cost = U.cost_for(est, j["text"], kind, hist) if U else None
         lat = latest_of(est, kind, hist)  # F66: whether it may start goes by its latest end
         late = U.at_latest(cost, est, lat) if cost else None
+        crange = None
+        if mx and not hl:  # F79: its latest end and its usage, measured
+            lat = mx["latest"]
+            mc, ml = measured.cost_of(kind, hist, keep=cost) if cost else (None, None)
+            if mc:
+                cost, late = {**mc, "how": "measured"}, ml
+                crange = {k: mc[k + "_range"] for k in U.KEYS if mc.get(k + "_range")}
+            elif cost:
+                late = U.at_latest(cost, est, lat)
         if hl and cost:  # F78: what's left of it, at least a picked-up turn
             cost = {**cost, **hl["cost"], "how": "left"}
             lat, late = hl["latest"], dict(hl["cost_latest"])
@@ -2342,6 +2392,12 @@ def plan(now=None):
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
                                     "waits": "usage" if (waits or start) and on else ("off" if not on else None),
                                     "latest": lat, **guess_detail(ke)}  # H190
+        if mx:  # F79: how sure, and what it rests on
+            out["jobs"][str(j["n"])]["sure"] = mx["sure"]
+            if mx["sure"]["ok"]:
+                out["jobs"][str(j["n"])]["based"] = mx["based"]
+            if crange:
+                out["jobs"][str(j["n"])]["cost_range"] = crange
         if hl:  # F78: the status page and the list say it's what's left of a held job
             out["jobs"][str(j["n"])]["held"] = {k: hl[k] for k in ("of", "of_latest", "so_far", "used", "floor",
                                                                    "floor_how", "floor_cost")}
@@ -2383,7 +2439,7 @@ def plan(now=None):
     out["paused"] = q.is_paused()  # F100
     out["five_on"] = _five_on()  # F107
     for k, e in out["jobs"].items():  # F103: each estimate says how many jobs it's based on
-        if not e.get("finished") and (st.get(k) or {}).get("based") is not None:
+        if not e.get("finished") and (st.get(k) or {}).get("based") is not None and not (e.get("sure") or {}).get("ok"):
             e["based"] = st[k]["based"]
     return out
 
@@ -2498,6 +2554,14 @@ def _plan_items(cursor, waits, on, hist, run, run_end=None, proj=None, U=None, f
         cost = U.cost_for(est, i["text"], kind, hist) if U else None
         if cost:
             e["cost"], e["cost_how"] = {k: cost[k] for k in U.KEYS}, cost["how"]
+        try:  # F79: built from what jobs like it really took, with its range and how sure it is
+            import measured
+            e["latest"] = latest_of(est, kind, hist)
+            measured.put(e, kind, _about(i["text"]), ie, hist, text=i["text"])
+            est = e["est"]
+            cost = {**e["cost"], "how": e["cost_how"]} if U and e.get("cost") else cost
+        except Exception as ex:
+            print(f"(F79: the measured estimate couldn't be made for item {i['n']}: {ex!r})", file=sys.stderr)
 
         def fit(start):
             """H172: the first minute from start when its usage fits; it counts for the work after it."""
@@ -2589,12 +2653,14 @@ def words(n, p):
     if e.get("finished"):
         return (f"estimated {dur(e['est'])}{g}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}{g}") \
             + (f", {e['turns']} turns" if e.get("turns") else "") + _cost_words(e)
-    if e.get("based") is not None:  # F103: each estimate says what it stands on
+    if e.get("based") is not None and not (e.get("sure") or {}).get("ok"):  # F103: each estimate says what it stands on
         g += f", from {based_words(e['based'])}"
     if gw and e.get("computed") and e.get("computed") != e["est"]:
         g = f" (computed {dur(e['computed'])}, {gw})"
     elif e.get("looking"):
         g += ", a first look is on its way"
+    if e.get("sure"):  # F79: its latest end, and measured from jobs like it or too few of them, said
+        g += f", {sure_words(e)}"
     if "left" in e:
         if e.get("over"):
             s = f"estimated {dur(e['est'])}{g}, running {dur(e['so_far'])}: taking longer than estimated"
@@ -2623,6 +2689,13 @@ def words(n, p):
     return s + " (estimate)"
 
 
+def sure_words(e) -> str:
+    """F79: the latest end and how sure an estimate is, in a few words."""
+    import measured
+    lat = f"at the latest {dur(e['latest'])}, " if e.get("latest") and e.get("est") and e["latest"] > e["est"] else ""
+    return lat + measured.words(e)
+
+
 def based_words(n) -> str:
     """F103: how many finished jobs an estimate stands on."""
     return "no finished jobs yet" if not n else f"{n} finished job{'' if n == 1 else 's'}"
@@ -2635,7 +2708,8 @@ def item_words(n, p):
         return ""
     gw = guessed_words(e)  # H190
     s = f"about {dur(e['est'])}" + (f" (computed {dur(e['computed'])}, {gw})" if gw and e.get("computed") else
-                                     f", {gw}" if gw else ", a first look is on its way" if e.get("looking") else "") + _cost_words(e)
+                                     f", {gw}" if gw else ", a first look is on its way" if e.get("looking") else "") + \
+        (f", {sure_words(e)}" if e.get("sure") else "") + _cost_words(e)  # F79
     if e.get("never"):
         s += ", it doesn't fit under the usage lines as they're set (a fixed line), so no time"
     elif e.get("eta"):

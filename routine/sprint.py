@@ -1273,6 +1273,11 @@ def plan():
             x["cost_latest"] = U.at_latest(c, est, x["latest"])
         except Exception:
             pass
+        try:  # F79: built from what jobs like it really took, with how sure it is
+            import measured
+            measured.put(x, det["kind"], E._about(t), ge, hist, text=t)
+        except Exception as ex:
+            print(f"(F79: the measured estimate couldn't be made for {r['label']}: {ex!r})", file=sys.stderr)
         j = q.with_team(jobs, r["label"])
         if j:
             x["team"] = j["n"]
@@ -1335,6 +1340,8 @@ def row_words(x):
         s += f" (the first look guessed {E.dur(x['guess_look'])})"
     elif x.get("looking"):
         s += " (a first look is on its way)"
+    if x.get("sure"):  # F79: its latest end and how sure it is
+        s += f", {E.sure_words(x)}"
     c = x.get("cost")
     if c:
         s += f", {use_words(c)}"

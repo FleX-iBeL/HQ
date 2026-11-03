@@ -698,8 +698,23 @@ def at_latest(cost, minutes, latest):
 def job_cost(n, text, hist=None, latest=False):
     """A waiting job's estimated minutes and usage, from its estimate now (F34, H166)."""
     E = _est()
+    hist = E.all_history() if hist is None else hist
     d = E.job_estimate(n, text, hist)
     c = cost_for(d["est"], text, d.get("kind"), hist)
+    try:  # F79: the same measured estimate the page and the planning show, so the gate holds what they say
+        import measured
+        x = measured.put({"est": d["est"], "latest": d["latest"], "cost": {k: c[k] for k in KEYS}, "cost_how": c["how"]},
+                         d.get("kind"), E._about(text), E.known(n), hist, text=text)
+        if x.get("cost_detail"):
+            c = dict(x["cost_detail"])
+        elif x["est"] != d["est"]:
+            c = cost_for(x["est"], text, d.get("kind"), hist)
+        d = {**d, "est": x["est"], "latest": x["latest"]}
+        if latest:
+            return d["latest"], {**c, **(x["cost_latest"] if x.get("cost_detail") else at_latest(c, d["est"], d["latest"]))}
+        return d["est"], c
+    except Exception as ex:
+        print(f"(F79: the measured estimate couldn't be made for job {n}: {ex!r})", file=sys.stderr)
     if latest:  # F66: the gate lets a job start only when its latest end fits under the stop lines
         return d["latest"], {**c, **at_latest(c, d["est"], d["latest"])}
     return d["est"], c
@@ -770,7 +785,7 @@ def start(n, text="", now=None):
         rec = {"n": n, "started": int(now), "running": True, "spent": {k: 0 for k in KEYS},
                "seg": {k: list(v) for k, v in snap.items()}, "last": {k: list(v) for k, v in snap.items()},
                "est": ({**{k: cost[k] for k in KEYS}, "minutes": minutes, "how": cost["how"], "plan": cost.get("plan"),
-                        **{k: cost[k] for k in ("tokens", "range") if k in cost}} if cost else None)}
+                        **{k: cost[k] for k in ("tokens", "range", "five_range", "weekly_range") if k in cost}} if cost else None)}
     d[str(n)] = rec
     _save(d)
     return rec
