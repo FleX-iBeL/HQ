@@ -4585,6 +4585,8 @@ window.addEventListener('load', () => setTimeout(() => {
         # settle isn't his question; a change to her own way of working goes to the team. In HQ's defaults, and on a blank
         # template HQ the same, read through agents.persona there (the way flow 185 makes one).
         h303 = ("You carry the team's findings back (H303)", "not the inventor", "give what the team found or proposed",
+                "technical solutions and how to build something come from the team", "your own prep for the planning stays yours",
+                "the MoSCoW tags, how a row is split, the order, your proposals on the sit-down list",
                 "say so and that the question goes to them, with no fix of your own", "first look at what they wrote since",
                 "no second row and no idea of your own", "take it through the review or to the team and tell him it went there",
                 "only what just he can answer goes on the sit-down list", "you edit nothing of HQ's",
@@ -4604,6 +4606,8 @@ window.addEventListener('load', () => setTimeout(() => {
         need("not ideas of her own" in tourtext and "she says so and it goes to them" in tourtext
              and "without asking you" in tourtext and "how she works herself goes to the team too" in tourtext,
              "H303: the tutorial's Moneypenny step doesn't say she carries the team's findings back")
+        need("with your fix" not in pm and "a technical one is the team's, said as theirs" in pm,
+             "H303: the ready check still brings a fix of her own to the sit-down")
         need(not any(w in agents.persona(every[x], "Alex") for x in ("donna", "pepper") for w in h303[:2]),
              "H303: Donna or Pepper got Moneypenny's line")
         need("grounds each decision" in tourtext and "she sits down with you" in tourtext and "works out the right answers herself" not in tourtext
