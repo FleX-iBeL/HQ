@@ -21165,7 +21165,7 @@ print(json.dumps(out))
         the doors, the status page, the tests, the privacy check, checkpoints, what never to do); Moneypenny's start carries its index, with the
         briefing on and off, and Donna's and Pepper's don't; rules.py maintain prints each section. Every HQ command it names is a real script,
         each word it gives that script stands in the script's own usage lines or its own argv comparisons, and each option as a whole word; a
-        rename on a throwaway copy (update.py's restart-all, sync.py's conflicts) and an option that's only a part of one (push.py --dry) go red.
+        rename on a throwaway copy (update.py's restart-all, sync.py's conflicts, also in its dispatcher alone) and an option that's only a part of one (push.py --dry) go red.
         Every start stays under the cap."""
         import shlex, shutil as _sh, subprocess as _sp
         doc = ROOT / "MAINTAINING.md"
@@ -21200,8 +21200,8 @@ print(json.dumps(out))
 
         def wrong(cmds, root):
             """What's wrong with each named command against the scripts under root: a missing script, an option the script doesn't have as a
-            whole word, or a word that's neither in a usage line of it (a line naming the script) nor in one of its argv comparisons (== or in).
-            After the first word, a key of the script's own table counts too (direct_line.py's kinds of text). A placeholder (N, LABEL,
+            whole word, or a subcommand (the first word) that isn't in one of its own argv comparisons (== or in); a later word may also be a
+            key of the script's own table (direct_line.py's kinds of text) or stand in a usage line of it (a line naming the script). A placeholder (N, LABEL,
             "HIS WORDS"), a number or a phrase isn't checked."""
             bad = []
             for span, rel, args in cmds:
@@ -21221,10 +21221,12 @@ print(json.dumps(out))
                         continue
                     q = rf"[\"']{re.escape(a)}[\"']"
                     k += 1
+                    compared = re.search(rf"==\s*[\[(]?\s*{q}", src) or re.search(rf"\bin\s*[(\[{{][^)\]}}\n]*{q}", src)
+                    keyed = re.search(rf"{q}\s*:", src)
                     said = any(re.search(whole(a), l) for l in usage)
-                    compared = re.search(rf"==\s*{q}", src) or re.search(rf"\bin\s*[(\[{{][^)\]}}\n]*{q}", src)
-                    keyed = k > 1 and re.search(rf"{q}\s*:", src)
-                    if not (said or compared or keyed):
+                    # the first word is the subcommand: only the dispatcher's own argv comparison counts; a later word may also be a key of
+                    # the script's table (direct_line.py's kinds of text) or stand in a usage line (a choice like main|backup|two-way)
+                    if not (compared or (k > 1 and (keyed or said))):
                         bad.append(f"{span}: {rel} doesn't take {a}")
             return bad
 
@@ -21246,6 +21248,11 @@ print(json.dumps(out))
         need(any("restart-all" in x for x in red) and any("doesn't take conflicts" in x for x in red),
              f"a renamed command stays green: {red}")
         need(not wrong(mine, ROOT), "the same commands go red on the real scripts")
+        # a rename in the dispatcher alone, its usage line still naming the word, goes red too
+        (fake / "routine/sync.py").write_text(sy.replace('cmd == "conflicts"', 'cmd == "conflict-copies"'), encoding="utf8")
+        need('sync.py" conflicts' in (fake / "routine/sync.py").read_text(encoding="utf8"), "the usage line was renamed too")
+        red = wrong([c for c in mine if c[1] == "routine/sync.py"], fake)
+        need(any("doesn't take conflicts" in x for x in red), f"a rename in the dispatcher alone stays green: {red}")
         _sh.rmtree(fake, ignore_errors=True)
         red = wrong(commands("`python3 routine/push.py --dry`"), ROOT)
         need(red and "--dry" in red[0], f"an option that's only a part of one passes: {red}")
