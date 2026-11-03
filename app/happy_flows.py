@@ -20545,7 +20545,8 @@ print(json.dumps({'one': one, 'two': two, 'twice': twice, 'kind': dl.KINDS['esti
     async def flow454(self) -> str:
         """F79, no Claude: the repeat's hold and tries follow the calendar day. Six failed starts on one day stop, and open the
         incident estimate-misses (a red line); two days later a new repeat starts its tries over and goes, and the incident
-        closes. A repeat raised at 23:50 holds a new one at 23:55, not one at 00:10 the next day. Past 500 misses none is
+        closes. A repeat raised at 23:58 holds a new one at 23:59 by the calendar day, and one at 00:01 the next day by his 12 hours: it waits
+        as pending, untried, and goes at 11:58. Past 500 misses none is
         told twice: the told jobs are kept by number, without a cap."""
         _, _, o = self._misses("f79day", """
 import incidents
@@ -20563,13 +20564,19 @@ out['day3'] = r
 Ms._start_raise = lambda: (starts.append(1), Ms.raise_pending())
 Ms.sweep(hist, now=day1 + 2 * 86400 + 60)
 out['day3_state'] = Ms._load(); out['back'] = not incidents.is_down('estimate-misses')
-fresh()  # the calendar day: raised at 23:50
-st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 50, 0, 0, 0, -1)); Ms._save(st)
+fresh()  # the calendar day and his 12 hours: raised at 23:58
+st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 58, 0, 0, 0, -1)); Ms._save(st)
 Ms._start_raise = lambda: starts.append('late')
+at = lambda d, h, m: time.mktime((2026, 9, d, h, m, 0, 0, 0, -1))
 h2 = ontime(800) + [line(821, 'research', 10, 20, 31, 20), line(822, 'research', 10, 20, 33, 21)]
-out['2355'] = Ms.sweep(h2, now=time.mktime((2026, 9, 22, 23, 55, 0, 0, 0, -1)))['started']
+out['2359'] = Ms.sweep(h2, now=at(22, 23, 59))['started']
 h2.append(line(823, 'research', 10, 20, 35, 22))
-out['0010'] = Ms.sweep(h2, now=time.mktime((2026, 9, 23, 0, 10, 0, 0, 0, -1)))['started']
+w = Ms.sweep(h2, now=at(23, 0, 1))
+out['0001'] = [w['started'], (w['pending'] or {}).get('id'), (w['pending'] or {}).get('tries')]
+w = Ms.sweep(h2, now=at(23, 11, 57))
+out['1157'] = [w['started'], (w['pending'] or {}).get('tries')]
+w = Ms.sweep(h2, now=at(23, 11, 58))
+out['1158'] = [w['started'], (w['pending'] or {}).get('tries')]
 os.environ['HQ_TEAM_LINE'] = '0'  # no notes on a line: 510 misses kept in the file, fast
 fresh()
 h3 = [line(2000 + i, 'qa', 10, 20, 45, i) for i in range(510)]
@@ -20582,9 +20589,10 @@ print(json.dumps(out))
         p3 = o["day3"].get("pending") or {}
         need(p3.get("id") == "misses-2026-09-24" and p3.get("tries") == 1 and o["day3"]["started"], f"F79: a new day's repeat inherits the old tries: {p3}")
         need(o["day3_state"].get("raised") and not o["day3_state"].get("pending") and o["back"], f"F79: the new day's repeat didn't go, or the incident stays open: {o['day3_state']} back {o['back']}")
-        need(o["2355"] is False and o["0010"] is True, f"F79: the hold doesn't follow the calendar day: 23:55 {o['2355']}, 00:10 {o['0010']}")
+        need(o["2359"] is False and o["0001"] == [False, "misses-2026-09-23", 0] and o["1157"] == [False, 0] and o["1158"] == [True, 1],
+             f"F79: a repeat raised at 23:58 doesn't hold the next until 11:58, or the wait counts as a try: 23:59 {o['2359']}, 00:01 {o['0001']}, 11:57 {o['1157']}, 11:58 {o['1158']}")
         need(o["many"] == [510, 0, 510], f"F79: past 500 misses the oldest are told again: {o['many']}")
-        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; the hold is the calendar day; 510 misses told once each"
+        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; raised at 23:58, the next waits untried until 11:58; 510 misses told once each"
 
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
@@ -37130,7 +37138,7 @@ FLOWS = {
     451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
     452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
     453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
-    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; the hold is the calendar day; past 500 misses none is told twice", False, "flow454"),
+    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; a repeat waits 12 hours after the last, untried; past 500 misses none is told twice", False, "flow454"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),

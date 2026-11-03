@@ -17,7 +17,8 @@ told once and one repeat raised once, whatever closed it where:
     row's id when it's on the record (F103). Without her line (no Moneypenny, or HQ_TEAM_LINE=0, as on a friend's HQ) no note
     is written anywhere he reads: it's kept in this file only (misses.py shows it). It counts as told only once it's written.
   * a repeat goes to him through her, as a text on her line (estimate-misses), at most once a calendar day (the day of its
-    line id, so two computers and the hold agree), when either:
+    line id, so two computers and the hold agree), and at least GAP_S (12 hours, his pick) after the last one that really went,
+    when either:
       - the bar is broken: more than MOST of the last WINDOW counted jobs ran past their latest end (2 or more in 20), or
       - the same kind of work missed twice in a row: the last two counted jobs of one kind (measured.group) both ran past it.
     [Both rules are the builder's reading of "escalate if things repeat" next to "at most 1 miss in 20".]
@@ -55,6 +56,7 @@ MOST = 1
 INCIDENT = "estimate-misses"  # the red line when a repeat couldn't be sent after TRIES tries
 RETRY_S = int(os.environ.get("HQ_MISSES_RETRY") or 600)  # a repeat that didn't go is tried again after this
 TRIES = 6
+GAP_S = 12 * 3600  # his pick (3 November 2026): "every 12 hours i think is best": since the last repeat that really went
 KEPT_MOST = 50
 STATE = os.path.join(E.DIR, "estimate-misses.json")
 
@@ -184,6 +186,12 @@ def _raised_today(st: dict, now: float) -> bool:
     return bool(r) and raise_id(float(r)) == raise_id(now)
 
 
+def _gap_left(st: dict, now: float) -> bool:
+    """Less than GAP_S since the last repeat that really went: a pending one waits, and the wait isn't a try."""
+    r = st.get("raised")
+    return bool(r) and now - float(r) < GAP_S
+
+
 def _incident(down: bool, why: str = "") -> None:
     try:
         import incidents
@@ -253,7 +261,7 @@ def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
         p = st.get("pending")
         if p and _raised_today(st, now):
             st["pending"] = p = None  # it went meanwhile
-        start = bool(p) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
+        start = bool(p) and not _gap_left(st, now) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
         if start:
             p["tries"], p["last"] = int(p.get("tries") or 0) + 1, now
         gave_up = bool(p) and not start and int(p.get("tries") or 0) >= TRIES
