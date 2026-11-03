@@ -7,6 +7,7 @@ How to use it:
 - Run every command from the HQ folder.
 - Looking never needs a yes. Changing something does, and some changes only stand on the owner's own words (section 5).
 - Moneypenny delegates and checks. She never edits, commits or pushes HQ's code and never runs a fix herself. When this page says "do", for her it means: give it to the team as an item, or ask the owner. What she does herself is look, decide what's ready, decide the release, and QA.
+- She carries the team's findings back. How something technical should be solved is the team's to find: she passes on what they found or proposed, and when they haven't looked yet she says so and gives it to them, with no fix of her own. A change to how she works goes to the team as an item too, so it goes out in a release.
 - Moneypenny's start names these sections. Before you act on one, read it: `python3 app/rules.py maintain N` prints section N. `python3 app/rules.py maintain` lists them.
 
 ## 1. The two computers
@@ -28,6 +29,8 @@ Change:
 - `python3 routine/role.py main here` (or `other`, or a name) makes one the main. A call may run this on the owner's ask.
 - `python3 routine/role.py alone` forgets the other HQ. Pairing (`python3 routine/role.py setup PEER_URL --main NAME`) is never done from a call.
 
+The backend switches. A new HQ starts with all of them on: the briefing, the open line, the team's jobs run in the background (headless), one-way sync, the planning index and the hand-over. An HQ that updates gets the five main ones once, but only when its switches file is still the one HQ wrote; switches the owner set himself stay as they are. `python3 app/backend.py` shows them. `python3 app/backend.py off NAME` turns one off, from the next call, text or job; no restart needed. A bad day is one switch back, not a rollback.
+
 The hand-over and its switch. With one-way sync on, the backup only receives. What it still holds that the main doesn't (its own changes, its conflict copies) goes to the main every minute, but only while the backend switch `handover` is on. The sync line on the status page has a button for it. By hand: `python3 routine/sync.py handover on` or `python3 routine/sync.py handover off`. To see what would go over without sending it: `python3 routine/sync.py handover --dry`. A hand-back waits up to ten minutes for the sync; after that, what's left goes over through the doors.
 
 The kept-from-both list. When both computers had their own version of the same file, the main's version stays in the file, and the other's own words go into `HQ/kept-from-both.md` in the workspace, newest first. Nothing is lost and nothing waits on a merge. Only the main writes that list. The owner reads it and decides what comes back. Never copy something from it into a file by hand; tell the owner it's there.
@@ -43,7 +46,7 @@ A restart ends a call that is on. So the order is always:
 3. Restart, the safe way: `python3 routine/update.py restart-all`. It is the same restart an update does. It stops each part by its exact pid, holds a running job so it carries on by itself afterwards, starts each part again and checks that it answers on a new pid. Its log is `scratch/update.log`.
 4. Check the status page: every line under Routines green again (section 6).
 
-Doing one part by hand: on a Mac `app/stop.sh` then `app/start.sh` for the call line. On Linux `app/stop-linux.sh` then `bash app/start-linux.sh` (it needs bash, not sh). On the laptop, start things from a clean environment (`env -i HOME=$HOME PATH=$PATH USER=$USER ...`), never from inside a Claude chat, whose settings would leak into what it starts. On both computers, restart both: the same code must run on each.
+Doing one part by hand: on a Mac `app/stop.sh` then `app/start.sh` for the call line. On Linux `app/stop-linux.sh` then `bash app/start-linux.sh` (it needs bash, not sh). On the laptop, start things from a clean environment (`env -i HOME=$HOME PATH=$PATH USER=$USER ...`), never from inside a Claude chat, whose settings would leak into what it starts. On both computers, restart both: the same code must run on each. A backend switch never needs a restart (section 1).
 
 Holding the team while you work: `python3 routine/jobs.py pause "WHY"` holds everything (the running job within a minute, no new starts, no reviews). `python3 routine/jobs.py on` ends the pause. `python3 routine/jobs.py off` switches the team off; `on` brings it back.
 
@@ -66,7 +69,7 @@ The release gate. `python3 routine/release.py status` says what tonight's run fo
 - work whose row doesn't say QA passed (that work and what comes after it stays on dev and nightly; `python3 routine/qa.py hold` shows what would go and what would be held);
 - anything, when the privacy check finds something.
 
-A second run on the same commit does nothing and says so. Only the main computer releases. `--version 1.0.0` names the version instead of the next small one.
+Each commit names its item at the start of its subject. A commit that belongs to an item but doesn't name it can be listed by hand in `COMMITS_FOR` in `routine/qa.py`, by its full id and exactly what it changes; it then waits for that item's QA like any commit naming it. Anything else is held as a commit naming no item. A second run on the same commit does nothing and says so. Only the main computer releases. `--version 1.0.0` names the version instead of the next small one.
 
 Moneypenny decides the release. Inside those gates, when to release is hers. Going past a gate (`--without-qa`, `--past-the-night`) only stands on the owner's own words (section 5). Hesitating is fine: `python3 routine/release.py nightly "WHY"` puts the work on nightly only, and the next night tests it again.
 
@@ -81,6 +84,8 @@ HQ runs on the owner's own Claude plan. Usage is counted in points: percent of t
 The stop lines. There are three: the 5-hour line, the weekly line (all models) and the weekly Fable line. Each one moves (the share of its window that has gone by, recalculated every minute) or is fixed at a number. Nothing of the team or the agents starts above its line. `python3 routine/usageline.py` shows all three and where they stand. `python3 routine/usage-check.py` shows the latest reading. On a plan with no 5-hour limit, HQ goes on the week alone.
 
 The reserve. A number of points (15 unless the owner turned it) is taken off the stop lines for the agents' own runs and the team, so his calls and the small routines always have room. `python3 routine/usageline.py reserve` shows it. The least line keeps the team's line from dropping under 15 points after a reset (`python3 routine/usageline.py least`). The agents' own runs stop five points under the team's line, so they are the first to stop.
+
+The estimates. Every job gets a likely and a latest end, learned from the finished jobs most like it. A job that runs past its latest end is a miss: Moneypenny gets a quiet note on her own line (which job, what kind of work, its range and its real time), and the owner's phone stays quiet. Only a repeat reaches him, through her: more than 1 miss in the last 20 jobs, or two of one kind in a row, at most once a day and at least 12 hours apart, also across a takeover. `python3 routine/misses.py` shows the misses, the last 20 jobs and whether it repeats now. The Friday report holds the week to the same figures. For Moneypenny: a miss is hers to look at; when a kind keeps missing, its fix is an item for the team.
 
 Also held by the program:
 
@@ -130,7 +135,9 @@ The light on top is red when something is not working (or the laptop is hot, or 
 
 The status block. At the top of the planning a block says what the work is doing now: building, testing, releasing, waiting for the owner, done or stopped. It is kept with `python3 status/set-status.py STATE "STEP" "JUST" "NEXT" "TABLE_ROW" "LOGLINE"`, before work starts, at every step and when it's finished. Never edit the block by hand.
 
-The incidents. When a part goes down, the incident log on the status page says when, why, what was done about it and when it was back. A red edge is still down. The watchdog runs every five minutes and brings the routine back when it stopped or hangs. Something that stays down for three minutes gets a text from Donna, and another when it's back. A refused pull or push to GitHub opens the incident "github" until the next one goes through. What Donna passes on to Moneypenny stands first in her start until its cause is gone. She looks at it and gives the team an item for it.
+The incidents. When a part goes down, the incident log on the status page says when, why, what was done about it and when it was back. A red edge is still down. The watchdog runs every five minutes and brings the routine back when it stopped or hangs. Something that stays down for three minutes gets a text from Donna, and another when it's back. A refused pull or push to GitHub opens the incident "github" until the next one goes through. A repeat of the estimate misses that can't be texted after six tries opens the incident "estimate-misses". What Donna passes on to Moneypenny stands first in her start until its cause is gone. She looks at it and gives the team an item for it.
+
+The score. Each agent's weekly score reads the ledger of mistakes. It says how many calls and texts it read and how many it couldn't, so a call it missed never looks like a call with nothing to correct; one that couldn't be opened is tried again on every pass. What each second look cost is kept in `.status/mistakes-looks.jsonl`.
 
 The logs: `scratch/server.log` (the call line), `scratch/routine/routine.log` (the routine), `scratch/routine/mail.log` (the mail check), `scratch/update.log` (updates and restarts).
 
@@ -140,9 +147,13 @@ The happy flows are HQ's tests. `.venv/bin/python app/happy_flows.py --quick` ru
 
 The test wall. Every run of the flows goes into a throwaway copy of HQ, whoever starts it. The real records are hashed before the first flow and compared after the last; anything real that changed turns the run red and is named. A test can't push, can't post, can't text the owner and can't read his mail. `python3 routine/testwall.py records` lists what counts as real. A canary flow with a false check runs first: if it passes, the run says a green result means nothing.
 
+One whole run at a time on a computer. Two at once clash on the test ports and the memory, so a whole run waits until the other is done (on the maker's server they take turns through a lock file, with a time limit inside it). A few flows with `--only` can run beside it.
+
+The owner's own extensions bring their own flows, in a folder inside the extension. They run every night with HQ's flows, each on a throwaway copy, and a failure names the extension, never HQ (happy flow 472). By hand: `python3 app/extensions.py flows`. A failure there is fixed in the extension's own folder, never in HQ's files.
+
 All must pass. A flow that fails says why. Every flow stops at six minutes, except a few named in `app/happy_flows.py`. Which flows hold on Linux, and which a first install runs, is in `routine/flowsets.py`.
 
-A build is done when a program says so. `python3 routine/proof.py run N` runs the flows job N's item names plus the quick set on a copy and keeps a record; `python3 routine/proof.py show N` shows it. Without a green record the job stays open and QA can't pass it.
+A build is done when a program says so. `python3 routine/proof.py run N` runs the flows job N's item names plus the quick set on a copy and keeps a record; `python3 routine/proof.py show N` shows it. Without a green record the job stays open and QA can't pass it. [Coming with F121: one full run that writes a proof record for each item it covers.]
 
 QA is Moneypenny's. After a build, a QA job runs as her: every done example of the item tried for real, end to end, and its flows run. Then `python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G` (each example with what was run and what came out) or `python3 routine/qa.py fail LABEL "WHAT'S OFF"`, which sends it back to the team. `python3 routine/qa.py state LABEL` shows where an item stands.
 
