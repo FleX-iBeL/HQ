@@ -108,7 +108,8 @@ SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "about_self": os.path.join(os.path.dirname(HERE), "app", "about_self.py"),  # F102
            **{k: os.path.join(os.path.dirname(HERE), "app", f"{k}.py")  # F115: the page's other writers
               for k in ("features", "kinds", "appt_notes", "workflows", "news", "planning", "backend")}}
-PASS_ENV = ("HQ_PINGS_BY",)  # what a handed request may carry over to the main (who asked, for her notes)
+PASS_ENV = ("HQ_PINGS_BY",  # what a handed request may carry over to the main (who asked, for her notes)
+            "HQ_CHECKED_WORDS")  # F115 with F114: his words, checked at the door on the backup, and where they stood
 
 # H203, in the user's words (call of 17 October 2026, 14:45): "i am even more confused, you give it to the server but
 # then also do it yourself? why?", then "ok, is there also other things you'd be better to hand over while that one
@@ -917,6 +918,36 @@ def _keep_handed(hid: str, answer: dict) -> None:
         if len(d) > 5000:
             d = dict(sorted(d.items(), key=lambda kv: kv[1].get("at") or 0)[-5000:])
         _save(HANDED, d)
+
+
+CHECKED = "HQ_CHECKED_WORDS"
+
+
+def checked_env(said: str | None, hits: list | None = None) -> dict:
+    """F115 with F114 (the combined check, 3 November 2026): the backup checked his words at its own door (his line in this call's or
+    this chat's own transcript, or his own hand with no call or chat), so it hands the change over with what it checked: the words, his
+    line and her turn before it, where they stood, and which computer checked them. The main trusts that and records it; a handed
+    change that carries none is refused there."""
+    h = (hits or [None])[0] or {}
+    return {CHECKED: json.dumps({"by": my_name(), "said": said or "", "line": h.get("line", ""), "turn": h.get("turn", ""),
+                                 "where": h.get("where") or ("his own hand" if said is None else ""), "at": time.time()})}
+
+
+def handed_words() -> dict | None:
+    """F115 with F114: on the main, running a handed request: the words the backup checked, or None (not handed, or none carried)."""
+    if not os.environ.get("HQ_ROLE_HERE"):
+        return None
+    try:
+        d = json.loads(os.environ.get(CHECKED) or "")
+        return d if isinstance(d, dict) and d.get("by") else None
+    except ValueError:
+        return None
+
+
+def note_handed(what: str, d: dict) -> None:
+    """F115 with F114: where the words of a handed change came from, in the routine's log on the main."""
+    _log(f"{what}: on his words checked on {d.get('by')}: \"{(d.get('said') or d.get('line') or '')[:160]}\" "
+         f"({d.get('where') or 'no place'})")
 
 
 def tell_other(script: str, args: list[str], timeout: float = 30) -> str:

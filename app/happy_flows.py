@@ -21447,13 +21447,53 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
             need(not (B["state"] / "role-pending.jsonl").exists(), "the kept change is still waiting after it landed")
             await asyncio.to_thread(run, "B", "routine/role.py", "tick")
             need(a("HQ/calendar-kinds.json").count("Steering") == 1, "the kept change landed twice")
+            # F115 with F114 (the combined check of 3 November 2026): his words are checked on the backup, at its own door, and the
+            # main trusts only what the backup checked, fitting a yes to its own holds. A call on B: her question about the dentist,
+            # then his "ok yes"; a line naming the weekly line at 80; and a yes naming the lunch.
+            call = B["ws"] / f"HQ/calls/{time.strftime('%Y-%m-%d')}-0000.md"
+            call.parent.mkdir(parents=True, exist_ok=True)
+            call.write_text("# Call today, 00:00\n\nStarted 00:00:00 · agent Donna · brain opus\n\n"
+                            "- 00:00:05 **HQ:** Shall I move the dentist to Friday?\n- 00:00:20 **Me:** ok yes\n"
+                            "- 00:00:40 **Me:** yes, fix the weekly usage line at 80 for tonight\n"
+                            "- 00:01:00 **HQ:** And the lunch with Alice, shall I add it?\n- 00:01:10 **Me:** yes, add the lunch with Alice\n")
+            oncall = {"HQ_PROOF_ON": "1", "HQ_WORDS_FROM": str(call)}
+            A["env"]["HQ_PROOF_ON"] = "1"  # the main reads his real lines too, as on the real pair: the call is only on the laptop
+            # finding 1: on the backup, in a call, a stop line with no words of his is refused there, never handed over
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "77", env=oncall)
+            need(r.returncode != 0 and "Weekly line: fixed at 77%" not in a("HQ/roadmap.md"),
+                 f"a stop line with no words of his, in a call on the backup, landed on the main: {r.stdout[-200:]} {r.stderr[-200:]}")
+            # finding 2: his real words from the laptop's call land on the main, which notes where they came from ...
+            r = await asyncio.to_thread(run, "B", "routine/usageline.py", "weekly", "fixed", "80", "--said",
+                                        "fix the weekly usage line at 80", env=oncall)
+            log_a = A["hq"] / "scratch/routine/routine.log"
+            need(r.returncode == 0 and "Weekly line: fixed at 80%" in a("HQ/roadmap.md"),
+                 f"his own words on the laptop's call were refused by the main: {r.stdout[-200:]} {r.stderr[-300:]}")
+            need(log_a.exists() and "checked on laptop" in log_a.read_text() and call.name in log_a.read_text(),
+                 "the main didn't note where the words of the handed switch came from")
+            # ... and a switch handed over with no words checked on the backup is refused there
+            r = await asyncio.to_thread(py, "B", "import role\nprint(role.hand('usageline', ['weekly', 'fixed', '70'])[:2])", None,
+                                        {"HQ_PROOF_ON": "1"})
+            need("Weekly line: fixed at 70%" not in a("HQ/roadmap.md"), f"a handed switch with no checked words landed: {r.stdout[-200:]}")
+            # finding 3: a hold on the main the backup hasn't seen yet; his "ok yes" to the dentist question doesn't open the lunch
+            r = await asyncio.to_thread(py, "A", "import cycles\nprint(cycles.hold('donna', 'f115-lunch', 'add \"Lunch with Alice\"', "
+                                        "'it has a guest'))")
+            need("asked" in r.stdout, f"couldn't hold a change on the main: {r.stdout[-200:]} {r.stderr[-300:]}")
+            held_ = lambda: py("A", "import cycles\nprint([h['what'] for h in cycles._agent_state(cycles._state(), 'donna')['holds']])").stdout
+            r = await asyncio.to_thread(run, "B", "routine/cycles.py", "yes", "donna", "ok yes", env=oncall)
+            need("Lunch with Alice" in await asyncio.to_thread(held_),
+                 f"a bare yes to another question opened the main's held lunch from a backup that hadn't seen it: {r.stdout[-300:]}")
+            r = await asyncio.to_thread(run, "B", "routine/cycles.py", "yes", "donna", "yes, add the lunch with Alice", env=oncall)
+            need("Lunch with Alice" not in await asyncio.to_thread(held_),
+                 f"his yes naming the lunch, on the laptop's call, didn't open it on the main: {r.stdout[-300:]} {r.stderr[-200:]}")
         finally:
             await asyncio.to_thread(P["stop"])
         return ("on the backup a switch, a kind, a note and a tick on an appointment, a workflow, the news setup, a stop line and a chat's "
                 "commit all landed on the main, the backup's own files the same byte for byte; a commit the main kept says so; the same file "
                 "settled twice against the main as it is now; a moved row, a deleted row, a JSON record, a repeated line and a stale copy "
                 "of what the main cleaned up left the main's file as it was, every difference in the list word for word; a big file with "
-                "a part missing not written; a hand-over sent twice ran once; with the main away a change was kept, said, and landed once")
+                "a part missing not written; a hand-over sent twice ran once; with the main away a change was kept, said, and landed once; "
+                "his words checked on the backup: no words in a call refused there, his words landed with where they came from noted, "
+                "unchecked words refused on the main, a bare yes to another question didn't open the main's hold, a yes naming it did")
 
     async def flow371(self) -> str:
         """F115, no Claude: what the laptop holds is settled, nothing of his lost. Two private Syncthings and two throwaway HQs, A

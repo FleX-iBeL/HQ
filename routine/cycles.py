@@ -2175,6 +2175,46 @@ def his_yes_refused(aid: str, words: str, n: int | None = None, places: list | N
             "question before them: ask him again by its name")
 
 
+def his_yes_line(words: str, base: Path | None = None) -> tuple[str, dict | None]:
+    """F115 with F114: on the backup, the first checks of his yes, whatever its own copy of the holds says: his own line, today, in this
+    call or this chat (or by hand, any of today's), read as a yes. (why, his line) — why is "" when it stands; the line is None when there's
+    none to carry (a test copy without lines of his). The fit to a change is the main's to check, against its own holds."""
+    if _SAYS_NO.match(words or ""):
+        return "", None
+    if os.environ.get("HQ_IN_JOB"):
+        return "a run can't give a yes", None
+    import sprint
+    import hqpaths as _hp
+    if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):
+        return "", None
+    hits = sprint.his_said_now(words, str(base or folder()), sprint.words_from_env())
+    if not hits:
+        return "those aren't his words from this call or this chat, today", None
+    yes_ = [h for h in hits if sprint.a_yes(h["line"], h["turn"])]
+    if not yes_:
+        return "those are his words, but they aren't a clear yes", None
+    return "", yes_[0]
+
+
+def handed_yes_refused(aid: str, d: dict, n: int | None = None) -> str:
+    """F115 with F114: on the main, a yes the backup checked: does his line (or her question just before it) name exactly one of the
+    main's own holds by its own words? "" when it does, or when nothing waits (yes() says so), or for a test copy without lines of his."""
+    waiting = _agent_state(_state(), aid)["holds"]
+    holds = [h for h in waiting if n is None or h["n"] == n]
+    if not waiting:
+        return ""
+    if not d.get("line"):
+        import hqpaths as _hp
+        if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):
+            return ""
+        return "the other computer sent no line of his to fit to a change"
+    named = [x for x in waiting if yes_fits(d["line"] + " " + (d.get("turn") or ""), x)]
+    if len(named) == 1 and named[0] in holds:
+        return ""
+    return ("those are his words, but they don't name this one change by its own words (or name more than one), and neither does her "
+            "question before them: ask him again by its name")
+
+
 # F114, the second check: words a title shares with any ordinary sentence ("I'll sort it on this call"), which never name a change alone.
 _COMMON = {_stem(w) for w in ("call", "calls", "lunch", "dinner", "breakfast", "drinks", "coffee", "meeting", "meet", "appointment", "event",
                                "today", "tonight", "tomorrow", "this", "that", "next", "week", "weekend", "morning", "afternoon", "evening",
@@ -2699,15 +2739,31 @@ def main(argv: list[str]) -> int:
         import hqpaths as _hp
         print(f"Refused: {_hp.MAIL_SWITCH_WORDS}.")
         return 2
-    if cmd == "yes" and len(rest) >= 2 and not os.environ.get("HQ_ROLE_HERE"):  # F114: his yes is his own words in a real line
-        why = his_yes_refused(rest[0].lower(), rest[1], int(rest[2]) if len(rest) > 2 and rest[2].isdigit() else None)
+    import role
+    yes_n = int(rest[2]) if cmd == "yes" and len(rest) > 2 and rest[2].isdigit() else None
+    if cmd == "yes" and len(rest) >= 2 and os.environ.get("HQ_ROLE_HERE") and not _SAYS_NO.match(rest[1]):
+        # F115 with F114 (the combined check): a handed yes stands on the words the backup checked, and fits a change by the main's own
+        # holds, never by the backup's copy of them, which can be behind
+        d = role.handed_words()
+        why = "a yes handed over from the other computer carries no words it checked there" if not d else \
+            handed_yes_refused(rest[0].lower(), d, yes_n)
         if why:
             print(f"Refused: {why}. A yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], a line he said or typed "
                   "on a call or in a chat; an agent's words never stand for it.")
             return 2
+        role.note_handed(f"cycles yes {rest[0]}", d)
+    elif cmd == "yes" and len(rest) >= 2:  # F114: his yes is his own words in a real line
+        backup = role.is_backup()
+        why, hit = his_yes_line(rest[1]) if backup else ("", None)
+        why = why or ("" if backup else his_yes_refused(rest[0].lower(), rest[1], yes_n))
+        if why:
+            print(f"Refused: {why}. A yes to a held change is his own words: cycles.py yes AGENT \"HIS WORDS\" [N], a line he said or typed "
+                  "on a call or in a chat; an agent's words never stand for it.")
+            return 2
+        if backup:  # checked here: his line goes to the main, which fits it to its own holds
+            return role.forward("cycles", list(argv), env=role.checked_env(rest[1], [hit] if hit else []))
     # harm 9: on the backup a call's change goes to the main, as schedule.py's does: only the main writes these
     if cmd in ("set", "order", "yes", "no") and not os.environ.get("HQ_ROLE_HERE"):
-        import role
         if role.is_backup():
             return role.forward("cycles", list(argv))
     try:
