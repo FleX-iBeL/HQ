@@ -20525,7 +20525,8 @@ old = {'n': 10, 'kind': 'qa', 'est': 10, 'latest': 30, 'actual': 25, 'done': int
 gone = dict(line(11, 'qa', 10, 20, 15), done=int(now) - 9 * 86400)
 one = E.friday_report(hist=[gone] + week + [old], now=now)
 two = E.friday_report(hist=[gone] + week + [dict(line(12, 'research', 10, 20, 44), done=int(now) - 60)], now=now)
-print(json.dumps({'one': one, 'two': two, 'kind': dl.KINDS['estimates']}))
+twice = E.friday_report(hist=week[:7] + [dict(line(399, 'build', 20, 40, 55), done=int(now) - 900), dict(line(399, 'build', 20, 40, 58), done=int(now) - 300, machine='u')], now=now)
+print(json.dumps({'one': one, 'two': two, 'twice': twice, 'kind': dl.KINDS['estimates']}))
 """
         r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
         need(r.returncode == 0, f"F79: the Friday report didn't run: {r.stderr[-800:]}")
@@ -20538,7 +20539,52 @@ print(json.dumps({'one': one, 'two': two, 'kind': dl.KINDS['estimates']}))
         need("8 of 10 jobs finished by the latest end" in two and "below nine in ten" in two and "2 past it (the bar is at most 1 in 20, so it's broken)" in two
              and "research 1 of 1" in two, f"F79: a week under the bar: {two}")
         need("nine in ten" in o["kind"] and "eight in ten" not in o["kind"], f"F79: her words for the report still say eight in ten: {o['kind']}")
+        need("Past their latest end: build 1 of 1." in o["twice"] and "7 of 8 jobs" in o["twice"], f"F79: one job closed twice counts twice in the Friday report: {o['twice']}")
         return "the week held to F79's latest end and nine in ten, per kind, rough and from before said apart, the last 20 against 1 in 20; her words say nine in ten"
+
+    async def flow454(self) -> str:
+        """F79, no Claude: the repeat's hold and tries follow the calendar day. Six failed starts on one day stop, and open the
+        incident estimate-misses (a red line); two days later a new repeat starts its tries over and goes, and the incident
+        closes. A repeat raised at 23:50 holds a new one at 23:55, not one at 00:10 the next day. Past 500 misses none is
+        told twice: the told jobs are kept by number, without a cap."""
+        _, _, o = self._misses("f79day", """
+import incidents
+starts = []
+Ms._start_raise = lambda: starts.append(1)
+day1 = time.mktime((2026, 9, 22, 12, 0, 0, 0, 0, -1))
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+for k in range(8):
+    Ms.sweep(hist, now=day1 + k * 60)
+out = {'day1': len(starts), 'day1_state': Ms._load(), 'down': bool(incidents.is_down('estimate-misses'))}
+hist.append(line(723, 'build', 20, 40, 70, 22))
+r = Ms.sweep(hist, now=day1 + 2 * 86400)
+out['day3'] = r
+Ms._start_raise = lambda: (starts.append(1), Ms.raise_pending())
+Ms.sweep(hist, now=day1 + 2 * 86400 + 60)
+out['day3_state'] = Ms._load(); out['back'] = not incidents.is_down('estimate-misses')
+fresh()  # the calendar day: raised at 23:50
+st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 50, 0, 0, 0, -1)); Ms._save(st)
+Ms._start_raise = lambda: starts.append('late')
+h2 = ontime(800) + [line(821, 'research', 10, 20, 31, 20), line(822, 'research', 10, 20, 33, 21)]
+out['2355'] = Ms.sweep(h2, now=time.mktime((2026, 9, 22, 23, 55, 0, 0, 0, -1)))['started']
+h2.append(line(823, 'research', 10, 20, 35, 22))
+out['0010'] = Ms.sweep(h2, now=time.mktime((2026, 9, 23, 0, 10, 0, 0, 0, -1)))['started']
+os.environ['HQ_TEAM_LINE'] = '0'  # no notes on a line: 510 misses kept in the file, fast
+fresh()
+h3 = [line(2000 + i, 'qa', 10, 20, 45, i) for i in range(510)]
+a = Ms.sweep(h3, now=day1); b = Ms.sweep(h3, now=day1 + 60)
+out['many'] = [len(a['kept']), len(b['kept']), len(Ms._load()['told'])]
+print(json.dumps(out))
+""")
+        p1 = o["day1_state"].get("pending") or {}
+        need(o["day1"] == 6 and p1.get("tries") == 6 and p1.get("id") == "misses-2026-09-22" and o["down"], f"F79: six failed starts don't stop or open the incident: {o['day1']} {p1} down {o['down']}")
+        p3 = o["day3"].get("pending") or {}
+        need(p3.get("id") == "misses-2026-09-24" and p3.get("tries") == 1 and o["day3"]["started"], f"F79: a new day's repeat inherits the old tries: {p3}")
+        need(o["day3_state"].get("raised") and not o["day3_state"].get("pending") and o["back"], f"F79: the new day's repeat didn't go, or the incident stays open: {o['day3_state']} back {o['back']}")
+        need(o["2355"] is False and o["0010"] is True, f"F79: the hold doesn't follow the calendar day: 23:55 {o['2355']}, 00:10 {o['0010']}")
+        need(o["many"] == [510, 0, 510], f"F79: past 500 misses the oldest are told again: {o['many']}")
+        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; the hold is the calendar day; 510 misses told once each"
 
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
@@ -36955,6 +37001,7 @@ FLOWS = {
     451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
     452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
     453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
+    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; the hold is the calendar day; past 500 misses none is told twice", False, "flow454"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),

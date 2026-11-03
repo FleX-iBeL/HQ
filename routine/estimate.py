@@ -1416,6 +1416,12 @@ def friday_report(hist=None, now=None):
     hist = all_history() if hist is None else hist
     now = time.time() if now is None else now
     week = [h for h in _real(hist) if (h.get("done") or 0) >= now - 7 * 86400 and h.get("est")]
+    one = {}  # F79: a job closed twice (or on both computers) counts once, by its latest close, as misses.last() does
+    for i, h in enumerate(week):
+        k = ("n", h["n"]) if h.get("n") is not None else ("line", i)
+        if k not in one or (h.get("done") or 0) >= (one[k].get("done") or 0):
+            one[k] = h
+    week = sorted(one.values(), key=lambda h: h.get("done") or 0)
     own = [h for h in week if mistake(h)]  # H286: kept out of the share, said on their own
     week = [h for h in week if not mistake(h)]
     own_words = ("" if not own else f" {len(own)} ran long through their own mistake and aren't counted: "

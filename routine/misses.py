@@ -16,13 +16,16 @@ told once and one repeat raised once, whatever closed it where:
     estimate-miss): which job, the kind of work, its range (likely to latest), its real time, how sure the estimate was; its
     row's id when it's on the record (F103). Without her line (no Moneypenny, or HQ_TEAM_LINE=0, as on a friend's HQ) no note
     is written anywhere he reads: it's kept in this file only (misses.py shows it). It counts as told only once it's written.
-  * a repeat goes to him through her, as a text on her line (estimate-misses), at most once a day (REPEAT_GAP), when either:
+  * a repeat goes to him through her, as a text on her line (estimate-misses), at most once a calendar day (the day of its
+    line id, so two computers and the hold agree), when either:
       - the bar is broken: more than MOST of the last WINDOW counted jobs ran past their latest end (2 or more in 20), or
       - the same kind of work missed twice in a row: the last two counted jobs of one kind (measured.group) both ran past it.
     [Both rules are the builder's reading of "escalate if things repeat" next to "at most 1 miss in 20".]
     It's sent by a run of its own (her words go through Claude), and counts as raised only once the text stands in her thread;
-    until then it waits as pending and is tried again every RETRY_S, at most TRIES times. The text's line id is the day's, so
-    even two computers on one line give one text.
+    until then it waits as pending and is tried again every RETRY_S, at most TRIES times; then the incident estimate-misses
+    opens (a red line, and Donna's text when it stays down), until a repeat goes again. A new day's repeat starts its tries
+    over. The text's line id is the day's, so even two computers on one line give one text. The jobs told are kept by number,
+    without a cap, so a miss is never told twice however many there were.
 
 Never from a test, unless it says so (HQ_MISSES=1) and gave its own line (HQ_DIRECT_DIR); HQ_MISSES_SYNC=1 waits for the text.
 
@@ -49,7 +52,7 @@ import estimate as E  # noqa: E402
 
 WINDOW = 20  # his bar: at most 1 miss in 20
 MOST = 1
-REPEAT_GAP = 86400  # a repeat raised at most once a day; a miss after that, while it still repeats, raises it again [the builder's]
+INCIDENT = "estimate-misses"  # the red line when a repeat couldn't be sent after TRIES tries
 RETRY_S = int(os.environ.get("HQ_MISSES_RETRY") or 600)  # a repeat that didn't go is tried again after this
 TRIES = 6
 KEPT_MOST = 50
@@ -175,6 +178,23 @@ def raise_id(now: float) -> str:
     return "misses-" + time.strftime("%Y-%m-%d", time.localtime(now))
 
 
+def _raised_today(st: dict, now: float) -> bool:
+    """A repeat went today, by the calendar day (the same day as the line id it went with)."""
+    r = st.get("raised")
+    return bool(r) and raise_id(float(r)) == raise_id(now)
+
+
+def _incident(down: bool, why: str = "") -> None:
+    try:
+        import incidents
+        if down:
+            incidents.down(INCIDENT, why[:300])
+        elif incidents.is_down(INCIDENT):
+            incidents.up(INCIDENT, what="The repeat of the estimate misses went to him again")
+    except Exception as e:
+        print(f"(the incident about the repeat: {e!r})", file=sys.stderr)
+
+
 def _start_raise() -> None:
     py = os.path.join(ROOT, ".venv", "bin", "python")
     cmd = [py if os.path.exists(py) else sys.executable, os.path.abspath(__file__), "raise"]
@@ -223,19 +243,24 @@ def sweep(hist: list[dict] | None = None, now: float | None = None) -> dict:
                     continue
                 out["told"].append(job_key(h))
             told.append(job_key(h))
-        st["told"] = told[-500:]
+        st["told"] = told  # every missed job by number, no cap: past any number of misses none is told twice
         why = repeats(hist) if new else []
-        if why and now - float(st.get("raised") or 0) >= REPEAT_GAP:
+        if why and not _raised_today(st, now):
             p = st.get("pending") or {}
-            st["pending"] = {"why": " ".join(why), "id": raise_id(now), "tries": int(p.get("tries") or 0), "last": float(p.get("last") or 0)}
+            same = p.get("id") == raise_id(now)  # today's repeat again: its tries go on; a new day's starts over
+            st["pending"] = {"why": " ".join(why), "id": raise_id(now), "tries": int(p.get("tries") or 0) if same else 0,
+                             "last": float(p.get("last") or 0) if same else 0.0}
         p = st.get("pending")
-        if p and now - float(st.get("raised") or 0) < REPEAT_GAP:
+        if p and _raised_today(st, now):
             st["pending"] = p = None  # it went meanwhile
         start = bool(p) and now - float(p.get("last") or 0) >= RETRY_S and int(p.get("tries") or 0) < TRIES
         if start:
             p["tries"], p["last"] = int(p.get("tries") or 0) + 1, now
+        gave_up = bool(p) and not start and int(p.get("tries") or 0) >= TRIES
         out["pending"] = p
         _save(st)
+    if gave_up:
+        _incident(True, f"The repeat of the estimate misses couldn't be sent to him after {TRIES} tries: {p.get('why')}")
     if start:
         _start_raise()
         out["started"] = True
@@ -261,6 +286,7 @@ def raise_pending() -> str:
             st = _load()
             st["raised"], st["raised_why"], st["pending"] = time.time(), p["why"], None
             _save(st)
+        _incident(False)
         return "raised"
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
