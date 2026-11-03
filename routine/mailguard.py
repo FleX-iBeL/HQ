@@ -197,6 +197,7 @@ def search_text() -> str:
     _put(_plan_file(), {"searches": qs, "at": time.time(), "marker": marker(text)})  # the marker at the start: a hand change
     # during the run (touched) moves what the list is held against, not this
     _put(_reach_file(), {})
+    _put(_open_file(), {})
     return "\n".join(f"   - `{q}`" for q in qs)
 
 
@@ -208,6 +209,16 @@ def _plan_file() -> str:
 
 def _reach_file() -> str:
     return os.path.join(RUN, "mail-reach.json")
+
+
+def _open_file() -> str:
+    """When the open search (today's, no end) was first made: its halves come minutes later, so mail between isn't in either."""
+    return os.path.join(RUN, "mail-reach-open.json")
+
+
+def _misses_file() -> str:
+    """How many good runs in a row didn't reach everything (kept across runs): the incident opens on the second."""
+    return os.path.join(RUN, "mail-reach-misses.json")
 
 
 def _put(p: str, data) -> None:
@@ -289,6 +300,11 @@ def reach(n: int, query: str) -> str:
         got = _get(_reach_file()) or {}
         got[q] = int(n)
         _put(_reach_file(), got)
+        if q == root and "before:" not in root:
+            first = _get(_open_file()) or {}
+            if root not in first:
+                first[root] = time.time()
+                _put(_open_file(), first)
     if n < CAP:
         return "Reached: everything this search finds is in its answer."
     kids = children(root, q)
@@ -359,14 +375,28 @@ def _hold_marker(missed: list[tuple[str, str]], old_m) -> None:
     days = [d for d in (_first_day(r) for r, _ in missed) if d is not None]
     if not days:
         return
-    upto = min(days) * 86400 - EASTMOST_CLOCK - MARGIN_S
+    _hold_at(min(days) * 86400 - EASTMOST_CLOCK - MARGIN_S, old_m, f"{_day_words(missed[0][0])}, which isn't all read yet")
+
+
+def _hold_open(plan: list[str], got: dict, old_m) -> None:
+    """F110, the check's point 5: today's search was split, and its halves came minutes after it, so a mail that came in between
+    is in neither. The marker goes no further than when that search was first made."""
+    first = _get(_open_file()) or {}
+    for r in plan:
+        if "before:" not in r and r in first and any(k.startswith(r + " ") for k in got):
+            _hold_at(int(first[r]) - MARGIN_S, old_m, "the moment today's search was split")
+
+
+def _hold_at(upto, old_m, words: str) -> None:
     text = _read()
     m = marker(text)
     if m is None or m <= upto:
         return
     hold = max(upto, old_m) if old_m is not None else upto
+    if hold >= m:
+        return
     new = re.sub(r"^Marker:.*$", f"Marker: {hold} ({time.strftime('%-d %B %Y %H:%M', time.localtime(hold))}; held before "
-                 f"{_day_words(missed[0][0])}, which isn't all read yet)", text, count=1, flags=re.M)
+                 f"{words})", text, count=1, flags=re.M)
     tmp = hqlock.tmp(path())
     with open(tmp, "w", encoding="utf8") as f:
         f.write(new)
@@ -382,17 +412,27 @@ def _reach_after(ok: bool, old_m, incidents, routines, log=print) -> list[tuple[
         return []  # a run started before F110, or a test of the list alone: nothing known about its searches
     if started.get("marker") is not None:
         old_m = started["marker"]
-    missed = reached(plan)
+    got = _get(_reach_file()) or {}
+    missed = reached(plan, got)
     if missed:
         _hold_marker(missed, old_m)
-    for p in (_plan_file(), _reach_file()):
+    _hold_open(plan, got, old_m)
+    for p in (_plan_file(), _reach_file(), _open_file()):
         try:
             os.remove(p)
         except OSError:
             pass
     if not ok:
         return missed
-    if missed:
+    misses = ((_get(_misses_file()) or {}).get("n", 0) + 1) if missed else 0
+    _put(_misses_file(), {"n": misses})
+    if missed and misses < 2 and not incidents.is_down(REACH_KEY):
+        # F110, the check's point 4: one miss alone (often a search the model didn't report) only holds the marker; the next run
+        # reads that day again. The incident opens on the second good run in a row that misses, so he isn't texted down and back.
+        day = _day_words(missed[0][0])
+        routines.beat(REACH_KEY, state="ok", text=f"Not all of {day} read yet; the next run reads it again"[:200], every=60)
+        log(f"mail check didn't reach {day} (first miss): {missed[0][1]}")
+    elif missed:
         day = _day_words(missed[0][0])
         why = (f"The mail check couldn't read all the mail of {day}: {missed[0][1]}. So some mail of that day may not be read "
                "yet. The newest mail seen stays before that day, so every run reads it again until it gets all of it")

@@ -715,6 +715,7 @@ def mail_running():
     if pid and alive(pid):
         if time.time() - started > MAIL_TIMEOUT:
             end_chat(pid)
+            mailguard.after_run(False, incidents, routines, log=log)  # F110: a run cut off still holds the marker; the guard too
             log("mail check ran over 20 minutes; ended it")
             incidents.down("mail", "Ran over 20 minutes", at=started)
             incidents.fix("mail", "Ended it; the next one starts on the hour")

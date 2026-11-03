@@ -16938,9 +16938,9 @@ def marker_is(t):
     open(inbox, "w").write(text)
 mk = lambda: M.marker(open(inbox).read())
 said = {}
-def run(conn, stop_after=None):
+def run(conn, stop_after=None, forget=False):
     """One run: the routine's real start, the stand-in reader doing what it was given, the routine's real end. stop_after: the
-    run dies after that many searches (no exit line)."""
+    run dies after that many searches (no exit line). forget: it doesn't report its first search."""
     tick.start_mail()
     prompt = open(os.path.join(os.environ["HQ_JOB_RUN"], "mail-check.md")).read()
     qs = re.findall(r"^   - `(after:[^`]*)`", prompt, re.M)
@@ -16955,6 +16955,8 @@ def run(conn, stop_after=None):
         for t in got:
             answers[t["id"]] = t
             ids += [m["id"] for m in t["messages"]]
+        if forget and made == 1:
+            continue
         r = subprocess.run([sys.executable, reach, "reach", str(len(got)), q], capture_output=True, text=True)
         need(r.returncode == 0, r.stderr[-300:])
         todo += re.findall(r"^- `([^`]+)`", r.stdout, re.M)
@@ -17005,10 +17007,13 @@ for i in range(5):
     c.mail(held_day + DAY + HOUR + i * 600, f"later {i}")
 start = mk()
 new, fresh = run(c)
-inc = reach_inc()
-need(inc and inc.get("to") == "moneypenny" and "couldn't read all the mail" in inc["why"], f"no incident for Moneypenny: {inc}")
+need(not reach_inc(), f"the first miss opened an incident: {reach_inc()}")  # the check's point 4: the second miss in a row opens it
 need(start <= mk() < held_day, f"the marker isn't held before that day: {start} {mk()} {held_day}")
 need({f"later {i}" for i in range(5)} <= {m["subject"] for m in fresh}, "the later mail wasn't written down")
+need(not any(m["subject"].startswith("later") for m in run(c)[1]), "a line written twice")
+inc = reach_inc()
+need(inc and inc.get("to") == "moneypenny" and "couldn't read all the mail" in inc["why"], f"no incident for Moneypenny on the second miss: {inc}")
+need(start <= mk() < held_day, f"the second run moved the marker past the day: {mk()}")
 need(routines.read()["mailreach"]["state"] == "down", "the line isn't red")
 data = incidents.read()
 for i in data["incidents"]:
@@ -17065,6 +17070,63 @@ need(M.reached([r], {r: 12}) == [], "a search under 50 isn't reached")
 # 7. While he sleeps the text waits for the morning; it isn't one that can't wait.
 os.environ["HQ_ASLEEP"], os.environ["HQ_DIRECT_DRY"] = "1", "1"
 need(direct_line.can_wait("down", downs[0]) and direct_line.text("down", downs[0]).get("held"), "it wakes him at night")
+# 8. The check's point 2: a run ended at 20 minutes still holds the marker before a capped day.
+tick.start_mail()
+plan = M.searches()  # what the run was given (the plan was written at its start)
+past = plan[0]
+need("before:" in past, f"the flow wants a day before today: {plan}")
+r = subprocess.run([sys.executable, ROOT + "/routine/mailguard.py", "reach", "50", past], capture_output=True, text=True)
+need("Search these two too" in r.stdout, r.stdout)
+marker_is(now - 60)  # the model moved the marker, as it does, then ran out of time
+open(tick.MAIL_PID, "w").write("4242")
+json.dump({"pid": 4242, "started": time.time() - tick.MAIL_TIMEOUT - 5}, open(tick.MAIL_STATE, "w"))
+real_alive, real_end = tick.alive, tick.end_chat
+tick.alive, tick.end_chat = (lambda pid: True), (lambda pid: None)
+need(tick.mail_running() is False, "the run over 20 minutes wasn't ended")
+tick.alive, tick.end_chat = real_alive, real_end
+need(M.searches()[0] == past, f"the capped day is gone from the next run: {M.searches()[:2]} (it was {past})")
+# 9. The check's point 5: today's search split minutes apart: the marker goes no further than its first report.
+tick.start_mail()
+plan, old = M.searches(), mk()
+opened = plan[-1]
+need("before:" not in opened, plan)
+rr = lambda n, q: subprocess.run([sys.executable, ROOT + "/routine/mailguard.py", "reach", str(n), q], capture_output=True, text=True).stdout
+for q in plan[:-1]:
+    rr(0, q)
+t0 = time.time()
+halves = re.findall(r"^- `([^`]+)`", rr(50, opened), re.M)
+need(len(halves) == 2, "today's search wasn't split")
+time.sleep(1.2)
+rr(30, halves[0]), rr(25, halves[1])
+marker_is(now + 600)  # a mail seen in the second half, minutes after the first
+open(os.path.join(os.environ["HQ_JOB_RUN"], "mail.log"), "w").write("--- 2026-11-03 10:00:00\nAdded 1 mail.\n--- exit 0\n")
+json.dump({"pid": None, "started": time.time() - 200}, open(tick.MAIL_STATE, "w"))
+tick.clear(tick.MAIL_PID)
+need(tick.mail_running() is False, "the run didn't end")
+need(not reach_inc() and old <= mk() <= t0, f"the marker went past today's first search: {mk()} {t0}")
+# 10. The check's point 4: a run that forgets one report holds the marker and nothing more; good, forget, good, forget: no
+# incident and no text; two forgotten in a row: one incident, one text, and the next good run closes it.
+run(c)
+texts = len([1 for w, f in got_texts if w == "down" and "mailreach" in f])
+def told():
+    data = incidents.read()
+    for i in data["incidents"]:
+        i["down"] -= direct_line.DOWN_AFTER + 1
+    incidents._write(data)
+    donna()
+    return len([1 for w, f in got_texts if w == "down" and "mailreach" in f])
+for forgot in (True, False, True, False, True, False):
+    held = mk()
+    run(c, forget=forgot)
+    need(not reach_inc() and told() == texts, f"a single miss reached him (forget={forgot}): {all_reach()[-1:]}")
+    need(not forgot or mk() <= held, "a forgotten search let the marker move")
+n = len(all_reach())
+run(c, forget=True), run(c, forget=True)
+need(reach_inc() and len(all_reach()) == n + 1 and told() == texts + 1, f"two misses in a row: {all_reach()[-1:]}")
+run(c, forget=True)
+need(len(all_reach()) == n + 1 and told() == texts + 1, "a third miss texted again")
+run(c)
+need(not reach_inc(), "a good run didn't close it")
 print("OK")
 '''
         r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=180)
