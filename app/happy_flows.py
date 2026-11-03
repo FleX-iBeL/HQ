@@ -4581,6 +4581,31 @@ window.addEventListener('load', () => setTimeout(() => {
              and "won't fit one night" not in pm, "H276: her craft still sizes work into nights while readying it")
         tourtext = (Path(__file__).parent / "web" / "tour.json").read_text(encoding="utf8")
         need("never builds or fixes HQ herself" in tourtext, "H290: the tutorial's Moneypenny step doesn't say she never builds")
+        # H303 (30 October 2026): she carries the team's findings back, she isn't the inventor; what the review or the team can
+        # settle isn't his question; a change to her own way of working goes to the team. In HQ's defaults, and on a blank
+        # template HQ the same, read through agents.persona there (the way flow 185 makes one).
+        h303 = ("You carry the team's findings back (H303)", "not the inventor", "give what the team found or proposed",
+                "say so and that the question goes to them, with no fix of your own", "first look at what they wrote since",
+                "no second row and no idea of your own", "take it through the review or to the team and tell him it went there",
+                "only what just he can answer goes on the sit-down list", "you edit nothing of HQ's",
+                "these instructions (app/agents.py) included", "write a row for the team and say so",
+                "doesn't touch development, or it never goes into a release")
+        for w in h303:
+            need(w in pm, f"H303: her persona misses {w!r}")
+        need(len(m["craft"]) <= agents.CRAFT_MAX and agents._clean(dict(m))["craft"] == m["craft"].strip(),
+             f"H303: her craft is cut on load ({len(m['craft'])} of {agents.CRAFT_MAX} characters)")
+        ws303, env303 = self._h298_ws("h303", maker=False)
+        code = ("import sys, json; sys.path.insert(0, %r); import agents; from pathlib import Path\n"
+                "m = next(a for a in agents.load(Path(%r)) if a['id'] == 'moneypenny')\n"
+                "print(json.dumps(agents.persona(m, 'Sam')))") % (str(APP), str(ws303))
+        blank = json.loads(self._h298_py(env303, code).strip().splitlines()[-1])
+        missing = [w for w in h303 if w not in blank]
+        need(not missing, f"H303: on a blank template HQ her persona misses {missing}")
+        need("not ideas of her own" in tourtext and "she says so and it goes to them" in tourtext
+             and "without asking you" in tourtext and "how she works herself goes to the team too" in tourtext,
+             "H303: the tutorial's Moneypenny step doesn't say she carries the team's findings back")
+        need(not any(w in agents.persona(every[x], "Alex") for x in ("donna", "pepper") for w in h303[:2]),
+             "H303: Donna or Pepper got Moneypenny's line")
         need("grounds each decision" in tourtext and "she sits down with you" in tourtext and "works out the right answers herself" not in tourtext
              and "yes but" in tourtext and "checked twice" not in tourtext, "the tutorial's Moneypenny step doesn't say how she runs")
         need("MoSCoW first, then bugs before features" in pm and "a Must feature stays above a Should bug" in pm,
@@ -10195,7 +10220,7 @@ setTimeout(() => {
         c = mp.get("craft", "")
         need("MoSCoW first, then bugs before features" in c and "a Must feature stays above a Should bug" in c
              and "always" not in c.split("MoSCoW first")[1][:200] and "tech debt" in c and "interest on a loan" in c and "Features and Bugs" in c
-             and "bug check" in c and "MoSCoW" in c and len(c) <= 8000, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
+             and "bug check" in c and "MoSCoW" in c and len(c) <= agents.CRAFT_MAX, "H271: Moneypenny's craft doesn't put bugs first, explain tech debt, keep them apart and suggest a bug check")
         need("bugs before features" in agents.persona(mp).lower() if hasattr(agents, "persona") else True, "H271: her persona doesn't carry it")
         fresh = (ROOT / "template/HQ/roadmap.md").read_text()
         need("## Phase F · Bugs" in fresh and "## Phase H · Features" in fresh and "tech debt" in fresh, "H271: a fresh roadmap doesn't keep Bugs and Features apart")
@@ -15068,7 +15093,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         import handbook as hb
         m = next(a for a in agents.DEFAULTS if a["id"] == "moneypenny")
         c = m["craft"]
-        need(len(c) <= 8000 and agents._clean(dict(m))["craft"] == c.strip(), f"her craft is cut on load ({len(c)} characters)")
+        need(len(c) <= agents.CRAFT_MAX and agents._clean(dict(m))["craft"] == c.strip(), f"her craft is cut on load ({len(c)} characters)")
         pm = agents.persona(m, "Alex")
         why = ("Look, these checklist and prep work on the items are KEY to making whole of HQ work You have a very "
                "important role as an agent, because you will eventually offload a lot of my life and work towards the "
