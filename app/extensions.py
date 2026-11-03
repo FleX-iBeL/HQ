@@ -25,6 +25,7 @@ steps for the mail check). HQ reads them at its fixed points:
     texts        direct_line._text_rules(), every text          rule("text")
     kinds of texts  direct_line.compose_prompt(), HQ's own first   text_kind(why)
     mail check   tick.start_mail(), its {EXTENSIONS} step       mail_steps()
+                 also on a quiet hour (step 3's {QUIET})   quiet_step()
     scripts      a call, a text or the mail check runs one       run EXT SCRIPT [ARGS]
     routines     tick.py every minute, each at its own `every`  routines()
 HQ's version leads: an extension never replaces one of HQ's own text kinds, files or rules; where both say something,
@@ -233,6 +234,19 @@ def mail_steps() -> str:
                          + ("\n   Its scripts you may run, each as exactly one Bash command:\n" + "\n".join("   " + s for s in sc)
                             if sc else ""))
     return "\n".join(parts) if parts else "(no extensions add steps)"
+
+
+QUIET_STOP = "If nothing is newer than the marker, stop: change nothing, commit nothing."
+QUIET_EXTENSIONS = ("If nothing is newer than the marker, HQ's own work stops here for this hour: skip steps 4, 4b, 5 and 6, and leave "
+                    "the marker as it is. Their own extensions' steps still run on a quiet hour: go straight to step 6b and do what it "
+                    "says, writing what it finds into inbox.md the way step 4 says; then step 7 only if inbox.md changed.")
+
+
+def quiet_step() -> str:
+    """H235, gap 1: the last words of the mail check's step 3, for an hour with nothing newer than the marker in Gmail. With no
+    extension that adds a mail step it stops as it always did; with one, only the extensions' step 6b runs (an Apple Mail
+    extension's mail doesn't wait for a Gmail mail to come in), and none of HQ's own steps."""
+    return QUIET_EXTENSIONS if any(e.get("mail") for e in on()) else QUIET_STOP
 
 
 def mail_tools() -> list[str]:

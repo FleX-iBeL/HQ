@@ -58,7 +58,7 @@ Scripts and routines run in their own folder, with `HQ_ROOT` (HQ), `HQ_WORKSPACE
 | The call rules | at every call start | each extension's `call.md` and its scripts |
 | The text rules | at every text | `text.md` and its scripts |
 | Kinds of texts | when the agent texts | `texts`, after HQ's own |
-| The mail check | every run | `mail.md`, its scripts with `"mail": true` |
+| The mail check | every run, also an hour with no new mail in Gmail (then only the extensions' step runs, none of HQ's own) | `mail.md`, its scripts with `"mail": true` |
 | Routines | every minute, each at its own `every` | `routines` |
 | Scripts | when a call, text or the mail check runs one | `scripts` |
 

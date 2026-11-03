@@ -7651,6 +7651,26 @@ __EXTRA__</script>""")
             allow, _ = tick.mail_tools(False)
             need(f"Bash(python3 {APP / 'extensions.py'} run demo-mail read:*)" in allow and "careful" not in allow,
                  "the mail check may not run the extension's mail script, or may run others")
+            # Gap 1: a quiet hour in Gmail no longer stops the check before an extension's step. With one that adds a mail
+            # step, step 3 sends a quiet hour straight to 6b and none of HQ's own steps; without one it stops as it always did.
+            raw = (ROOT / "routine/mail-check.md").read_text()
+            need("{QUIET}" in raw and "If nothing is newer than the marker, stop" not in raw, "step 3 still stops before the extensions' step")
+            text = tick.mail_instructions()
+            s3, s4, s6b = text.index("\n3. "), text.index("\n4. "), text.index("\n6b. ")
+            need("{QUIET}" not in text and "{EXTENSIONS}" not in text and ex.QUIET_EXTENSIONS in text[s3:s4]
+                 and "Flow one three eight's mail step" in text[s6b:] and "skip steps 4, 4b, 5 and 6" in ex.QUIET_EXTENSIONS
+                 and "leave the marker as it is" in ex.QUIET_EXTENSIONS and "go straight to step 6b" in ex.QUIET_EXTENSIONS
+                 and "If nothing is newer than the marker, stop" not in text, f"a quiet hour with an extension's mail step: {text[s3:s4][-500:]}")
+            plain = base / "no-mail-step"
+            (plain / "plain").mkdir(parents=True)
+            (plain / "plain" / "extension.json").write_text(json.dumps({"name": "Plain", "what": "Adds no mail step."}))
+            for f_ in (plain, base / "none-at-all"):
+                os.environ["HQ_EXTENSIONS_FOLDER"] = str(f_)
+                text = tick.mail_instructions()
+                s3, s4 = text.index("\n3. "), text.index("\n4. ")
+                need(ex.QUIET_STOP in text[s3:s4] and ex.QUIET_EXTENSIONS not in text and "(no extensions add steps)" in text,
+                     f"a quiet hour without an extension's mail step doesn't stop as before ({f_.name})")
+            os.environ["HQ_EXTENSIONS_FOLDER"] = str(ext)
             # A script: only the declared ones; on a call, "ask" asks.
             r = sp.run([sys.executable, str(APP / "extensions.py"), "run", "demo-mail", "read", "a", "b"], capture_output=True, text=True, env=os.environ)
             need(r.returncode == 0 and r.stdout.startswith("read a b") and str(d) in r.stdout, f"the script didn't run: {r.stdout}{r.stderr}")
