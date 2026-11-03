@@ -20816,6 +20816,117 @@ print(r["weekly"]["pct"])
         need(r.returncode == 0, f"a QA job needs a record: {r.stderr}")
         return "no record, a failing flow, an older commit or an unread note keep a job open; a green record passes; only his own words go past it; a clean exit isn't done"
 
+    async def flow460(self) -> str:
+        """F121, no Claude: one run on a commit stands as the proof for every row it holds. proof.py run-rows runs the quick set
+        once and each row's own flows: two rows with commits both get a green record from one run, under one id; a row with no
+        commits gets none and is named; one row's own flow red makes only that row red; a red quick set makes both red; a row's
+        commit listed in qa.COMMITS_FOR counts; qa.py pass takes the record; jobs.py done still asks for a job's own record; and
+        it waits its turn on the full runs' lock."""
+        import fcntl
+        import subprocess as _sp
+        ws, env, repo, fails = self._proof_env("f121")
+        env.pop("HQ_JOB", None)
+        lockf = self.tmp / "f121-fullrun.lock"
+        env["HQ_FULLRUN_LOCK"] = str(lockf)
+        rm = ws / "HQ/roadmap.md"
+        rows = ("| ⬜ | F9701 A row | What's wrong: x. Flow 901 must hold. | | | |\n| ⬜ | F9702 Another row | What's wrong: y. Happy flow 902. | | | |\n"
+                "| ⬜ | F9703 A row with no commits | What's wrong: z. Flow 903. | | | |\n| ⬜ | F9704 A row with a listed commit | What's wrong: w. | | | |\n")
+        t = rm.read_text()
+        head_ = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+        need(head_ in t, "no bugs phase")
+        rm.write_text(t.replace(head_, head_ + rows, 1))
+        g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()
+        g("checkout", "-q", "-b", "dev")
+        for name, subject in (("b.py", "F9701: the first row's change"), ("c.py", "F9702: the second row's change"), ("d.py", "a small list")):
+            (repo / name).write_text(f"# {subject}\n")
+            g("add", name)
+            g("commit", "-q", "-m", subject)
+        listed = g("rev-parse", "HEAD")
+        pdir = Path(env["HQ_PROOF_DIR"])
+        def proof(*a):
+            return _sp.run([sys.executable, str(ROOT / "routine/proof.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        def recs():
+            return {json.loads(f.read_text())["label"]: json.loads(f.read_text()) for f in pdir.glob("rows-*-F97*.json")}
+        def latest(label):
+            return json.loads(proof("latest", label).stdout or "{}")
+        # one run, two records
+        r = proof("run-rows", "F9701", "F9702", "F9703")
+        need(r.returncode == 0, f"one run didn't make two green records: {r.stdout} {r.stderr[-600:]}")
+        got = recs()
+        need(set(got) == {"F9701", "F9702"}, f"the records: {sorted(got)} {r.stdout}")
+        a, b = got["F9701"], got["F9702"]
+        need(a["green"] and b["green"] and a["shared"] == b["shared"] and a["shared"], f"not both green from one run: {a} {b}")
+        need(a["head"] == b["head"] == listed, f"a record doesn't stand for the commit: {a['head']} {listed}")
+        need(a["named"] == [901] and b["named"] == [902], f"each row's own flows: {a['named']} {b['named']}")
+        need(a["ran"] == 3 and a["passed"] == 3, f"the quick set and the row's flow: {a['ran']} {a['passed']}")
+        need(any("F9701" in c for c in a["commits"]) and not any("F9702" in c for c in a["commits"]), f"the row's commits: {a['commits']}")
+        need(sorted(a["rows"]) == ["F9701", "F9702"], f"the run's rows: {a['rows']}")
+        need("F9703" in r.stdout and "no record" in r.stdout, f"the row without commits isn't named: {r.stdout}")
+        need(not list(pdir.glob("job-*.json")), "a rows run wrote a job's record")
+        need(latest("F9701").get("shared") == a["shared"], f"latest doesn't read it: {latest('F9701')}")
+        # qa.py pass takes it
+        def qa(label, *a_):
+            return _sp.run([sys.executable, str(ROOT / "routine/qa.py"), "pass", label, "looked fine", "--example", "the example", "--ran", "nothing",
+                            "--got", "fine", *a_], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        r = qa("F9701", "--compared", "rows read whole, 4 of 4")
+        need(r.returncode == 0 and "QA passed" in r.stdout, f"QA's pass refused a rows record: {r.stdout} {r.stderr[-300:]}")
+        r = qa("F9703", "--compared", "rows read whole, 4 of 4")
+        need(r.returncode == 2 and "no record" in r.stdout, f"a row with no commits passed: {r.stdout}")
+        # one row's own flow red: only that row
+        time.sleep(1.1)
+        fails.write_text("902")
+        r = proof("run-rows", "F9701", "F9702")
+        need(r.returncode == 1, f"a red own flow: {r.stdout} {r.stderr[-300:]}")
+        a, b = latest("F9701"), latest("F9702")
+        need(a["shared"] == b["shared"] != got["F9701"]["shared"], f"not the newest run: {a.get('shared')} {b.get('shared')}")
+        need(a["green"] and not b["green"] and any("902: FAILED" in f for f in b["failed"]), f"one row's flow made the other red: {a} {b}")
+        r = qa("F9702", "--compared", "rows read whole, 4 of 4")
+        need(r.returncode == 2 and "wasn't green" in r.stdout, f"a red rows record passed QA: {r.stdout}")
+        # the shared quick set red: both
+        time.sleep(1.1)
+        fails.write_text("1")
+        r = proof("run-rows", "F9701", "F9702")
+        need(r.returncode == 1, f"a red quick set: {r.stdout}")
+        a, b = latest("F9701"), latest("F9702")
+        need(not a["green"] and not b["green"] and all(any("1: FAILED" in f for f in x["failed"]) for x in (a, b)), f"a red quick set left one green: {a} {b}")
+        fails.write_text("")
+        # a commit qa.COMMITS_FOR gives a row counts for it, only as listed
+        drv = self.tmp / "f121-listed.py"
+        drv.write_text("import sys\nsys.path.insert(0, sys.argv[1] + '/routine')\nimport qa, proof\n"
+                       "sha, root = sys.argv[2], proof.ROOT\nfiles = qa.changed_files(root, sha)\n"
+                       "qa.COMMITS_FOR[sha] = {'row': 'F9704', 'files': files, 'diff': sys.argv[3] if len(sys.argv) > 3 else qa.commit_diff(root, sha, files)}\n"
+                       "sys.exit(proof.main(['run-rows', 'F9704']))\n")
+        r = _sp.run([sys.executable, str(drv), str(ROOT), listed, "0000000000000000"], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 2 and "F9704" in r.stdout and "F9704" not in recs(), f"a listed commit whose changes aren't the list's counted: {r.stdout} {r.stderr[-300:]}")
+        r = _sp.run([sys.executable, str(drv), str(ROOT), listed], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 0 and recs().get("F9704", {}).get("green"), f"a listed commit didn't count for its row: {r.stdout} {r.stderr[-300:]}")
+        need(any("a small list" in c for c in recs()["F9704"]["commits"]), f"the listed commit isn't in the record: {recs()['F9704']}")
+        # a job still needs its own record
+        def jobs(*a_):
+            return _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a_], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        time.sleep(1.1)
+        need(proof("run-rows", "F9701").returncode == 0 and latest("F9701")["green"], "the row's record isn't green again")
+        r = jobs("add", "Fix for F9701 (F56): the thing is wrong. Flow 901 must hold.", "--kind", "small")
+        need(r.returncode == 0, f"no job: {r.stdout} {r.stderr}")
+        n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
+        need(jobs("mark", n, "running since 10:00").returncode == 0, "no mark")
+        r = jobs("done", n)
+        need(r.returncode != 0 and "no record" in r.stderr, f"a build went done on a rows record: {r.stdout} {r.stderr}")
+        # it waits its turn on the lock
+        held = open(lockf, "a")
+        fcntl.flock(held, fcntl.LOCK_EX)
+        try:
+            pr = _sp.Popen([sys.executable, str(ROOT / "routine/proof.py"), "run-rows", "F9701"], stdout=_sp.PIPE, stderr=_sp.PIPE, text=True, env=env, cwd=str(ROOT))
+            time.sleep(2.5)
+            need(pr.poll() is None, "it ran past a full run that holds the lock")
+        finally:
+            fcntl.flock(held, fcntl.LOCK_UN)
+            held.close()
+        out, err = pr.communicate(timeout=300)
+        need(pr.returncode == 0 and "waiting" in out, f"after the lock: {out} {err[-300:]}")
+        return ("one run gives two rows a green record each under one id; a row with no commits gets none; one row's flow red makes only it "
+                "red, a red quick set both; a listed commit counts; QA passes on it; a job still needs its own; it waits for the lock")
+
     async def flow206(self) -> str:
         """F101, no Claude: QA's pass stands on a program's run. Refused with no record, with a red record, with no comparison
         or one without numbers; passes with a green record and a comparison that says what, how many, how many right. A
@@ -36957,6 +37068,7 @@ FLOWS = {
     348: ("F116: missing routine lines, usage reading or incident log are red, each saying what it means; grey only in a fresh install's first minutes", False, "flow348"),
     208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
     207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),
+    460: ("F121: one run on a commit is the proof for every row it holds: a record each, a red own flow only red for its row, a red quick set for all", False, "flow460"),
     206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),
     205: ("F101: done is a program's: no record, a failing flow, an older commit or an unread note keep a job open; a clean exit isn't done", False, "flow205"),
     204: ("F101: one reader: an escaped pipe and a status phrase mid-sentence reach the reviewer whole; a QA mark and a release line keep the cells", False, "flow204"),

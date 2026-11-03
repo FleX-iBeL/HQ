@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Items built and checked by hand get their proof from one test run: the quick set runs once on the commit, each item's own tests run after it, and every item with changes in that commit gets its own record, red only for what failed for it or for all (F121).
 - A busy mail day no longer loses mail: when a day has more than one search can show, the mail check splits it until it has read all of it, and a program checks that it did. If a day still can't be read in full, it's read again every hour until it is, nothing gets written down twice, and Donna texts you once (in the morning if you're asleep) and passes it on to Moneypenny (F110).
 - Four small fixes for friends: a fresh install no longer runs old data changes on its brand-new folder; going back on a copy that came as a download finds the versions before it (or says plainly why it can't yet); going forward again brings back what you hadn't committed; and a workspace without backend switches gets the briefing on, so its calls start small, while a Deep call's start is now measured as the whole folder it really loads.
 

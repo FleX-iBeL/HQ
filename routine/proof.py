@@ -8,11 +8,20 @@ Here a program runs the tests on a copy and keeps a record; `jobs.py done` and `
     python3 routine/proof.py run N       job N's record: the commits, the flows its row names plus the quick set, on a copy
     python3 routine/proof.py show N      the record, as it stands
     python3 routine/proof.py latest ROW  the newest record for a row (F99, H283)
+    python3 routine/proof.py run-rows ROW [ROW ...]  F121: the quick set once, each row's own flows, a record per row
 
 A record says what was run and how it came out: {"n", "label", "head", "commits", "named", "ran", "passed", "failed", "green",
 "at"}. It stands for the commit it ran on: new commits after it mean a new run. HQ_PROOF_RUNNER is a test's stand-in for the
 flows (same arguments, same output); HQ_PROOF_ROOT a test's own HQ repository; HQ_PROOF_DIR its own records folder. While a
 test runs (HQ_UNDER_TEST) the gate is off unless HQ_PROOF_ON says it's the gate being tested.
+
+F121 (3 November 2026): items built and checked in a supervised chat, not as jobs, have no record. `run-rows` runs the quick set
+once on the commit HQ is on, then each row's own named flows (one group per row), and writes `rows-<run id>-<ROW>.json` for every
+row with commits in that commit (`commits_of`, or listed in qa.COMMITS_FOR); a row without any gets no record and is named. Each
+is a record as above plus "shared" (the run's id) and "rows" (every row of that run): green only when the shared quick set and that
+row's own flows all passed. `latest()` reads it by its "t" like a job's; `jobs.py done` still needs a job's own record. It takes
+~/hq-fullrun.lock (HQ_FULLRUN_LOCK for a test's own), the lock the whole quick sets by hand take turns on, so two full runs never
+run at once. Exit 0 when every record is green, 1 when one is red, 2 when there was nothing to run.
 """
 from __future__ import annotations
 
@@ -128,12 +137,13 @@ def keep_say_so(j: dict, said: str) -> None:
     _save(rec)
 
 
-def _save(rec: dict) -> None:
+def _save(rec: dict, where: str | None = None) -> None:
     os.makedirs(folder(), exist_ok=True)
-    tmp = path(rec["n"]) + f".{os.getpid()}"
+    where = where or path(rec["n"])
+    tmp = where + f".{os.getpid()}"
     with open(tmp, "w", encoding="utf8") as f:
         json.dump(rec, f, indent=1, ensure_ascii=False)
-    os.replace(tmp, path(rec["n"]))
+    os.replace(tmp, where)
 
 
 def commits_of(label: str | None) -> list[str]:
@@ -216,9 +226,120 @@ def run(n: int) -> int:
     return 0 if rec["green"] else 1
 
 
+def lock_path() -> str:
+    """The lock the full runs take turns on. A test never waits on the real one: a quick set held by hand runs this too."""
+    if os.environ.get("HQ_FULLRUN_LOCK"):
+        return os.environ["HQ_FULLRUN_LOCK"]
+    if hqpaths.under_test():
+        os.makedirs(folder(), exist_ok=True)
+        return os.path.join(folder(), ".fullrun.lock")
+    return os.path.expanduser("~/hq-fullrun.lock")
+
+
+def listed_commits(label: str) -> list[str]:
+    """F121: the commits qa.COMMITS_FOR gives this row that are on this branch, written as commits_of writes them."""
+    import qa
+    base = "origin/main" if _git("rev-parse", "-q", "--verify", "origin/main") else "main"
+    out = []
+    for sha, entry in qa.COMMITS_FOR.items():
+        if entry.get("row") != label:
+            continue
+        if subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, "HEAD"], capture_output=True).returncode:
+            continue
+        if not subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", sha, base], capture_output=True).returncode:
+            continue  # already on the release line, which commits_of leaves out too
+        if qa.listed_row(str(ROOT), sha)[0] == label:
+            out.append(_git("log", "-1", "--format=%h %s", sha))
+    return out
+
+
+def run_rows(labels: list[str]) -> int:
+    """F121: one run on the commit HQ is on stands as the proof for every row it holds."""
+    import fcntl
+    import qa
+    labels = list(dict.fromkeys(x.upper() for x in labels))
+    bad = [x for x in labels if not qa.LABEL.fullmatch(x)]
+    if not labels or bad:
+        print("Which rows? Give their labels, like F121" + (f": not {', '.join(bad)}." if bad else "."))
+        return 2
+    if subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD"]).returncode:
+        print("HQ has changes that aren't committed: commit them first; a record stands for a commit.")
+        return 2
+    text = q.read()[0]
+    rows, none = {}, []
+    for label in labels:
+        commits = commits_of(label)
+        commits += [c for c in listed_commits(label) if c not in commits]
+        if commits:
+            rows[label] = {"commits": commits, "named": named_flows(row_of(text, label))}
+        else:
+            none.append(label)
+    if none:
+        print(f"No commits in this commit for {', '.join(none)}: no record for {'it' if len(none) == 1 else 'them'}.")
+    if not rows:
+        print("Nothing to run.")
+        return 2
+    lock = open(lock_path(), "a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"Another full run holds {lock_path()}: waiting for it.", flush=True)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        head = _git("rev-parse", "HEAD")
+        runid = time.strftime("%Y%m%d-%H%M%S") + "-" + head[:7]
+        at, t = time.strftime("%Y-%m-%d %H:%M"), time.time()
+        own_job = os.environ.get("HQ_JOB") or ""
+        key = own_job or f"rows-{runid}"  # a job that runs it keeps its box still, as with its own run
+        shared = {"ran": 0, "passed": 0, "failed": []}
+        wt = _copy()
+        os.makedirs(folder(), exist_ok=True)
+        import wall
+        wall.proof_start(key)
+        try:
+            with open(os.path.join(folder(), f"rows-{runid}.log"), "w", encoding="utf8") as log:
+                code, out = _flows(wt, nightly.flow_args(), log)
+                p, r_ = nightly.summary(out)
+                shared.update(ran=r_, passed=p, failed=nightly.failures(out)
+                              or ([] if code == 0 and r_ else [f"the quick set ended with exit {code}, {p} of {r_}"]))
+                for label, row in rows.items():
+                    row.update(ran=0, passed=0, failed=[])
+                    if row["named"]:
+                        code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, row["named"]))], log)
+                        p, r_ = nightly.summary(out)
+                        row.update(ran=r_, passed=p, failed=nightly.failures(out)
+                                   or ([] if code == 0 else [f"the named flows {row['named']} ended with exit {code}, {p} of {r_}"]))
+        finally:
+            wall.proof_end(key)
+            if not own_job:
+                wall.forget(key)
+            subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force", wt], capture_output=True)
+            shutil.rmtree(os.path.dirname(wt), ignore_errors=True)
+        sgreen = not shared["failed"] and shared["ran"] > 0 and shared["passed"] == shared["ran"]
+        red = 0
+        for label, row in rows.items():
+            ran, passed = shared["ran"] + row["ran"], shared["passed"] + row["passed"]
+            failed = shared["failed"] + row["failed"]
+            green = sgreen and not row["failed"] and row["passed"] == row["ran"]
+            rec = {"n": None, "label": label, "item": None, "head": head, "commits": row["commits"][:40], "named": row["named"],
+                   "ran": ran, "passed": passed, "failed": failed, "green": green, "at": at, "t": t, "shared": runid, "rows": list(rows)}
+            _save(rec, os.path.join(folder(), f"rows-{runid}-{label}.json"))
+            red += not green
+            print(f"{label}: {passed} of {ran} passed on a copy of {head[:7]}" + (f", named flows {row['named']}" if row["named"] else "")
+                  + (": green." if green else f". Failed: {'; '.join(failed)[:600]}"))
+        print(f"One run ({runid}): the quick set {shared['passed']} of {shared['ran']}, {len(rows)} record{'' if len(rows) == 1 else 's'}"
+              + (f", {red} red." if red else ", all green."))
+        return 1 if red else 0
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[0] == "run" and argv[1].isdigit():
         return run(int(argv[1]))
+    if len(argv) >= 2 and argv[0] == "run-rows":
+        return run_rows(argv[1:])
     if len(argv) == 2 and argv[0] == "show" and argv[1].isdigit():
         print(json.dumps(load(argv[1]) or {}, indent=1, ensure_ascii=False))
         return 0
