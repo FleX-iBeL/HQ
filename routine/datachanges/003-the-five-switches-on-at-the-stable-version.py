@@ -1,9 +1,10 @@
 """H301: at the stable version the five backend switches (the briefing, the open line, headless jobs, one-way sync, the planning index) are on
 by default. A fresh install has them from the template; an HQ that updates gets them once, but only when its file is exactly one HQ wrote
-itself and nobody could have changed by hand: the template's file just before the stable version (the briefing, headless jobs and the
-hand-over), or the file change 002 makes (the briefing, with its set_by). When in doubt, the file is left alone: anything else could be a
-switch turned off by hand (the earlier templates' files are also what a later one looks like with a switch turned off), and keeps its
-switches. With two HQs this runs on the main, and the file reaches the backup the way every synced file does. Its undo puts back the file
+itself: the template's file just before the stable version (the briefing, headless jobs and the hand-over), or the file change 002 makes
+(the briefing, with its set_by). The first can also come from a hand change (an install from c611926's template that turned the hand-over on
+writes the same bytes); that's harmless, because this change only adds switches and keeps every one already on, so nothing turned off by
+hand is turned on. When in doubt, the file is left alone: anything else could be a switch turned off by hand (the earlier templates' files
+are also what a later one looks like with a switch turned off), and keeps its switches. With two HQs this runs on the main, and the file reaches the backup the way every synced file does. Its undo puts back the file
 as it was, unless a switch was turned since."""
 import json
 import os
@@ -12,7 +13,8 @@ WHAT = "The five backend switches are on by default: an HQ whose switches are st
 FILE = "HQ/backend.json"
 ADD = ["briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index"]  # the five
 ORDER = ["briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index", "handover"]
-# The files HQ itself wrote that no hand change can give: the template's from F115 until the stable version, and change 002's.
+# The files HQ itself wrote: the template's from F115 until the stable version, and change 002's. Only switches turned off by hand must
+# never be turned back on; the first can come from turning the hand-over on by hand, which this keeps.
 HQS_OWN = [{"on": ["briefing", "headless_jobs", "handover"]},
            {"on": ["briefing"], "set_by": "HQ: this workspace had no switches yet"}]
 MARK = "HQ: on by default at the stable version (H301)"  # tells this file from one of hers, so the undo takes back only its own
