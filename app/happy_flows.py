@@ -20305,10 +20305,11 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
 
     async def flow470(self) -> str:
         """H301, no Claude: at the stable version the five backend switches are on by default. A fresh install (the installer's own
-        workspace step, the way flow 440 runs it) has all five on and counts the data change as run; an HQ that updates with one of HQ's
-        own earlier files (each template's from before, and change 002's) gets the five once, and its undo gives back the file byte for
-        byte; a file with switches set by hand stays exactly as it is, and so does one turned since. With two HQs the file is a synced one
-        the main writes, so the backup gets the main's."""
+        workspace step, the way flow 440 runs it) has all five on and counts the data change as run; an HQ that updates with exactly one
+        of the files HQ wrote that no hand change gives (the template's just before, change 002's) gets the five once, and its undo gives
+        back the file byte for byte. When in doubt the file is left alone: the older templates' files (each also a later one with a switch
+        turned off by hand), 002's switches without its set_by, any file set by hand, and one turned since. With two HQs the file is a
+        synced one the main writes, so the backup gets the main's."""
         import importlib.util, shutil as _sh, subprocess as _sp
         five = ["briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index"]
         tmp = self.tmp / "h301"
@@ -20342,10 +20343,9 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
         before = (ws / "HQ/backend.json").read_text()
         m.do(ws)
         need((ws / "HQ/backend.json").read_text() == before, "the change wrote over a fresh install's file")
-        # An HQ that updates: each of HQ's own files from before gets the five, and the undo gives the file back as it was.
+        # An HQ that updates with a file HQ wrote that no hand change gives: the five, and the undo gives the file back as it was.
         f = ws / "HQ/backend.json"
         for i, old in enumerate(('{\n  "on": [\n    "briefing",\n    "headless_jobs",\n    "handover"\n  ]\n}\n',
-                                 '{\n  "on": [\n    "briefing",\n    "headless_jobs"\n  ]\n}\n', '{\n  "on": [\n    "headless_jobs"\n  ]\n}\n',
                                  '{\n  "on": [\n    "briefing"\n  ],\n  "set_by": "HQ: this workspace had no switches yet"\n}\n')):
             f.write_text(old)
             m.do(ws)
@@ -20357,9 +20357,14 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             need(json.loads(f.read_text())["on"] == [n for n in m.ORDER if n in five or n in old], f"a second run changed it again: {f.read_text()}")
             m.undo(ws)
             need(f.read_text() == old, f"the undo didn't give file {i + 1} back as it was: {f.read_text()!r}")
-        # The person's own choices stay: a switch set by hand, and one turned after the change.
-        for own in ('{"on": ["briefing", "handover"]}\n', '{"on": ["briefing", "headless_jobs", "planning_index"]}\n', '{"on": []}\n',
-                    '{"on": ["briefing", "headless_jobs", "handover"], "mine": 1}\n'):
+        # When in doubt, left alone: c611926's template with headless jobs turned off by hand (the briefing alone, no set_by), or with the
+        # briefing off (headless jobs alone), an older template that's also F115's with the hand-over off, any switch set by hand, and one
+        # turned after the change.
+        for own in ('{\n  "on": [\n    "briefing"\n  ]\n}\n', '{\n  "on": [\n    "headless_jobs"\n  ]\n}\n',
+                    '{\n  "on": [\n    "briefing",\n    "headless_jobs"\n  ]\n}\n', '{"on": ["briefing", "handover"]}\n',
+                    '{"on": ["briefing", "headless_jobs", "planning_index"]}\n', '{"on": []}\n',
+                    '{"on": ["briefing", "headless_jobs", "handover"], "mine": 1}\n',
+                    '{"on": ["briefing", "headless_jobs"], "set_by": "HQ: this workspace had no switches yet"}\n'):
             f.write_text(own)
             m.do(ws)
             need(f.read_text() == own, f"a file with switches set by hand was changed: {own!r} became {f.read_text()!r}")
@@ -20377,7 +20382,8 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
         sys.path.insert(0, str(ROOT / "routine"))
         import role as _role
         need(not any("HQ/backend.json".startswith(x) for x in _role.LOCAL_ON_BACKUP), "the switches' file stays local on the backup")
-        return "a fresh install has all five on and counts the change as run; HQ's four earlier files get the five once and undo byte for byte; switches set by hand, or turned since, stay"
+        return ("a fresh install has all five on and counts the change as run; the two files only HQ wrote get the five once and undo byte for byte; "
+                "anything that could be a hand change (the older templates' files, the briefing without 002's set_by, switches set by hand or turned since) stays")
 
     async def flow471(self) -> str:
         """H235, gap 3, no Claude: an extension's own flows have a home. A made-up extensions folder: one extension declares a flows
@@ -20479,6 +20485,102 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             return "no extension has flows of its own"
         n = len({r["ext"] for r in res})
         return f"{len(res)} flow{'s' if len(res) != 1 else ''} of {n} extension{'s' if n != 1 else ''} pass{'es' if len(res) == 1 else ''}"
+
+    async def flow473(self) -> str:
+        """H301, no Claude: one writer with one-way sync on, as a fresh HQ has it since the stable version (flow 117 is the two-way
+        way). A throwaway main behind a stand-in for its status server and a throwaway backup paired with it, each its own workspace
+        from the blank template. On the backup every synced file is the main's (role.one_writer), the files kept locally on the backup
+        (the quick notes, the transcripts) excepted. A call's Write of 90 KB or less is handed whole to the main ("put", policy.
+        _hand_over) and written there, never here; a bigger Write is a not yet, an Edit only; an Edit to any synced file is made by the
+        main. Nothing of the person's is touched."""
+        import subprocess as sp, shutil, threading, http.server
+        base = self.tmp / "h301-oneway"
+        shutil.rmtree(base, ignore_errors=True)
+        ws = {}
+        for side in ("main", "backup"):
+            ws[side] = base / side / "ws"
+            shutil.copytree(ROOT / "template", ws[side])
+            (ws[side] / "plain.md").write_text("plain one\n")
+            (base / side / "support").mkdir(parents=True)
+
+        def env(side, **extra):
+            e = {k: v for k, v in os.environ.items() if not k.startswith(("HQ_TODO", "HQ_DIRECT", "HQ_FOLDER", "HQ_BACKEND"))}
+            return {**e, "HQ_WORKSPACE": str(ws[side]), "HQ_ROADMAP": str(ws[side] / "HQ" / "roadmap.md"),
+                    "HQ_SUPPORT": str(base / side / "support"), "HQ_BACKEND": str(ws[side] / "HQ" / "backend.json"), **extra}
+        for side in ws:
+            need("one_way_sync" in json.loads((ws[side] / "HQ/backend.json").read_text())["on"], "the template doesn't have one-way sync on")
+        seen = []
+
+        class Main(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, data):
+                body = json.dumps(data).encode()
+                self.send_response(code)
+                self.send_header("content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                self._send(200, {"name": "main", "main": "main", "chosen_at": 1, "acting": "main", "busy": ""})
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("content-length") or 0))
+                seen.append(json.loads(body or b"{}"))
+                r = sp.run([sys.executable, str(ROOT / "routine/role.py"), "serve", "forward"], input=body,
+                           capture_output=True, env=env("main"), timeout=60)
+                data = json.loads(r.stdout.decode().strip().splitlines()[-1])
+                self._send(409 if r.returncode == 3 else 400 if r.returncode == 2 else 200, data)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Main)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        (base / "backup" / "support" / "role.json").write_text(json.dumps(
+            {"name": "backup", "peer": f"http://127.0.0.1:{port}/", "peer_name": "main", "main": "main", "chosen_at": 1}))
+        (base / "backup" / "support" / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        decide_py = ("import json, sys; sys.path.insert(0, sys.argv[1]); import policy, brain\n"
+                     "p = policy.Policy(sys.argv[2]); p.agent = 'donna'; d = p.decide(sys.argv[3], json.loads(open(sys.argv[4]).read()))\n"
+                     "print(json.dumps({'verdict': d.verdict, 'why': d.why, 'retry': d.retry, 'handed': d.handed}))")
+        writer_py = ("import json, sys; sys.path.insert(0, sys.argv[1]); import role\n"
+                     "print(json.dumps({r: role.one_writer(r) for r in sys.argv[2:]}))")
+
+        def decide(tool, inp):
+            f = base / "input.json"
+            f.write_text(json.dumps(inp))
+            r = sp.run([sys.executable, "-c", decide_py, str(ROOT / "app"), str(ws["backup"]), tool, str(f)],
+                       capture_output=True, text=True, env=env("backup"), timeout=120)
+            need(r.returncode == 0, f"the policy didn't decide: {r.stderr[-400:]}")
+            return json.loads(r.stdout.strip().splitlines()[-1])
+
+        text = lambda side, rel: (ws[side] / rel).read_text()
+        try:
+            r = sp.run([sys.executable, "-c", writer_py, str(ROOT / "routine"), "current-situation.md", "plain.md", "HQ/agents/notes-x.md",
+                        "HQ/notes.md", "HQ/calls/x.md"], capture_output=True, text=True, env=env("backup"), timeout=60)
+            w = json.loads(r.stdout.strip().splitlines()[-1])
+            need(w["current-situation.md"] and w["plain.md"] and w["HQ/agents/notes-x.md"], f"with one-way sync synced files aren't the main's: {w}")
+            need(not w["HQ/notes.md"] and not w["HQ/calls/x.md"], f"the files the backup keeps locally became the main's: {w}")
+            # a Write of 90 KB or less: handed whole as put, written by the main, not here
+            body = "written whole on the backup, by the main\n" + "x" * 1000 + "\n"
+            d = decide("Write", {"file_path": str(ws["backup"] / "plain.md"), "content": body})
+            need(d["verdict"] == "deny" and d["handed"] and seen and seen[-1].get("script") == "handover" and seen[-1].get("args", [""])[0] == "put",
+                 f"a Write on the backup wasn't handed whole as put: {d} {seen[-1:]}")
+            need(text("main", "plain.md") == body and text("backup", "plain.md") == "plain one\n", "the main didn't write it whole, or the backup did")
+            # over 90 KB: a not yet, an Edit only, nothing written on either side
+            n = len(seen)
+            d = decide("Write", {"file_path": str(ws["backup"] / "plain.md"), "content": "y" * 90_001})
+            need(d["verdict"] == "deny" and d["retry"] and not d["handed"] and "Edit" in d["why"] and len(seen) == n
+                 and text("main", "plain.md") == body, f"a Write over 90 KB wasn't a not yet: {d}")
+            # an Edit to a synced file: made by the main
+            d = decide("Edit", {"file_path": str(ws["backup"] / "plain.md"), "old_string": "written whole", "new_string": "edited"})
+            need(d["handed"] and text("main", "plain.md").startswith("edited on the backup") and text("backup", "plain.md") == "plain one\n",
+                 f"an Edit to a synced file wasn't made by the main: {d}")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            shutil.rmtree(base, ignore_errors=True)
+        return ("with one-way sync on, synced files are the main's on the backup and its own files stay local; a Write of 90 KB or less "
+                "is handed whole as put and written by the main, a bigger one is a not yet, an Edit is made by the main")
 
     async def flow241(self) -> str:
         """F106, no Claude: a call's start is under the size the design sets, for every agent, on a workspace filled with made-up work: a long
@@ -35385,7 +35487,7 @@ print("H88OUT " + json.dumps(out))
                 "bounces the sound once; never on the phone or off a Mac")
 
     async def flow117(self) -> str:
-        """Flow 117, one writer, with one-way sync off (H301): the body below says what it checks."""
+        """Flow 117, one writer, with one-way sync off (H301): the body below says what it checks; flow 473 is its one-way twin."""
         return await self._one_way_off(self._flow117_two_way)
 
     async def _flow117_two_way(self) -> str:
@@ -36756,6 +36858,7 @@ FLOWS = {
     470: ("H301: the five backend switches on by default at the stable version: a fresh install has all five; an HQ that updates gets them once unless it set its own; the undo gives its file back", False, "flow470"),
     471: ("H235, gap 3: an extension's own flows have a home: a made-up one with a passing and a failing flow, each on its own copy; the command and the nightly's flow name the failure as the extension's", False, "flow471"),
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
+    473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
