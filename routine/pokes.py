@@ -168,8 +168,13 @@ def pokes(agent: dict, since: float, until: float, folder: Path | None = None) -
     kinds = mistakes.counts((agent["id"].lower(), agent["name"].lower()), since, until, folder or FOLDER)
     fixed = sum(kinds.get(k, 0) for k in HIS_MISTAKE_KINDS)
     rep = repeats(agent["id"], since, until, folder)
+    try:  # F97: how many calls and texts the ledger's pass read and couldn't, so a missing one never reads as zero
+        read = mistakes.reading(since, until, folder or FOLDER)
+    except Exception as e:
+        read = {"error": repr(e)}
     return {"status_questions": t["status"], "corrections": fixed, "short_calls": c["short"], "refused": kinds.get("refused", 0), "repeats": rep,
-            "total": t["status"] + fixed + c["short"] + rep, "his_texts": t["texts"], "calls": c["calls"], "texts_acted_on": t["acted"]}
+            "total": t["status"] + fixed + c["short"] + rep, "his_texts": t["texts"], "calls": c["calls"], "texts_acted_on": t["acted"],
+            "read": read}
 
 
 # -- each agent's own measures -----------------------------------------------------------------------------------------
@@ -411,6 +416,10 @@ def lines_of(agent: dict, p: dict, own: dict) -> list[str]:
         out.append(f"texts he acted on: {_say(p['texts_acted_on'])}")
     for k, v in own.items():
         out.append(f"{NAMES.get(k, k)}: {_say(v)}")
+    r = p.get("read")
+    if isinstance(r, dict):  # F97: the corrections above stand on these
+        import mistakes
+        out.append("what the ledger read: " + (f"couldn't be counted ({r['error']})" if r.get("error") else mistakes.reading_words(r)))
     return out
 
 

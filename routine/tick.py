@@ -1469,7 +1469,9 @@ def mistakes_minute():
         if got:
             log(f"the ledger: {len(got)} new")
         cycles.write_scores(log=log)
-        routines.good("mistakes", "The ledger is up to date", every=300)
+        no = mistakes.reading().get("calls_not_read") or []  # F97: a transcript it couldn't read is said, and tried again next pass
+        routines.good("mistakes", "The ledger is up to date" + (f"; {len(no)} transcript{'' if len(no) == 1 else 's'} couldn't be read, "
+                                                               "tried again each pass" if no else ""), every=300)
     except Exception as e:
         log(f"the ledger: {e!r}")
         routines.bad("mistakes", f"The ledger's pass failed: {e!r}", every=300)

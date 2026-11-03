@@ -20097,6 +20097,135 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             p.terminate()
         return "a running helper stands on the page in one line, in words; finished, past its box or gone it doesn't"
 
+    async def flow444(self) -> str:
+        """F97, no Claude: what each second look really costs is kept, one line per look in a file of its own (as review.py keeps
+        reviews.jsonl): a stand-in for Claude that says yes for $0.0123 and one that fails at $0.05 give two lines, the failed one
+        marked, with their cost; the look the ledger itself makes (its second look's own call) writes one too; a look made for
+        another part (no name) isn't kept here; and the score prints the period's total, an older look left out."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97a")
+        looks = self.tmp / "f97a-looks.jsonl"
+        fake = self.tmp / "f97a-model"
+        fake.write_text("#!/bin/sh\ncat > /dev/null\nif [ \"$F97_LOOK\" = fail ]; then echo '{\"is_error\": true, \"result\": \"over the budget\", "
+                        "\"total_cost_usd\": 0.05}'; else echo '{\"result\": \"yes\", \"total_cost_usd\": 0.0123}'; fi\n")
+        fake.chmod(0o755)
+        env.update({"HQ_MISTAKES_LOOKS": str(looks), "HQ_CLAUDE": str(fake), "HQ_MISTAKES_SCAN": str(self.tmp / "f97a-scan.json")})
+        code = """
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes as M
+out = {'yes': M.ask(M.LOOK_SYSTEM, 'x', what='second look')}
+os.environ['F97_LOOK'] = 'fail'
+try:
+    M.ask(M.LOOK_SYSTEM, 'x', what='second look')
+    out['failed'] = ''
+except Exception as e:
+    out['failed'] = str(e)
+os.environ.pop('F97_LOOK')
+out['other'] = M.ask('another part', 'x')
+out['own'] = M._ask_model('you got that wrong', 'before')
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F97: the looks didn't run: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["yes"] == "yes" and "over the budget" in o["failed"] and o["other"] == "yes" and o["own"] == "yes", f"F97: the looks: {o}")
+        rows = [json.loads(l) for l in looks.read_text().splitlines()] if looks.exists() else []
+        need(len(rows) == 3, f"F97: not one line per look of the ledger's (a look for another part kept, or one missing): {rows}")
+        need([d["cost"] for d in rows] == [0.0123, 0.05, 0.0123] and [bool(d.get("failed")) for d in rows] == [False, True, False]
+             and all(d["what"] == "second look" and d["model"] == "haiku" and isinstance(d["s"], (int, float)) for d in rows),
+             f"F97: a look's line lacks its cost, its failure or what it was: {rows}")
+        with open(looks, "a") as f:
+            f.write(json.dumps({"at": time.time() - 9 * 86400, "what": "second look", "model": "haiku", "cost": 1.0, "s": 1}) + "\n")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "The second looks: 3, $0.0746 in all (1 failed)." in r.stdout, f"F97: the score doesn't print the week's total: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        t = json.loads(r.stdout)
+        need(t["looks"] == {"looks": 3, "failed": 1, "cost": 0.0746, "unknown": 0}, f"F97: the score's looks: {t.get('looks')}")
+        return "three looks of the ledger's kept with their cost, a failed one marked; another part's look not kept; the score says $0.0746 for the week, the older look left out"
+
+    async def flow445(self) -> str:
+        """F97, no Claude: the pass reads every transcript it hasn't read, not only the names after the newest it saw. A transcript
+        that reaches the main late with an older name, holding a clear correction, is on the ledger after the next pass, once; one
+        that can't be read (a link to nothing) is counted as not read with why, in the score and in her weekly score, and tried
+        again each pass until it can; a call still going is read again until it ends; a text that arrives with an older time is
+        read; two passes over the same transcript give one line."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97b")
+        scan = self.tmp / "f97b-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan), "HQ_MISTAKES_LOOKS": str(self.tmp / "f97b-looks.jsonl")})
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/app'); import me; from pathlib import Path; print(me.load(Path(sys.argv[2]))['name'] or 'Me')"
+        me = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env).stdout.strip()
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        led = ws / "HQ/mistakes.jsonl"
+        lines = lambda: [json.loads(l) for l in led.read_text().splitlines()] if led.exists() else []
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def call(name, said, ended=True, agent="Moneypenny"):
+            (calls / name).write_text(f"# Call\n\nStarted 10:00:00 · agent {agent} · brain opus\n\n- 10:00:01 **{me}:** Hey there\n"
+                                      + "".join(f"- 10:0{i + 1}:00 **{me}:** {s}\n" for i, s in enumerate(said)) + ("\nEnded 10:30:00\n" if ended else ""))
+        r = sweep()
+        need(r.returncode == 0 and scan.exists(), f"F97: the first pass: {r.stdout} {r.stderr[-400:]}")
+        call("2026-10-31-1000.md", ["that's wrong, it was Friday"])
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 1, f"F97: a new call: {r.stdout} {lines()}")
+        call("2026-10-30-0900.md", ["not what I asked for at all"])  # it came late from the other computer: an older name than the newest read
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 2 and lines()[-1]["where"] == "HQ/calls/2026-10-30-0900.md" and lines()[-1]["agent"] == "moneypenny",
+             f"F97: a transcript with an older name that came late was skipped: {r.stdout} {lines()}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 2, f"F97: a second pass counted a line twice: {r.stdout} {lines()}")
+        broken = calls / "2026-10-31-1100.md"
+        broken.symlink_to(self.tmp / "f97b-nothing-here.md")
+        for tries in (1, 2):
+            sweep()
+            st = json.loads(scan.read_text())
+            need((st.get("unread") or {}).get(broken.name, {}).get("tries") == tries and "can't be opened" in st["unread"][broken.name]["why"],
+                 f"F97: a transcript that can't be read isn't kept as not read and tried again: {st.get('unread')}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "4000"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(f"couldn't read 1 call ({broken.name}: it can't be opened" in r.stdout and "Read 2 calls" in r.stdout, f"F97: the score doesn't say what it couldn't read: {r.stdout}")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import agents, pokes
+from pathlib import Path
+a = next(x for x in agents.load(Path(sys.argv[2])) if x['id'] == 'moneypenny')
+s = pokes.score(a, days=4000, folder=Path(sys.argv[2]))
+print(json.dumps({'lines': s['lines'], 'read': s['pokes']['read'], 'corr': s['pokes']['corrections']}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"F97: her weekly score: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["read"]["calls_not_read"] == [broken.name] and o["corr"] == 2
+             and any(l.startswith("what the ledger read: Read 2 calls") and "couldn't read 1 call" in l for l in o["lines"]),
+             f"F97: her score reads as if nothing were missing: {o}")
+        broken.unlink()
+        call(broken.name, ["you got that wrong again"])
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and not st.get("unread") and broken.name in st["read"], f"F97: the transcript, once readable, wasn't read: {r.stdout} {st.get('unread')}")
+        live = "2026-10-31-1200.md"
+        call(live, ["this is a new rule"], ended=False)
+        r = sweep()
+        need("1 new" in r.stdout and live not in json.loads(scan.read_text())["read"], f"F97: a call still going: {r.stdout}")
+        call(live, ["this is a new rule", "that is not what I meant"], ended=True)
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and live in st["read"] and len(lines()) == 5, f"F97: the rest of a call read before it ended: {r.stdout} {lines()[-2:]}")
+        team = ws / "HQ/team-line"
+        team.mkdir(parents=True, exist_ok=True)
+        with open(team / "thread.jsonl", "a") as f:  # a text from the other computer, with a time before the last pass
+            f.write(json.dumps({"at": 1000.0, "from": "me", "text": "you just say yes to everything", "id": "late1"}) + "\n")
+            f.write("{not a line\n")
+        r = sweep()
+        need("1 new" in r.stdout and lines()[-1]["where"] == "HQ/team-line" and lines()[-1]["kind"] == "say-yes", f"F97: a text with an older time: {r.stdout} {lines()[-1]}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 6, f"F97: a text counted twice: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "40000", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        rd = json.loads(r.stdout)["reading"]
+        need(rd["calls_read"] == 4 and rd["calls_not_read"] == [] and rd["texts_read"] == 1 and rd["texts_not_read"] == 1, f"F97: what the score read: {rd}")
+        return "a late transcript with an older name read once; one that can't be read counted as not read in both scores and tried again; a call read again until it ends; a late text read; no line twice"
+
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
         minute runs none on the brand-new folder and going back never undoes one it never had. An existing list is never written over."""
@@ -36502,6 +36631,8 @@ FLOWS = {
     441: ("The small list: a download says why it can't go back yet, never that there's no version before; made a git copy with one tag, one back is found", False, "flow441"),
     442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
+    444: ("F97: each second look of the ledger is kept with what it cost, a failed one marked, another part's look left out, and the score prints the week's total", False, "flow444"),
+    445: ("F97: the pass reads every transcript it hasn't read: a late one with an older name once, one it can't read counted as not read in both scores and tried again, a call read until it ends, a late text", False, "flow445"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
