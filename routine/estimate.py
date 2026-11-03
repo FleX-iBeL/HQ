@@ -1407,8 +1407,12 @@ def friday_sent(now=None):
 
 def friday_report(hist=None, now=None):
     """F66 (call of 28 October 2026, 14:20, his words: "I like the idea about Friday sending me a report"): the week's
-    jobs against their own estimates as they were given (likely and latest), per kind, plainly; below 8 in 10 it says
-    so. Plain words for Donna's text."""
+    jobs against their own estimates as they were given, per kind of work, plainly. F79: what each job started with, the
+    measured estimate and its latest end on its finished line (m_est, latest), how sure it was, held to the bar he accepted
+    (9 in 10 by the latest end; at most 1 job in 20 past it, the last 20 held to F79's latest). A line from before F79 is held
+    to the range it had then, and said apart. Plain words for her text."""
+    import measured
+    import misses
     hist = all_history() if hist is None else hist
     now = time.time() if now is None else now
     week = [h for h in _real(hist) if (h.get("done") or 0) >= now - 7 * 86400 and h.get("est")]
@@ -1418,24 +1422,38 @@ def friday_report(hist=None, now=None):
                  + "; ".join(f"job {h.get('n')}, {mistake_what(h) or 'no reason written'}" for h in own) + ".")
     if not week:
         return "The team's estimates this week: no finished jobs to hold them against." + own_words
-    inside, kinds = 0, {}
+    by, within, rough, old, kinds = 0, 0, 0, 0, {}
     for h in week:
-        est = h.get("with_guess") or h["est"]
-        late = h.get("latest") or latest_of(est, h.get("kind"), hist)
-        ok = h["actual"] <= late and h["actual"] >= est / 2
-        inside += ok
-        k = kinds.setdefault(h.get("kind") or "other", [0, 0, 0])
+        if misses.counted(h):
+            est, late = h["m_est"], h["latest"]
+            rough += not (h.get("sure") or {}).get("ok")
+        else:  # before F79: the range it was given then
+            est = h.get("with_guess") or h["est"]
+            late = h.get("latest") or latest_of(est, h.get("kind"), hist)
+            old += 1
+        ok = h["actual"] <= late
+        by += ok
+        within += est / 2 <= h["actual"] <= est * 2
+        k = kinds.setdefault(measured.group(h.get("kind"), h.get("about") or ""), [0, 0])
         k[0] += 1
-        k[1] += ok
-        k[2] += h["actual"] > late
-    share = inside / len(week)
-    missed = [f"{n} ({v[0] - v[1]} of {v[0]} outside, {v[2]} of them later than their latest)"
-              for n, v in sorted(kinds.items()) if v[1] < v[0]]
-    words = f"The team's estimates this week: {inside} of {len(week)} jobs landed inside their range."
-    if share < 0.8:
-        words += " That's below eight in ten, so the estimates aren't good enough yet."
+        k[1] += not ok
+    n = len(week)
+    words = (f"The team's estimates this week: {by} of {n} jobs finished by the latest end they were given ({round(100 * by / n)}%), "
+             f"{within} within half and double their likely time.")
+    if by / n < 0.9:
+        words += " That's below nine in ten, the bar, so the estimates aren't good enough yet."
+    missed = [f"{g} {v[1]} of {v[0]}" for g, v in sorted(kinds.items(), key=lambda kv: (-kv[1][1], kv[0])) if v[1]]
     if missed:
-        words += " Missed most: " + "; ".join(missed) + "."
+        words += " Past their latest end: " + "; ".join(missed) + "."
+    if rough:
+        words += f" {rough} had too few finished jobs like them, so a rough number."
+    if old:
+        words += f" {old} started before the measured estimates and are held to the range they had then."
+    held = misses.last(hist)[-misses.WINDOW:]
+    if held:
+        m = sum(misses.is_miss(h) for h in held)
+        words += (f" The last {len(held)} jobs held to the measured latest end: {m} past it (the bar is at most {misses.MOST} in "
+                  f"{misses.WINDOW}" + (", so it's broken" if m > misses.MOST else "") + ").")
     return words + own_words
 
 
@@ -2061,6 +2079,11 @@ def on_done(n, text="", started_hhmm=None, at=None):
             usagecost.learn()
         except Exception as ex:
             print(f"(the usage rate couldn't be learned: {ex!r})", file=sys.stderr)
+    try:  # F79: past the latest end it started with: Moneypenny is told, once; a repeat she raises with him
+        import misses
+        misses.check(rec)
+    except Exception as ex:
+        print(f"(the estimate's miss couldn't be checked: {ex!r})", file=sys.stderr)
     return rec
 
 

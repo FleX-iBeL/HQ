@@ -20226,6 +20226,134 @@ print(json.dumps({'lines': s['lines'], 'read': s['pokes']['read'], 'corr': s['po
         need(rd["calls_read"] == 4 and rd["calls_not_read"] == [] and rd["texts_read"] == 1 and rd["texts_not_read"] == 1, f"F97: what the score read: {rd}")
         return "a late transcript with an older name read once; one that can't be read counted as not read in both scores and tried again; a call read again until it ends; a late text read; no line twice"
 
+    async def flow446(self) -> str:
+        """F79, no Claude: a miss goes to Moneypenny, not to him. A finished job past the latest end it started with puts one note on
+        her own line, never pushed and not taken for an answer to his waiting text: which job, its kind, its range and its real time;
+        the same job again adds nothing. A repeat goes to him through her, a text on her line, at most once a day: two jobs of one
+        kind in a row past it, or more than 1 in the last 20; one miss alone, or a job on time, says nothing. A test without its own
+        line and its word never tells anyone. A job closed for real (estimate.on_done) goes the same way."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f79m")
+        env.update({"HQ_MISSES": "1", "HQ_MISSES_SYNC": "1", "HQ_DIRECT_PLAIN": "1", "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0"})
+        code = """
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import misses as Ms, estimate as E, direct_line as dl
+def line(n, kind, est, late, act, i, ok=True):
+    return {'n': n, 'kind': kind, 'est': est, 'm_est': est, 'latest': late, 'actual': act, 'done': 1790000000 + i * 600, 'how': 'seen',
+            'machine': 't', 'about': f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12, 'group': kind}}
+def team():
+    p = os.path.join(os.environ['HQ_TEAM_LINE_DIR'], 'thread.jsonl')
+    return [json.loads(l) for l in open(p)] if os.path.exists(p) else []
+def fresh():
+    if os.path.exists(Ms.STATE):
+        os.remove(Ms.STATE)
+with dl._Env(dl.team_env()):
+    dl.add('me', 'what is the team doing right now?')
+hist = [line(700 + i, 'qa', 10, 20, 12, i) for i in range(18)]
+out = {}
+ok = line(720, 'build', 20, 40, 30, 20); hist.append(ok)
+out['ok'] = Ms.check(ok, hist)
+a = line(721, 'build', 20, 40, 55, 21, ok=False); hist.append(a)
+out['a'] = Ms.check(a, hist)
+out['a_again'] = Ms.check(a, hist)
+out['after_a'] = team()
+with dl._Env(dl.team_env()):
+    out['waiting'] = [m['text'] for m in dl.unanswered()]
+b = line(722, 'build', 20, 40, 61, 22); hist.append(b)
+out['b'] = Ms.check(b, hist)
+c = line(723, 'qa', 10, 20, 45, 23); hist.append(c)
+out['c'] = Ms.check(c, hist)
+out['after_c'] = team()
+out['donna'] = dl.thread()
+fresh()  # two of one kind in a row, the last 20 holding only one of them
+h2 = [line(800, 'research', 10, 20, 30, 0)] + [line(801 + i, 'qa', 10, 20, 12, 1 + i) for i in range(20)]
+r2 = line(830, 'research', 10, 20, 31, 30); h2.append(r2)
+out['row'] = Ms.check(r2, h2)
+fresh()  # two of different kinds within the last 20
+h3 = [line(900 + i, 'qa', 10, 20, 12, i) for i in range(18)] + [line(950, 'release', 10, 20, 25, 18)]
+r3 = line(951, 'research', 10, 20, 26, 19); h3.append(r3)
+out['bar'] = Ms.check(r3, h3)
+fresh()
+st = E._load_state()
+st['960'] = {'est': 5, 'kind': 'build', 'started': int(time.time()) - 1800, 'm': {'est': 5, 'latest': 8, 'sure': {'ok': True, 'jobs': 9, 'group': 'build'}}}
+E._save_state(st)
+rec = E.on_done(960, 'H9960 on the hq roadmap: a made-up build')
+out['done'] = {k: rec.get(k) for k in ('m_est', 'latest', 'actual')}
+out['after_done'] = team()
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 0, f"F79: the misses didn't run: {r.stderr[-1200:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["ok"] is None, f"F79: a job on time was told: {o['ok']}")
+        need(o["a"] and o["a"]["repeat"] is None and o["a_again"] is None, f"F79: one miss: {o['a']} / again {o['a_again']}")
+        notes = [m for m in o["after_a"] if m["from"] == "agent"]
+        need(len(notes) == 1 and notes[0].get("quiet") and notes[0]["why"] == "estimate-miss" and "job 721 (build) took 55 minutes" in notes[0]["text"]
+             and "about 20, at the latest 40" in notes[0]["text"], f"F79: her note on her line: {notes}")
+        need(o["waiting"] == ["what is the team doing right now?"], f"F79: her note was taken for an answer to his text: {o['waiting']}")
+        need(o["b"] and o["b"]["repeat"] and "two build jobs in a row" in o["b"]["repeat"] and "2 of the last 20" in o["b"]["repeat"],
+             f"F79: the repeat isn't raised: {o['b']}")
+        need(o["c"] and o["c"]["repeat"] is None, f"F79: raised twice in a day: {o['c']}")
+        texts = [m for m in o["after_c"] if m["from"] == "agent"]
+        need([m["why"] for m in texts] == ["estimate-miss", "estimate-miss", "estimate-misses", "estimate-miss"]
+             and [bool(m.get("quiet")) for m in texts] == [True, True, False, True] and "two build jobs in a row" in texts[2]["text"],
+             f"F79: what stands on her line: {[(m['why'], m.get('quiet')) for m in texts]}")
+        need(not o["donna"], f"F79: a miss went to Donna's line: {o['donna']}")
+        need(o["row"] and o["row"]["repeat"] and "two research jobs in a row" in o["row"]["repeat"] and "of the last 20" not in o["row"]["repeat"],
+             f"F79: two of one kind in a row: {o['row']}")
+        need(o["bar"] and o["bar"]["repeat"] and "2 of the last 20" in o["bar"]["repeat"] and "in a row" not in o["bar"]["repeat"], f"F79: the bar: {o['bar']}")
+        need(o["done"] == {"m_est": 5, "latest": 8, "actual": 30} and any(m.get("quiet") and "job 960" in m["text"] for m in o["after_done"]),
+             f"F79: a job closed for real isn't told: {o['done']} {[m['text'][:60] for m in o['after_done']]}")
+        bare = {k: v for k, v in env.items() if k not in ("HQ_MISSES", "HQ_DIRECT_DIR")}
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import misses as Ms
+h = {'n': 1, 'kind': 'build', 'est': 5, 'm_est': 5, 'latest': 8, 'actual': 90, 'done': 1790000000, 'how': 'seen', 'machine': 'u'}
+print(json.dumps([Ms.check(h, [h]), Ms._allowed()]))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=bare, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0 and json.loads(r.stdout.strip().splitlines()[-1]) == [None, False], f"F79: a test without its own line told someone: {r.stdout} {r.stderr[-300:]}")
+        return "one quiet note per miss on her line, his waiting text still waiting; two builds in a row and 2 in 20 raised once that day; a job closed for real told too; nothing from a bare test"
+
+    async def flow447(self) -> str:
+        """F79, no Claude: the Friday report reads what F79 built: each job of the week against the measured estimate and latest end
+        it started with (m_est and latest on its finished line), the bar of nine in ten by the latest end, how many were rough,
+        the jobs from before F79 said apart, per kind of work, and the last 20 held to the measured latest against at most 1 in
+        20. Her words for it say nine in ten too."""
+        import subprocess as _sp
+        rm = self.tmp / "roadmap-F79f.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        code = """
+import json, sys, time
+sys.path.insert(0, 'routine'); sys.path.insert(0, 'app')
+import estimate as E, direct_line as dl
+now = time.time()
+def line(n, kind, est, late, act, ok=True, about=''):
+    return {'n': n, 'kind': kind, 'est': 99, 'm_est': est, 'latest': late, 'actual': act, 'done': int(now) - 3600 * (n % 50), 'how': 'seen',
+            'machine': 't', 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12}}
+week = [line(i, 'qa', 10, 20, 12) for i in range(1, 8)] + [line(8, 'build', 20, 40, 39, ok=False), line(9, 'build', 20, 40, 55)]
+old = {'n': 10, 'kind': 'qa', 'est': 10, 'latest': 30, 'actual': 25, 'done': int(now) - 7200, 'how': 'seen', 'machine': 't'}
+gone = dict(line(11, 'qa', 10, 20, 15), done=int(now) - 9 * 86400)
+one = E.friday_report(hist=[gone] + week + [old], now=now)
+two = E.friday_report(hist=[gone] + week + [dict(line(12, 'research', 10, 20, 44), done=int(now) - 60)], now=now)
+print(json.dumps({'one': one, 'two': two, 'kind': dl.KINDS['estimates']}))
+"""
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F79: the Friday report didn't run: {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        one, two = o["one"], o["two"]
+        need("9 of 10 jobs finished by the latest end they were given (90%)" in one and "below nine in ten" not in one, f"F79: the week by the latest end: {one}")
+        need("Past their latest end: build 1 of 2." in one and "1 had too few finished jobs like them" in one
+             and "1 started before the measured estimates" in one, f"F79: per kind, rough and from before: {one}")
+        need("The last 10 jobs held to the measured latest end: 1 past it (the bar is at most 1 in 20)." in one, f"F79: the last 20: {one}")
+        need("8 of 10 jobs finished by the latest end" in two and "below nine in ten" in two and "2 past it (the bar is at most 1 in 20, so it's broken)" in two
+             and "research 1 of 1" in two, f"F79: a week under the bar: {two}")
+        need("nine in ten" in o["kind"] and "eight in ten" not in o["kind"], f"F79: her words for the report still say eight in ten: {o['kind']}")
+        return "the week held to F79's latest end and nine in ten, per kind, rough and from before said apart, the last 20 against 1 in 20; her words say nine in ten"
+
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
         minute runs none on the brand-new folder and going back never undoes one it never had. An existing list is never written over."""
@@ -36633,6 +36761,8 @@ FLOWS = {
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
     444: ("F97: each second look of the ledger is kept with what it cost, a failed one marked, another part's look left out, and the score prints the week's total", False, "flow444"),
     445: ("F97: the pass reads every transcript it hasn't read: a late one with an older name once, one it can't read counted as not read in both scores and tried again, a call read until it ends, a late text", False, "flow445"),
+    446: ("F79: a miss goes to Moneypenny as a quiet note on her line, once per job; a repeat (two of a kind in a row, or more than 1 in 20) she raises with him once a day; never from a bare test", False, "flow446"),
+    447: ("F79: the Friday report holds the week to the latest end each job started with and nine in ten, per kind, rough and older jobs apart, and the last 20 against 1 in 20", False, "flow447"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
