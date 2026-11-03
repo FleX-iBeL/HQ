@@ -7888,7 +7888,25 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(code == 403, f"an update can be started without the page's header: {code}")
         return "grey version, bar, quiet on a call, warning off a Mac with Cancel, no warning on a Mac, latest version, changelog; all pages carry it"
 
+    async def _one_way_off(self, body):
+        """H301: one-way sync is on in the template since the stable version. A flow of the two-way way (the backup that
+        sends and receives, its conflict copies, its Write made an Edit) pins it off for its whole run, the scripts it
+        starts too; the one-way way has flows of its own."""
+        keep = os.environ.get("HQ_BACKEND_ONE_WAY_SYNC")
+        os.environ["HQ_BACKEND_ONE_WAY_SYNC"] = "0"
+        try:
+            return await body()
+        finally:
+            if keep is None:
+                os.environ.pop("HQ_BACKEND_ONE_WAY_SYNC", None)
+            else:
+                os.environ["HQ_BACKEND_ONE_WAY_SYNC"] = keep
+
     async def flow65(self) -> str:
+        """Flow 65, main and backup, with one-way sync off (H301): the body below says what it checks."""
+        return await self._one_way_off(self._flow65_two_way)
+
+    async def _flow65_two_way(self) -> str:
         """H56.3: main and backup. Two throwaway HQs (A, the laptop, and B, the server), each a copy of HQ with the
         blank template and its own memory and status server on spare ports, nothing of the user's, both with their
         routine and mail check switched off so nothing real ever starts. On this computer, and with a Linux machine
@@ -7937,6 +7955,10 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
 
 
     async def flow66(self) -> str:
+        """Flow 66, the two-way sync, with one-way sync off (H301): the body below says what it checks."""
+        return await self._one_way_off(self._flow66_two_way)
+
+    async def _flow66_two_way(self) -> str:
         """H56.4: the two-way sync. Two private, throwaway Syncthings (A, the laptop, and B, the server) on spare
         ports, talking only to each other on this computer (no discovery, no relays), each with a throwaway HQ,
         the blank template as its workspace (a git repo with a throwaway origin) and its own memory folder;
@@ -35360,6 +35382,10 @@ print("H88OUT " + json.dumps(out))
                 "bounces the sound once; never on the phone or off a Mac")
 
     async def flow117(self) -> str:
+        """Flow 117, one writer, with one-way sync off (H301): the body below says what it checks."""
+        return await self._one_way_off(self._flow117_two_way)
+
+    async def _flow117_two_way(self) -> str:
         """H203, no Claude: one writer. A throwaway main (its own workspace from the blank template, its own memory,
         on its own, so acting main) behind a stand-in for its status server's /api/role and /api/forward, and a
         throwaway backup paired with it, its own workspace a copy (the synced one). On the backup a call's Edit to the
