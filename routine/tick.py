@@ -1487,7 +1487,9 @@ def mistakes_minute():
         if got:
             log(f"the ledger: {len(got)} new")
         cycles.write_scores(log=log)
-        routines.good("mistakes", "The ledger is up to date", every=300)
+        no = mistakes.reading().get("calls_not_read") or []  # F97: a transcript it couldn't read is said, and tried again next pass
+        routines.good("mistakes", "The ledger is up to date" + (f"; {len(no)} transcript{'' if len(no) == 1 else 's'} couldn't be read, "
+                                                               "tried again each pass" if no else ""), every=300)
     except Exception as e:
         log(f"the ledger: {e!r}")
         routines.bad("mistakes", f"The ledger's pass failed: {e!r}", every=300)
@@ -1616,6 +1618,13 @@ def direct_watch():
                 log("direct line: the Friday report on the estimates")
         except Exception as e:
             log(f"the Friday estimates report: {e!r}")
+        try:  # F79: a job past its latest end goes to Moneypenny once, a repeat she raises with him (only the main)
+            import misses
+            got = misses.sweep()
+            if got["told"] or got["kept"] or got["started"]:
+                log(f"estimate misses: told {len(got['told'])}, kept {len(got['kept'])}" + (", raising the repeat" if got["started"] else ""))
+        except Exception as e:
+            log(f"the estimate misses: {e!r}")
         def weather_():
             import weather
             if weather.start():

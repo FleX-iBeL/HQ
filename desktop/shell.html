@@ -275,7 +275,7 @@
       const newest = msgs.reduce((a, m) => Math.max(a, +m.at || 0), 0);
       if (seen == null || told == null) { seen = told = newest; }
       if (looking) seen = Math.max(seen, newest);
-      const hers = msgs.filter((m) => m.from !== 'me');
+      const hers = msgs.filter((m) => m.from !== 'me' && !m.quiet);  // F79: her note for herself never reaches him
       const notify = looking ? [] : hers.filter((m) => (+m.at || 0) > told).slice(-3).map((m) => ({ at: m.at, text: m.text }));
       told = Math.max(told, newest);
       const unread = hers.filter((m) => (+m.at || 0) > seen).length;

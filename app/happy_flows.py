@@ -20175,6 +20175,495 @@ print(json.dumps({'start': [ask('python3 routine/helper.py start "a question for
             p.terminate()
         return "a running helper stands on the page in one line, in words; finished, past its box or gone it doesn't"
 
+    async def flow444(self) -> str:
+        """F97, no Claude: what each second look really costs is kept, one line per look in a file of its own (as review.py keeps
+        reviews.jsonl): a stand-in for Claude that says yes for $0.0123 and one that fails at $0.05 give two lines, the failed one
+        marked, with their cost; the look the ledger itself makes (its second look's own call) writes one too; a look made for
+        another part (no name) isn't kept here; and the score prints the period's total, an older look left out."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97a")
+        looks = self.tmp / "f97a-looks.jsonl"
+        fake = self.tmp / "f97a-model"
+        fake.write_text("#!/bin/sh\ncat > /dev/null\nif [ \"$F97_LOOK\" = fail ]; then echo '{\"is_error\": true, \"result\": \"over the budget\", "
+                        "\"total_cost_usd\": 0.05}'; else echo '{\"result\": \"yes\", \"total_cost_usd\": 0.0123}'; fi\n")
+        fake.chmod(0o755)
+        env.update({"HQ_MISTAKES_LOOKS": str(looks), "HQ_CLAUDE": str(fake), "HQ_MISTAKES_SCAN": str(self.tmp / "f97a-scan.json")})
+        code = """
+import json, os, sys
+sys.path.insert(0, sys.argv[1] + '/routine')
+import mistakes as M
+out = {'yes': M.ask(M.LOOK_SYSTEM, 'x', what='second look')}
+os.environ['F97_LOOK'] = 'fail'
+try:
+    M.ask(M.LOOK_SYSTEM, 'x', what='second look')
+    out['failed'] = ''
+except Exception as e:
+    out['failed'] = str(e)
+os.environ.pop('F97_LOOK')
+out['other'] = M.ask('another part', 'x')
+out['own'] = M._ask_model('you got that wrong', 'before')
+print(json.dumps(out))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F97: the looks didn't run: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["yes"] == "yes" and "over the budget" in o["failed"] and o["other"] == "yes" and o["own"] == "yes", f"F97: the looks: {o}")
+        rows = [json.loads(l) for l in looks.read_text().splitlines()] if looks.exists() else []
+        need(len(rows) == 3, f"F97: not one line per look of the ledger's (a look for another part kept, or one missing): {rows}")
+        need([d["cost"] for d in rows] == [0.0123, 0.05, 0.0123] and [bool(d.get("failed")) for d in rows] == [False, True, False]
+             and all(d["what"] == "second look" and d["model"] == "haiku" and isinstance(d["s"], (int, float)) for d in rows),
+             f"F97: a look's line lacks its cost, its failure or what it was: {rows}")
+        with open(looks, "a") as f:
+            f.write(json.dumps({"at": time.time() - 9 * 86400, "what": "second look", "model": "haiku", "cost": 1.0, "s": 1}) + "\n")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0 and "The second looks: 3, $0.0746 in all (1 failed)." in r.stdout, f"F97: the score doesn't print the week's total: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        t = json.loads(r.stdout)
+        need(t["looks"] == {"looks": 3, "failed": 1, "cost": 0.0746, "unknown": 0}, f"F97: the score's looks: {t.get('looks')}")
+        return "three looks of the ledger's kept with their cost, a failed one marked; another part's look not kept; the score says $0.0746 for the week, the older look left out"
+
+    async def flow445(self) -> str:
+        """F97, no Claude: the pass reads every transcript it hasn't read, not only the names after the newest it saw. A transcript
+        that reaches the main late with an older name, holding a clear correction, is on the ledger after the next pass, once; one
+        that can't be read (a link to nothing) is counted as not read with why, in the score and in her weekly score, and tried
+        again each pass until it can; a call still going is read again until it ends; a text that arrives with an older time is
+        read; two passes over the same transcript give one line."""
+        import subprocess as _sp
+        ws, env = self._ledger_env("f97b")
+        scan = self.tmp / "f97b-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan), "HQ_MISTAKES_LOOKS": str(self.tmp / "f97b-looks.jsonl")})
+        code = "import sys; sys.path.insert(0, sys.argv[1] + '/app'); import me; from pathlib import Path; print(me.load(Path(sys.argv[2]))['name'] or 'Me')"
+        me = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env).stdout.strip()
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        led = ws / "HQ/mistakes.jsonl"
+        lines = lambda: [json.loads(l) for l in led.read_text().splitlines()] if led.exists() else []
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        def call(name, said, ended=True, agent="Moneypenny"):
+            (calls / name).write_text(f"# Call\n\nStarted 10:00:00 · agent {agent} · brain opus\n\n- 10:00:01 **{me}:** Hey there\n"
+                                      + "".join(f"- 10:0{i + 1}:00 **{me}:** {s}\n" for i, s in enumerate(said)) + ("\nEnded 10:30:00\n" if ended else ""))
+        r = sweep()
+        need(r.returncode == 0 and scan.exists(), f"F97: the first pass: {r.stdout} {r.stderr[-400:]}")
+        call("2026-10-31-1000.md", ["that's wrong, it was Friday"])
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 1, f"F97: a new call: {r.stdout} {lines()}")
+        call("2026-10-30-0900.md", ["not what I asked for at all"])  # it came late from the other computer: an older name than the newest read
+        r = sweep()
+        need("1 new" in r.stdout and len(lines()) == 2 and lines()[-1]["where"] == "HQ/calls/2026-10-30-0900.md" and lines()[-1]["agent"] == "moneypenny",
+             f"F97: a transcript with an older name that came late was skipped: {r.stdout} {lines()}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 2, f"F97: a second pass counted a line twice: {r.stdout} {lines()}")
+        broken = calls / "2026-10-31-1100.md"
+        broken.symlink_to(self.tmp / "f97b-nothing-here.md")
+        for tries in (1, 2):
+            sweep()
+            st = json.loads(scan.read_text())
+            need((st.get("unread") or {}).get(broken.name, {}).get("tries") == tries and "can't be opened" in st["unread"][broken.name]["why"],
+                 f"F97: a transcript that can't be read isn't kept as not read and tried again: {st.get('unread')}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "4000"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(f"couldn't read 1 call ({broken.name}: it can't be opened" in r.stdout and "Read 2 calls" in r.stdout, f"F97: the score doesn't say what it couldn't read: {r.stdout}")
+        code = """
+import json, sys
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import agents, pokes
+from pathlib import Path
+a = next(x for x in agents.load(Path(sys.argv[2])) if x['id'] == 'moneypenny')
+s = pokes.score(a, days=4000, folder=Path(sys.argv[2]))
+print(json.dumps({'lines': s['lines'], 'read': s['pokes']['read'], 'corr': s['pokes']['corrections']}))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.returncode == 0, f"F97: her weekly score: {r.stderr[-600:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        need(o["read"]["calls_not_read"] == [broken.name] and o["corr"] == 2
+             and any(l.startswith("what the ledger read: Read 2 calls") and "couldn't read 1 call" in l for l in o["lines"]),
+             f"F97: her score reads as if nothing were missing: {o}")
+        broken.unlink()
+        call(broken.name, ["you got that wrong again"])
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and not st.get("unread") and broken.name in st["read"], f"F97: the transcript, once readable, wasn't read: {r.stdout} {st.get('unread')}")
+        live = "2026-10-31-1200.md"
+        call(live, ["this is a new rule"], ended=False)
+        r = sweep()
+        need("1 new" in r.stdout and live not in json.loads(scan.read_text())["read"], f"F97: a call still going: {r.stdout}")
+        call(live, ["this is a new rule", "that is not what I meant"], ended=True)
+        r = sweep()
+        st = json.loads(scan.read_text())
+        need("1 new" in r.stdout and live in st["read"] and len(lines()) == 5, f"F97: the rest of a call read before it ended: {r.stdout} {lines()[-2:]}")
+        team = ws / "HQ/team-line"
+        team.mkdir(parents=True, exist_ok=True)
+        with open(team / "thread.jsonl", "a") as f:  # a text from the other computer, with a time before the last pass
+            f.write(json.dumps({"at": 1000.0, "from": "me", "text": "you just say yes to everything", "id": "late1"}) + "\n")
+            f.write("{not a line\n")
+        r = sweep()
+        need("1 new" in r.stdout and lines()[-1]["where"] == "HQ/team-line" and lines()[-1]["kind"] == "say-yes", f"F97: a text with an older time: {r.stdout} {lines()[-1]}")
+        r = sweep()
+        need("0 new" in r.stdout and len(lines()) == 6, f"F97: a text counted twice: {r.stdout}")
+        r = _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "score", "--days", "40000", "--json"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        rd = json.loads(r.stdout)["reading"]
+        need(rd["calls_read"] == 4 and rd["calls_not_read"] == [] and rd["texts_read"] == 1 and rd["texts_not_read"] == 1, f"F97: what the score read: {rd}")
+        return "a late transcript with an older name read once; one that can't be read counted as not read in both scores and tried again; a call read again until it ends; a late text read; no line twice"
+
+    MISSES_HEAD = """
+import json, os, sys, time
+sys.path.insert(0, sys.argv[1] + '/routine'); sys.path.insert(0, sys.argv[1] + '/app')
+import misses as Ms, estimate as E, direct_line as dl
+def line(n, kind, est, late, act, i, ok=True, machine='t', about=''):
+    return {'n': n, 'kind': kind, 'est': est, 'm_est': est, 'latest': late, 'actual': act, 'done': 1790000000 + i * 600, 'how': 'seen',
+            'machine': machine, 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12, 'group': kind}}
+def _read(d):
+    p = os.path.join(d, 'thread.jsonl')
+    return [json.loads(l) for l in open(p)] if os.path.exists(p) else []
+def team():
+    return [m for m in _read(os.environ['HQ_TEAM_LINE_DIR']) if m['from'] == 'agent']
+def donna():
+    return _read(os.environ['HQ_DIRECT_DIR'])
+def ontime(n0, k=18, kind='qa'):
+    return [line(n0 + i, kind, 10, 20, 12, i) for i in range(k)]
+def fresh():
+    if os.path.exists(Ms.STATE):
+        os.remove(Ms.STATE)
+    Ms.sweep([])  # the first look here: nothing old is sent
+"""
+
+    def _misses(self, tag, script, more=None, ws_env=None):
+        """F79: a made-up workspace with her line and Donna's, the misses allowed and waited for, a script run there with the
+        helpers above; its last line as JSON."""
+        import subprocess as _sp
+        ws, env = ws_env or self._h298_ws(tag)
+        env.update({"HQ_MISSES": "1", "HQ_MISSES_SYNC": "1", "HQ_DIRECT_PLAIN": "1", "HQ_DIRECT_DRY": "1", "HQ_ASLEEP": "0",
+                    "HQ_MISSES_RETRY": "0", **(more or {})})
+        r = _sp.run([sys.executable, "-c", self.MISSES_HEAD + script, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        need(r.returncode == 0, f"F79: the misses didn't run: {r.stderr[-1500:]}")
+        return ws, env, json.loads(r.stdout.strip().splitlines()[-1])
+
+    async def flow446(self) -> str:
+        """F79, no Claude: a miss goes to Moneypenny, not to him. The main's minute (misses.sweep) puts one note on her own line for a
+        finished job past the latest end it started with: never pushed, not taken for an answer to his waiting text; which job, its
+        kind, its range and its real time; the same job again adds nothing. A repeat goes to him through her, a text on her line,
+        once it really went and at most once a day: two jobs of one kind in a row past it, or more than 1 in the last 20; one miss
+        alone, or a job on time, says nothing. A job closed for real (estimate.on_done) is told at the next minute. A test without
+        its own line and its word never tells anyone."""
+        _, env, o = self._misses("f79m", """
+fresh()
+with dl._Env(dl.team_env()):
+    dl.add('me', 'what is the team doing right now?')
+hist = ontime(700)
+out = {}
+hist.append(line(720, 'build', 20, 40, 30, 20)); out['ok'] = Ms.sweep(hist)
+hist.append(line(721, 'build', 20, 40, 55, 21, ok=False)); out['a'] = Ms.sweep(hist); out['a_again'] = Ms.sweep(hist)
+out['after_a'] = team()
+with dl._Env(dl.team_env()):
+    out['waiting'] = [m['text'] for m in dl.unanswered()]
+hist.append(line(722, 'build', 20, 40, 61, 22)); out['b'] = Ms.sweep(hist); out['b_state'] = Ms._load()
+hist.append(line(723, 'qa', 10, 20, 45, 23)); out['c'] = Ms.sweep(hist)
+out['after_c'] = team(); out['donna'] = donna()
+fresh()  # two of one kind in a row, the last 20 holding only one of them
+h2 = [line(800, 'research', 10, 20, 30, 0)] + ontime(801, 20)
+h2.append(line(830, 'research', 10, 20, 31, 30)); Ms.sweep(h2); out['row'] = Ms._load().get('raised_why')
+fresh()  # two of different kinds within the last 20
+h3 = ontime(900) + [line(950, 'release', 10, 20, 25, 18), line(951, 'research', 10, 20, 26, 19)]
+Ms.sweep(h3); out['bar'] = Ms._load().get('raised_why')
+fresh()
+st = E._load_state()
+st['960'] = {'est': 5, 'kind': 'build', 'started': int(time.time()) - 1800, 'm': {'est': 5, 'latest': 8, 'sure': {'ok': True, 'jobs': 9, 'group': 'build'}}}
+E._save_state(st)
+rec = E.on_done(960, 'H9960 on the hq roadmap: a made-up build')
+out['done'] = {k: rec.get(k) for k in ('m_est', 'latest', 'actual')}
+out['done_sweep'] = Ms.sweep()
+out['after_done'] = team()
+print(json.dumps(out))
+""")
+        need(o["ok"]["told"] == [] and o["ok"]["pending"] is None, f"F79: a job on time was told: {o['ok']}")
+        need(o["a"]["told"] == ["job 721"] and o["a"]["pending"] is None and o["a_again"]["told"] == [], f"F79: one miss: {o['a']} / again {o['a_again']}")
+        notes = o["after_a"]
+        need(len(notes) == 1 and notes[0].get("quiet") and notes[0]["why"] == "estimate-miss" and "job 721 (build) took 55 minutes" in notes[0]["text"]
+             and "about 20, at the latest 40" in notes[0]["text"], f"F79: her note on her line: {notes}")
+        need(o["waiting"] == ["what is the team doing right now?"], f"F79: her note was taken for an answer to his text: {o['waiting']}")
+        rw = o["b_state"].get("raised_why") or ""
+        need(o["b"]["started"] and o["b_state"].get("raised") and not o["b_state"].get("pending") and "two build jobs in a row" in rw and "2 of the last 20" in rw,
+             f"F79: the repeat isn't raised: {o['b']} {o['b_state']}")
+        need(o["c"]["told"] == ["job 723"] and not o["c"]["started"], f"F79: raised twice in a day: {o['c']}")
+        texts = o["after_c"]
+        need([m["why"] for m in texts] == ["estimate-miss", "estimate-miss", "estimate-misses", "estimate-miss"]
+             and [bool(m.get("quiet")) for m in texts] == [True, True, False, True] and "two build jobs in a row" in texts[2]["text"],
+             f"F79: what stands on her line: {[(m['why'], m.get('quiet')) for m in texts]}")
+        need([m for m in o["donna"]] == [], f"F79: a miss went to Donna's line: {o['donna']}")
+        need("two research jobs in a row" in (o["row"] or "") and "of the last 20" not in o["row"], f"F79: two of one kind in a row: {o['row']}")
+        need("2 of the last 20" in (o["bar"] or "") and "in a row" not in o["bar"], f"F79: the bar: {o['bar']}")
+        need(o["done"] == {"m_est": 5, "latest": 8, "actual": 30} and o["done_sweep"]["told"] == ["job 960"]
+             and any(m.get("quiet") and "job 960" in m["text"] for m in o["after_done"]), f"F79: a job closed for real isn't told: {o['done']} {o['done_sweep']}")
+        import subprocess as _sp
+        bare = {k: v for k, v in env.items() if k not in ("HQ_MISSES", "HQ_DIRECT_DIR")}
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1] + '/routine'); import misses as Ms\n"
+                "h = {'n': 1, 'kind': 'build', 'est': 5, 'm_est': 5, 'latest': 8, 'actual': 90, 'done': 1790000000, 'how': 'seen', 'machine': 'u'}\n"
+                "print(json.dumps([Ms.sweep([h, dict(h, n=2)]), Ms._allowed()]))\n")
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=bare, cwd=str(ROOT), timeout=60)
+        got = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else None
+        need(got and got[0]["told"] == [] and not got[0]["started"] and got[1] is False, f"F79: a test without its own line told someone: {r.stdout} {r.stderr[-300:]}")
+        return "one quiet note per miss on her line, his waiting text still waiting; two builds in a row and 2 in 20 raised once that day; a job closed for real told at the next minute; nothing from a bare test"
+
+    async def flow448(self) -> str:
+        """F79, no Claude: once per job is the job, not its finished line. Job 721 closed twice, once on each computer (two lines,
+        two machines, two times): one note, and it counts once in the last 20, by its latest close, so one job alone trips neither
+        rule and nothing goes to him."""
+        _, _, o = self._misses("f79once", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20, machine='t'), line(721, 'build', 20, 40, 58, 21, machine='u')]
+out = {'one': Ms.sweep(hist), 'two': Ms.sweep(hist), 'team': team(), 'repeats': Ms.repeats(hist),
+       'last': [(h['n'], h['machine']) for h in Ms.last(hist)][-2:], 'count': len(Ms.last(hist)), 'state': Ms._load()}
+print(json.dumps(out))
+""")
+        need(o["one"]["told"] == ["job 721"] and o["two"]["told"] == [] and len(o["team"]) == 1, f"F79: one job closed twice gave {len(o['team'])} notes: {o['one']} {o['two']}")
+        need(o["repeats"] == [] and not o["one"]["started"] and not o["state"].get("pending"), f"F79: one job alone tripped a rule: {o['repeats']}")
+        need(o["count"] == 19 and o["last"][-1] == [721, "u"], f"F79: the job doesn't count once by its latest close: {o['count']} {o['last']}")
+        return "one job closed on both computers: one note, counted once by its latest close, no repeat"
+
+    async def flow449(self) -> str:
+        """F79, no Claude: two computers on one line. Each has its own state folder; the backup's minute tells nothing and raises
+        nothing, the main's tells each miss once and raises the repeat once; and a second main on the same line (a takeover with a
+        state of its own) adds no second note and no second text: the note's and the text's line ids are the job's and the day's."""
+        import shutil as _sh
+        ws, env = self._h298_ws("f79pair")
+        a, b, c = (self.tmp / f"f79pair-{x}" for x in "abc")
+        for d in (a, b, c):
+            d.mkdir()
+        sup = self.tmp / "f79pair-backup-support"
+        sup.mkdir()
+        (sup / "role.json").write_text(json.dumps({"peer": "the-main", "main": "the-main"}))
+        (sup / "role-state.json").write_text(json.dumps({"acting": "backup"}))
+        hist = ("hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]\n")
+        for d in (a, b, c):  # each one's first look, before the misses
+            self._misses("f79pair", "Ms.sweep([])\nprint(json.dumps(Ms._load()))\n", {"HQ_ESTIMATES": str(d)}, ws_env=(ws, dict(env)))
+        _, _, ob = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'main': Ms._main(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(b), "HQ_SUPPORT": str(sup)}, ws_env=(ws, dict(env)))
+        need(ob["main"] is False and ob["sweep"]["told"] == [] and not ob["sweep"]["started"] and ob["team"] == [], f"F79: the backup told or raised: {ob}")
+        _, _, oa = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(a)}, ws_env=(ws, dict(env)))
+        need(oa["sweep"]["told"] == ["job 721", "job 722"] and oa["state"].get("raised") and [m["why"] for m in oa["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: the main: {oa['sweep']} {[m['why'] for m in oa['team']]}")
+        _, _, oc = self._misses("f79pair", hist + "print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'team': team()}))\n",
+                                {"HQ_ESTIMATES": str(c)}, ws_env=(ws, dict(env)))
+        need(oc["state"].get("raised") and [m["why"] for m in oc["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"],
+             f"F79: a second main on one line wrote again: {[m['why'] for m in oc['team']]}")
+        _sh.rmtree(sup, ignore_errors=True)
+        return "the backup's minute tells nothing; the main tells twice and raises once; a second main on the same line adds nothing"
+
+    async def flow450(self) -> str:
+        """F79, no Claude: nothing is marked done before it went. A note that can't be written isn't told and is written at the next
+        minute; a repeat whose text fails stays pending, is never marked raised, and goes at the next minute; the note carries its
+        row's id when the row is on the record, and the record has the step (F103)."""
+        ws, env = self._h298_ws("f79fail")
+        broken = self.tmp / "f79fail-a-file"
+        broken.write_text("not a folder")
+        _, _, o1 = self._misses("f79fail", """
+import trail
+fresh()
+item = trail.written('H9721', 'a made-up row', by='flow 450')
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'state': Ms._load(), 'item': item}))
+""", {"HQ_TEAM_LINE_DIR": str(broken / "team-line")}, ws_env=(ws, dict(env)))
+        need(o1["sweep"]["told"] == [] and "job 721" not in (o1["state"].get("told") or []), f"F79: a note that wasn't written counted as told: {o1}")
+        _, _, o2 = self._misses("f79fail", """
+import trail
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+started = []
+real = Ms._start_raise
+Ms._start_raise = lambda: started.append(1)
+one = Ms.sweep(hist)
+d = Ms._dl()
+send = d.text
+def fails(*a, **k):
+    raise OSError('the line fell over')
+d.text = fails
+try:
+    Ms.raise_pending(); said = 'went'
+except OSError as e:
+    said = str(e)
+after_fail = Ms._load()
+d.text = send
+Ms._start_raise = real
+two = Ms.sweep(hist)
+steps = [x for x in trail.lines() if x.get('step') == 'text']
+print(json.dumps({'one': one, 'said': said, 'after_fail': after_fail, 'two': two, 'state': Ms._load(), 'team': team(), 'steps': steps}))
+""", ws_env=(ws, dict(env)))
+        need(o2["one"]["told"] == ["job 721", "job 722"] and o2["one"]["started"], f"F79: the notes at the next minute: {o2['one']}")
+        need(o2["said"] == "the line fell over" and not o2["after_fail"].get("raised") and (o2["after_fail"].get("pending") or {}).get("why"),
+             f"F79: a failed repeat was marked raised or lost: {o2['said']} {o2['after_fail']}")
+        need(o2["two"]["started"] and o2["state"].get("raised") and not o2["state"].get("pending")
+             and [m["why"] for m in o2["team"]] == ["estimate-miss", "estimate-miss", "estimate-misses"], f"F79: the repeat didn't go the next minute: {o2['two']} {o2['state']}")
+        item = o1["item"]
+        need(o2["team"][0].get("item") == item and any(x.get("id") == item and x.get("why") == "estimate-miss" for x in o2["steps"]),
+             f"F79: the note doesn't carry its row's id, or the record has no step: {o2['team'][0]} {o2['steps']}")
+        return "a note not written is written at the next minute; a failed repeat stays pending and goes at the next; the note carries its row's id and the record its step"
+
+    async def flow451(self) -> str:
+        """F79, no Claude: with no line of hers (HQ_TEAM_LINE=0, as without Moneypenny on a friend's HQ) a miss is never written on
+        Donna's line, which he reads: it's kept in the misses' own file, told once. And the Mac app's inbox counts no quiet note
+        as unread and shows none as a notification."""
+        import subprocess as _sp
+        _, _, o = self._misses("f79off", """
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20)]
+print(json.dumps({'sweep': Ms.sweep(hist), 'again': Ms.sweep(hist), 'state': Ms._load(), 'donna': donna(),
+                  'note': dl.note('estimate-miss', 'made up', '', 'x1'), 'donna2': donna()}))
+""", {"HQ_TEAM_LINE": "0"})
+        need(o["sweep"]["kept"] == ["job 721"] and o["sweep"]["told"] == [] and o["again"]["kept"] == [] and o["donna"] == [] and o["donna2"] == []
+             and o["note"].get("skipped"), f"F79: with no line of hers a note went to Donna's: {o}")
+        need(len(o["state"].get("kept") or []) == 1 and "job 721" in o["state"]["kept"][0]["facts"], f"F79: the miss isn't kept: {o['state']}")
+        js = r"""
+const fs = require('fs');
+const src = fs.readFileSync('desktop/shell.html', 'utf8');
+const i = src.indexOf('inbox(d, seen, told, looking) {');
+const j = src.indexOf('\n    zoom(pct)', i);
+var $ = () => ({ textContent: '', title: '', classList: { toggle() {} } });
+var hq = { dragMap() {} };
+const o = eval('({' + src.slice(i, j).trim().replace(/,$/, '') + '})');
+const d = { agent: { name: 'M' }, messages: [{ from: 'agent', at: 10, text: 'hers' }, { from: 'agent', at: 20, text: 'a note', quiet: true }] };
+console.log(JSON.stringify(o.inbox(d, 1, 1, false)));
+"""
+        r = _sp.run(["node", "-e", js], capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+        need(r.returncode == 0, f"F79: the inbox check didn't run: {r.stderr[-500:]}")
+        ib = json.loads(r.stdout.strip().splitlines()[-1])
+        need(ib["unread"] == 1 and [n["text"] for n in ib["notify"]] == ["hers"], f"F79: the Mac app shows her quiet note to him: {ib}")
+        return "no line of hers: nothing on Donna's line, the miss kept in its own file once; the Mac app's inbox leaves quiet notes out"
+
+    async def flow452(self) -> str:
+        """F79, no Claude: a quiet note is honoured everywhere it's read. Her answer's history has the note once, as a note, and not
+        his text she's answering (it comes as his new text); her weekly score doesn't count the note as one of her texts; her chat
+        page shows it as a note and still says she's typing while his text waits."""
+        ws, env = self._h298_ws("f79quiet")
+        _, _, o = self._misses("f79quiet", """
+import pokes
+from pathlib import Path
+with dl._Env(dl.team_env()):
+    dl.add('agent', 'All four jobs are done.')
+    m = dl.add('me', 'what about the fifth one?')
+    dl.note('estimate-miss', 'Noted for myself: job 9 ran long.', '', 'miss-9')
+    waiting = dl.unanswered()
+    h = dl.history([x['id'] for x in waiting])
+tp = pokes.text_pokes('moneypenny', 0, time.time() + 60, Path(os.environ['HQ_WORKSPACE']))
+print(json.dumps({'waiting': [x['text'] for x in waiting], 'history': h, 'pokes': tp}))
+""", ws_env=(ws, env))
+        h = o["history"]
+        need(o["waiting"] == ["what about the fifth one?"], f"F79: his text isn't waiting: {o['waiting']}")
+        need(h.count("job 9 ran long") == 1 and "(a note for yourself" in h and "fifth one" not in h and "All four jobs" in h, f"F79: her answer's history: {h}")
+        need(o["pokes"]["acted"][1] == 1, f"F79: her score counts her note as one of her texts: {o['pokes']}")
+        page = (ROOT / "status" / "direct.html").read_text()
+        need("m.quiet ? ' quiet'" in page and ".filter((m) => !m.quiet).slice(-1)[0]" in page and ".m.quiet" in page,
+             "F79: her chat page doesn't show a quiet note as one, or lets it hide that she's typing")
+        return "her history has the note once and not his text twice; her score doesn't count the note; the page shows it as a note and keeps 'is typing'"
+
+    async def flow453(self) -> str:
+        """F79 and F97, no Claude: her words for a repeat can't invent an action: they say what repeated and that it's for him to
+        look at, an idea only as a proposal. And a transcript with no heading counts as not read only while it's fresh: left
+        untouched for a day, an empty stub is read and empty."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "app"))
+        import direct_line as _dl
+        k = _dl.KINDS["estimate-misses"]
+        need("what you're doing about it" not in k and "proposal" in k and "never say you're doing or fixing" in k, f"F79: her words for a repeat: {k}")
+        ws, env = self._ledger_env("f97stub")
+        scan = self.tmp / "f97stub-scan.json"
+        env.update({"HQ_MISTAKES_SCAN": str(scan)})
+        calls = ws / "HQ/calls"
+        calls.mkdir(parents=True, exist_ok=True)
+        sweep = lambda: _sp.run([sys.executable, str(ROOT / "routine/mistakes.py"), "scan"], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        sweep()
+        old, new = calls / "2026-10-29-0800.md", calls / "2026-10-29-0900.md"
+        old.write_text("")
+        new.write_text("")
+        t = time.time() - 2 * 86400
+        os.utime(old, (t, t))
+        sweep()
+        st = json.loads(scan.read_text())
+        need(old.name in st["read"] and old.name not in (st.get("unread") or {}) and new.name in (st.get("unread") or {}),
+             f"F97: an old empty stub isn't read, or a fresh one isn't kept as not read: {st.get('read')} {st.get('unread')}")
+        return "her words for a repeat say it's his to look at, an idea as a proposal; an empty stub left a day is read, a fresh one waits"
+
+    async def flow447(self) -> str:
+        """F79, no Claude: the Friday report reads what F79 built: each job of the week against the measured estimate and latest end
+        it started with (m_est and latest on its finished line), the bar of nine in ten by the latest end, how many were rough,
+        the jobs from before F79 said apart, per kind of work, and the last 20 held to the measured latest against at most 1 in
+        20. Her words for it say nine in ten too."""
+        import subprocess as _sp
+        rm = self.tmp / "roadmap-F79f.md"
+        rm.write_text("# HQ\n\n## The queue\n\n**Routine:** on\n")
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ROLE_HERE": "1"}
+        code = """
+import json, sys, time
+sys.path.insert(0, 'routine'); sys.path.insert(0, 'app')
+import estimate as E, direct_line as dl
+now = time.time()
+def line(n, kind, est, late, act, ok=True, about=''):
+    return {'n': n, 'kind': kind, 'est': 99, 'm_est': est, 'latest': late, 'actual': act, 'done': int(now) - 3600 * (n % 50), 'how': 'seen',
+            'machine': 't', 'about': about or f'h9{n} on the hq roadmap: a made-up change', 'sure': {'ok': ok, 'jobs': 12}}
+week = [line(i, 'qa', 10, 20, 12) for i in range(1, 8)] + [line(8, 'build', 20, 40, 39, ok=False), line(9, 'build', 20, 40, 55)]
+old = {'n': 10, 'kind': 'qa', 'est': 10, 'latest': 30, 'actual': 25, 'done': int(now) - 7200, 'how': 'seen', 'machine': 't'}
+gone = dict(line(11, 'qa', 10, 20, 15), done=int(now) - 9 * 86400)
+one = E.friday_report(hist=[gone] + week + [old], now=now)
+two = E.friday_report(hist=[gone] + week + [dict(line(12, 'research', 10, 20, 44), done=int(now) - 60)], now=now)
+twice = E.friday_report(hist=week[:7] + [dict(line(399, 'build', 20, 40, 55), done=int(now) - 900), dict(line(399, 'build', 20, 40, 58), done=int(now) - 300, machine='u')], now=now)
+print(json.dumps({'one': one, 'two': two, 'twice': twice, 'kind': dl.KINDS['estimates']}))
+"""
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        need(r.returncode == 0, f"F79: the Friday report didn't run: {r.stderr[-800:]}")
+        o = json.loads(r.stdout.strip().splitlines()[-1])
+        one, two = o["one"], o["two"]
+        need("9 of 10 jobs finished by the latest end they were given (90%)" in one and "below nine in ten" not in one, f"F79: the week by the latest end: {one}")
+        need("Past their latest end: build 1 of 2." in one and "1 had too few finished jobs like them" in one
+             and "1 started before the measured estimates" in one, f"F79: per kind, rough and from before: {one}")
+        need("The last 10 jobs held to the measured latest end: 1 past it (the bar is at most 1 in 20)." in one, f"F79: the last 20: {one}")
+        need("8 of 10 jobs finished by the latest end" in two and "below nine in ten" in two and "2 past it (the bar is at most 1 in 20, so it's broken)" in two
+             and "research 1 of 1" in two, f"F79: a week under the bar: {two}")
+        need("nine in ten" in o["kind"] and "eight in ten" not in o["kind"], f"F79: her words for the report still say eight in ten: {o['kind']}")
+        need("Past their latest end: build 1 of 1." in o["twice"] and "7 of 8 jobs" in o["twice"], f"F79: one job closed twice counts twice in the Friday report: {o['twice']}")
+        return "the week held to F79's latest end and nine in ten, per kind, rough and from before said apart, the last 20 against 1 in 20; her words say nine in ten"
+
+    async def flow454(self) -> str:
+        """F79, no Claude: the repeat's hold and tries follow the calendar day. Six failed starts on one day stop, and open the
+        incident estimate-misses (a red line); two days later a new repeat starts its tries over and goes, and the incident
+        closes. A repeat raised at 23:50 holds a new one at 23:55, not one at 00:10 the next day. Past 500 misses none is
+        told twice: the told jobs are kept by number, without a cap."""
+        _, _, o = self._misses("f79day", """
+import incidents
+starts = []
+Ms._start_raise = lambda: starts.append(1)
+day1 = time.mktime((2026, 9, 22, 12, 0, 0, 0, 0, -1))
+fresh()
+hist = ontime(700) + [line(721, 'build', 20, 40, 55, 20), line(722, 'build', 20, 40, 61, 21)]
+for k in range(8):
+    Ms.sweep(hist, now=day1 + k * 60)
+out = {'day1': len(starts), 'day1_state': Ms._load(), 'down': bool(incidents.is_down('estimate-misses'))}
+hist.append(line(723, 'build', 20, 40, 70, 22))
+r = Ms.sweep(hist, now=day1 + 2 * 86400)
+out['day3'] = r
+Ms._start_raise = lambda: (starts.append(1), Ms.raise_pending())
+Ms.sweep(hist, now=day1 + 2 * 86400 + 60)
+out['day3_state'] = Ms._load(); out['back'] = not incidents.is_down('estimate-misses')
+fresh()  # the calendar day: raised at 23:50
+st = Ms._load(); st['raised'] = time.mktime((2026, 9, 22, 23, 50, 0, 0, 0, -1)); Ms._save(st)
+Ms._start_raise = lambda: starts.append('late')
+h2 = ontime(800) + [line(821, 'research', 10, 20, 31, 20), line(822, 'research', 10, 20, 33, 21)]
+out['2355'] = Ms.sweep(h2, now=time.mktime((2026, 9, 22, 23, 55, 0, 0, 0, -1)))['started']
+h2.append(line(823, 'research', 10, 20, 35, 22))
+out['0010'] = Ms.sweep(h2, now=time.mktime((2026, 9, 23, 0, 10, 0, 0, 0, -1)))['started']
+os.environ['HQ_TEAM_LINE'] = '0'  # no notes on a line: 510 misses kept in the file, fast
+fresh()
+h3 = [line(2000 + i, 'qa', 10, 20, 45, i) for i in range(510)]
+a = Ms.sweep(h3, now=day1); b = Ms.sweep(h3, now=day1 + 60)
+out['many'] = [len(a['kept']), len(b['kept']), len(Ms._load()['told'])]
+print(json.dumps(out))
+""")
+        p1 = o["day1_state"].get("pending") or {}
+        need(o["day1"] == 6 and p1.get("tries") == 6 and p1.get("id") == "misses-2026-09-22" and o["down"], f"F79: six failed starts don't stop or open the incident: {o['day1']} {p1} down {o['down']}")
+        p3 = o["day3"].get("pending") or {}
+        need(p3.get("id") == "misses-2026-09-24" and p3.get("tries") == 1 and o["day3"]["started"], f"F79: a new day's repeat inherits the old tries: {p3}")
+        need(o["day3_state"].get("raised") and not o["day3_state"].get("pending") and o["back"], f"F79: the new day's repeat didn't go, or the incident stays open: {o['day3_state']} back {o['back']}")
+        need(o["2355"] is False and o["0010"] is True, f"F79: the hold doesn't follow the calendar day: 23:55 {o['2355']}, 00:10 {o['0010']}")
+        need(o["many"] == [510, 0, 510], f"F79: past 500 misses the oldest are told again: {o['many']}")
+        return "six failed starts stop and open the incident; a new day's repeat starts over, goes, and closes it; the hold is the calendar day; 510 misses told once each"
+
     async def flow440(self) -> str:
         """The small list, no Claude: a fresh install's workspace from the template counts every data change this HQ has as run, so the first
         minute runs none on the brand-new folder and going back never undoes one it never had. An existing list is never written over."""
@@ -21340,6 +21829,7 @@ R.is_main = lambda: True
 nightly.RUNNING = sys.argv[3]
 qa.BEFORE_GATE = json.loads(os.environ.get('F112_LIST') or '{}')
 qa.MERGES_PASSED = json.loads(os.environ.get('F112_MERGES') or '{}')
+qa.COMMITS_FOR = json.loads(os.environ.get('F112_COMMITS') or '{}')
 told, pushes = [], []
 qa.tell = lambda *a, **k: told.append(a)
 real = R.to_nightly
@@ -21569,6 +22059,89 @@ print('COUNTS', json.dumps({'told': len(told), 'pushes': len(pushes)}))
                     subj = _sp.run(["git", "-C", str(ROOT), "log", "-1", "--format=%s", c], capture_output=True, text=True).stdout
                     need(label in _qa.subject_labels(subj), f"{c} isn't {label}'s: {subj[:80]}")
         return "a merge passes on what it brought and is held by what it brought, a version merged back passes, a row out in a version is said, F66 is named held, the list can't wave one through"
+
+    async def flow336(self) -> str:
+        """F120, no Claude: the gate's list of commits that belong to a row their subject doesn't name (qa.COMMITS_FOR). A listed commit counts for
+        its row: held for that row ("no QA yet") until it passes, then it goes, named as taken; the same with git set to other abbreviations,
+        no prefixes and renames. Nothing else rides on the entry: listed by a short id, for other files, with another fingerprint, a second commit
+        with the same subject, or the same files changed differently, it's a commit naming no item, held. The real list: every commit in it is
+        here, by its full id, and is what the list names; f6de1a4 counts for F119."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import qa as _qa
+        passed = "| ✅ | F9812 A row | What's wrong. | QA passed (job 5, 30 October 2026 10:00): tried it. | |\n"
+        rows = "| ⬜ | F9811 A row | What's wrong. | | |\n" + passed
+        h = self._f112_hq("c", rows=rows)
+        hq, g, work = h["hq"], h["g"], h["work"]
+
+        def hold(tip="dev"):
+            out, _, _ = h["rel"]("hold", tip)
+            return json.loads(out.split("HOLD ", 1)[1].splitlines()[0]), out.split("WORDS ", 1)[1].splitlines()[0]
+        before = work("F9812", "a passed one first")
+        quiet = work("", "Small list: the things a friend hits", "app/startsize.py")
+        files = sorted(_qa.changed_files(str(hq), quiet))
+        need(files == ["CHANGELOG.md", "app/startsize.py"], f"what the commit changes: {files}")
+        fp = _qa.commit_diff(str(hq), quiet, files)
+        listed = lambda **k: json.dumps({quiet: {"row": "F9811", "files": files, "diff": fp, **k}})
+        o, w = hold()
+        need(not o["all"] and o["to"] == before and o["held"][0]["label"] == quiet[:7] and "names no item" in o["held"][0]["why"],
+             f"an unlisted commit naming nothing: {o}")
+        seen = ["unlisted, it names no item"]
+        h["env"]["F112_COMMITS"] = listed()
+        o, w = hold()
+        need(not o["all"] and o["to"] == before and o["held"] == [{"label": "F9811", "why": "no QA yet"}] and "F9811 (no QA yet)" in w,
+             f"a listed commit isn't held for its row: {o} {w}")
+        # git's own settings don't change what the list matches: other abbreviations, no a/ b/ prefixes, renames
+        for k_, v_ in (("core.abbrev", "12"), ("diff.noprefix", "true"), ("diff.renames", "copies"), ("diff.mnemonicPrefix", "true")):
+            g("config", k_, v_)
+        need(_qa.commit_diff(str(hq), quiet, files) == fp and sorted(_qa.changed_files(str(hq), quiet)) == files,
+             "with core.abbrev 12 and diff.noprefix the fingerprint or the files changed")
+        o, w = hold()
+        need(not o["all"] and o["held"] == [{"label": "F9811", "why": "no QA yet"}], f"with other git settings the listed commit isn't held for its row: {o}")
+        h["env"]["F112_COMMITS"] = json.dumps({quiet[:7]: {"row": "F9811", "files": files, "diff": fp}})
+        o, w = hold()
+        need(not o["all"] and o["held"][0]["label"] == quiet[:7] and "names no item" in o["held"][0]["why"], f"a commit listed by a short id is covered: {o}")
+        h["env"]["F112_COMMITS"] = listed()
+        seen.append("listed, it's held for its row until that row's QA, whatever git is set to; by a short id it isn't listed")
+        road = h["road"].read_text()
+        h["road"].write_text(road.replace("| ⬜ | F9811 A row | What's wrong. | | |",
+                                          "| ✅ | F9811 A row | What's wrong. | QA passed (job 6, 3 November 2026 10:00): tried it. | |"))
+        o, w = hold()
+        need(o["all"] and not o["held"] and "F9811" in o["taken"], f"a listed commit whose row passed doesn't go: {o}")
+        seen.append("then it goes, for its row")
+        for why, entry in (("other files", listed(files=["app/startsize.py"])), ("another fingerprint", listed(diff="0" * 16))):
+            h["env"]["F112_COMMITS"] = entry
+            o, w = hold()
+            need(not o["all"] and o["held"][0]["label"] == quiet[:7] and "names no item" in o["held"][0]["why"]
+                 and "aren't what the list names" in o["held"][0]["why"], f"a commit listed with {why} went: {o}")
+        h["env"]["F112_COMMITS"] = listed()
+        # The same files, changed differently, under the same subject: the entry is by commit and by change, so it doesn't ride along.
+        g("checkout", "-q", "-b", "other", before)
+        other = work("", "Small list: the things a friend hits", "app/startsize.py")
+        (hq / "app/startsize.py").write_text("something else = 2\n")
+        g("commit", "-q", "--amend", "-a", "--no-edit")
+        other = g("rev-parse", "HEAD")
+        o, w = hold("other")
+        need(not o["all"] and o["held"][0]["label"] == other[:7] and "names no item" in o["held"][0]["why"], f"a second commit rode on the entry: {o}")
+        h["env"]["F112_COMMITS"] = json.dumps({other: {"row": "F9811", "files": files, "diff": fp}})
+        o, w = hold("other")
+        need(not o["all"] and "aren't what the list names" in o["held"][0]["why"], f"another change rode on the first one's fingerprint: {o}")
+        seen.append("listed for other files, another fingerprint, or another commit, it isn't covered")
+        g("checkout", "-q", "dev")
+        # The real list: every commit in it is here (a history rewrite leaves no stale entry), by its full id, its row, files and fingerprint
+        # its whole change.
+        for c, d in _qa.COMMITS_FOR.items():
+            need(re.fullmatch(r"[0-9a-f]{40}", c), f"{c} is listed by a short id: the list takes full ids only")
+            need(d.get("row") and d.get("files") and d.get("diff"), f"{c} is listed without its row, files or fingerprint: {d}")
+            need(_sp.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{c}^{{commit}}"], capture_output=True).returncode == 0,
+                 f"{c} is listed but isn't a commit here (a rewritten history?): take it off the list or list the new one")
+            got = _qa.changed_files(str(ROOT), c)
+            need(sorted(got) == sorted(d["files"]) and _qa.commit_diff(str(ROOT), c, got) == d["diff"], f"{c} isn't what the list names: {got}")
+            need(_qa.commit_labels(str(ROOT), c, "") == [d["row"]], f"{c} doesn't count for {d['row']}")
+        f6 = _qa.COMMITS_FOR.get("f6de1a4f2fb156bc53775a75fc0007c8f342cdbe") or {}
+        need(f6.get("row") == "F119", f"f6de1a4 isn't listed for F119: {f6}")
+        seen.append("the real list holds what its commits change, f6de1a4 for F119")
+        return "; ".join(seen)
 
     async def flow331(self) -> str:
         """F112, no Claude: a release on a copy to a bare repo, each refusal and the happy path. The night counts for the commit it ran on: no night, a
@@ -23834,6 +24407,7 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         mark = {"BUILDING": "🔨", "WAITING": "⏸", "DONE": "✅", "STOPPED": "⚠️"}.get(state, "🔨")
         words = "WAITING FOR YOU" if state == "WAITING" else state
         updated = "2026-10-01" if ago is None else (datetime.now() - timedelta(minutes=ago)).strftime("%Y-%m-%d %H:%M")
+        self._f116_at = None if ago is None else datetime.strptime(updated, "%Y-%m-%d %H:%M")
         site_roadmap(site).write_text(self.F116_ROADMAP.format(mark=mark, state=words, queue=queue, extra=extra, updated=updated, step=step), encoding="utf8")
 
     @staticmethod
@@ -24002,6 +24576,25 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
 
         def banner():
             return self._f116_page(base)["truth"]["banner"]
+
+        months = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+        def said(who: str, words: str = "") -> tuple:
+            """F119: how the page says when the block was written (status/server.mjs, whenSaid): "<who> said at HH:MM, <words>," on
+            its own day, "<who> said on D Month at HH:MM," when it was written on another day. A block written three hours ago at
+            1:00 is from yesterday, so the flow works out which, and holds at any hour. In the first minutes after midnight both."""
+            at, now = self._f116_at, datetime.now()
+            today = f"{who} said at {at:%H:%M}, " + (f"{words}," if words else "")
+            other = f"{who} said on {at.day} {months[at.month - 1]} at {at:%H:%M},"
+            if now - timedelta(minutes=2) < now.replace(hour=0, minute=0, second=0, microsecond=0) <= now:
+                return (today, other)
+            return (today,) if at.date() == now.date() else (other,)
+
+        def starts(line: str, who: str, words: str = "") -> bool:
+            return any(line.startswith(x) for x in said(who, words))
+
+        def has(text: str, who: str, words: str = "") -> bool:
+            return any(x in text for x in said(who, words))
         try:
             # The second check's repro first: a block saying Testing, written 35 minutes ago, nothing on the queue.
             self._f116_road(site, "TESTING", "", ago=35)
@@ -24025,48 +24618,51 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             # The third check's B: a chat's Waiting, two hours old, is trusted as written, saying who and when.
             self._f116_road(site, "WAITING", "", ago=120, step="him to try the mic on the phone")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at ") and "2 hours ago" in b["line"]
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat", "2 hours ago")
                  and "it's waiting for you: him to try the mic on the phone" in b["line"], f"a chat's Waiting, two hours old: {b}")
             dom = await self._f116_dom(base)
-            need('data-state="WAITING"' in dom and "A chat said at " in dom, "the page doesn't draw a chat's Waiting as waiting, saying who")
+            need('data-state="WAITING"' in dom and has(dom, "A chat", "2 hours ago"), "the page doesn't draw a chat's Waiting as waiting, saying who")
             # The routine's own Waiting, and a job's.
             self._f116_road(site, "WAITING", "", ago=90, step="Job 7 isn't running (ended 10:00 without a done mark); nothing runs now")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("The routine said at "), f"the routine's own Waiting: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "The routine"), f"the routine's own Waiting: {b}")
             at6 = datetime.now() - timedelta(minutes=60)
-            done6 = (at6 + timedelta(minutes=2)).strftime("%H:%M")
-            self._f116_road(site, "WAITING", f"- Job 6 · done {done6} on {at6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
+            d6 = at6 + timedelta(minutes=2)  # the done mark's day and time from the same moment
+            self._f116_road(site, "WAITING", f"- Job 6 · done {d6:%H:%M} on {d6:%Y-%m-%d} · agreed 2026-11-02 09:00 · a test build", ago=60, step="built, waiting for him to try it")
             b = banner()
-            if at6.date() == datetime.now().date():
-                need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a job's Waiting: {b}")
+            if d6.date() == self._f116_at.date():
+                need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a job's Waiting: {b}")
+            else:  # the server's own edge: a job done just after midnight is never credited to a block written just before it
+                need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a job done past midnight, its block from before: {b}")
             self._f116_road(site, "WAITING", "", ago=1, step="your answer")
             b = banner()
-            need(b["state"] == "WAITING" and re.search(r"\b(1 minute|2 minutes) ago", b["line"]) and "1 minutes" not in b["line"], f"the wording, a minute on: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat") and "1 minutes" not in b["line"]
+                 and (b["line"].startswith("A chat said on ") or re.search(r"\b(1 minute|2 minutes) ago", b["line"])), f"the wording, a minute on: {b}")
             # The fourth check's 1: a done mark from another day, or one without its day, doesn't make a chat's Waiting a job's.
             mark = (at6 + timedelta(minutes=7)).strftime("%H:%M")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, an old done mark without its day at a fitting time: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a chat's Waiting, an old done mark without its day at a fitting time: {b}")
             yesterday = (at6 - timedelta(days=1)).strftime("%Y-%m-%d")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} on {yesterday} · agreed 2026-11-01 09:00 · an old build", ago=60, step="your answer on the plan")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a chat's Waiting, a job done yesterday at a fitting time: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a chat's Waiting, a job done yesterday at a fitting time: {b}")
             self._f116_road(site, "WAITING", f"- Job 6 · done {mark} · agreed 2026-11-01 09:00 · an old build", ago=60, step="Job 6 · built, waiting for him to try it")
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("Job 6 said at "), f"a Waiting whose Now line names job 6: {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "Job 6"), f"a Waiting whose Now line names job 6: {b}")
             seen.append("a job's Waiting only by its own Now line or a done mark of that day")
             # The fourth check's 2: an old chat Waiting doesn't hide a held job or the routine off; it's named on a second line.
             self._f116_road(site, "WAITING", "- Job 8 · held: usage over the line · agreed 2026-11-02 09:00 · a test job", ago=180, step="your answer")
             b = banner()
-            need(b["state"] == "STOPPED" and "Job 8 held" in b["line"] and "and a chat said at " in b.get("also", "") and "3 hours ago" in b.get("also", ""),
+            need(b["state"] == "STOPPED" and "Job 8 held" in b["line"] and has(b.get("also", ""), "and a chat", "3 hours ago"),
                  f"a held job under a chat's Waiting from 3 hours ago: {b}")
             dom = await self._f116_dom(base)
-            need('data-state="STOPPED"' in dom and "And a chat said at " in dom, "the page doesn't draw the held job as stopped with the chat's Waiting under it")
+            need('data-state="STOPPED"' in dom and has(dom, "And a chat", "3 hours ago"), "the page doesn't draw the held job as stopped with the chat's Waiting under it")
             self._f116_road(site, "WAITING", "", ago=180, step="your answer")
             road = site_roadmap(site)
             road.write_text(road.read_text(encoding="utf8").replace("**Routine:** on", "**Routine:** off"), encoding="utf8")
             b = banner()
-            need(b["state"] == "STOPPED" and "routine is off" in b["line"] and "and a chat said at " in b.get("also", ""), f"the routine off under a chat's Waiting: {b}")
+            need(b["state"] == "STOPPED" and "routine is off" in b["line"] and has(b.get("also", ""), "and a chat"), f"the routine off under a chat's Waiting: {b}")
             seen.append("a held job or the routine off comes before a Waiting")
             # The fourth check's 3: a build that waits only for the night is said calmly, in yellow; the usage line stays red.
             self._f116_road(site, "DONE", "- Job 8 · ready · agreed 2026-11-02 09:00 · a test build", ago=20, step="all done")
@@ -24156,7 +24752,7 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
             need(b["state"] == "DONE", f"a Done from five hours ago: still Done, nothing newer replaced it: {b}")
             self._f116_road(site, "WAITING", "", ago=5)
             b = banner()
-            need(b["state"] == "WAITING" and b["line"].startswith("A chat said at "), f"a fresh waiting with nothing his: shown as {b}")
+            need(b["state"] == "WAITING" and starts(b["line"], "A chat"), f"a fresh waiting with nothing his: shown as {b}")
             seen.append("Done only from a block that says Done")
         finally:
             self._f116_stop(proc)
@@ -34905,7 +35501,10 @@ print("H88OUT " + json.dumps(out))
     async def flow75(self) -> str:
         """F18, no Claude: the status page on the phone only scrolls up and down. A copy of the status page in a
         headless browser at phone widths, with a job and a roadmap note that hold a long path and a key (no space
-        to break at), every fold opened: no element's right edge is past the screen and the page is no wider than it."""
+        to break at), every fold opened: no element's right edge is past the screen and the page is no wider than it.
+        A wide table in a note scrolls inside its own box: the box fits, what's inside it may be wider. Its roadmap is
+        its own, from HQ's blank template, so what's in his real roadmap never decides it (F119: it went red on
+        3 November when his roadmap got a wide note table, drawn right, in its own scrolling box)."""
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
         chrome = str(cands[-1]) if cands else (shutil.which("google-chrome") or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
@@ -34919,11 +35518,19 @@ print("H88OUT " + json.dumps(out))
         (site / ".status").mkdir()
         long_path = "/home/someone/HQ/workspace/HQ/roadmap.sync-conflict-20261012-223405-5Q2D7XN-and-a-long-tail.md"
         key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAwk8/o+vb4By0L7LRCWdxgnYI7o0qc/Lund+DC/zojPxxxxxxxxxxxxxxxx"
-        rm = ROADMAP.read_text()
-        need("\n## The queue\n" in rm and "\n## The schedule\n" in rm, "the roadmap has no queue or schedule to add to")
+        rm = (ROOT / "template/HQ/roadmap.md").read_text(encoding="utf8")
+        need("\n## The queue\n" in rm and "\n# The roadmap\n" in rm, "HQ's blank roadmap has no queue to add to")
+        if "\n## The schedule\n" not in rm:
+            rm = rm.replace("\n# The roadmap\n", "\n## The schedule\n\nWork planned ahead for a day and a time (H43).\n\n# The roadmap\n", 1)
+        rm = rm.replace("\n**Routine:** on\n", "\n- Job 9000 · ready · agreed 2026-10-13 11:00 · A short test job.\n\n**Routine:** on\n", 1)
         rm = rm.replace("\n## The schedule\n", f"\n- Job 9001 · waiting · agreed 2026-10-13 12:00 · Merge {long_path} into the roadmap.\n\n## The schedule\n", 1)
         rm = rm.replace("\n## The schedule\n", f"\n## The schedule\n\n- Item 9001 · waiting · at 2026-12-31 23:59 · added 2026-10-13 12:00 · Look at {long_path}.\n", 1)
         rm += f"\n\n## Phase Z · Test\n\n| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | Z1 A long word | The key `{key}` and the file `{long_path}` | Sonnet |\n"
+        # A note under the phase with a table wider than a phone: it scrolls inside its own box (status/index.html, .prose .scroll).
+        rm += "\nA note with a wide table:\n\n| Row | File | Branch | Commit | When | Also |\n|---|---|---|---|---|---|\n" + "".join(
+            f"| ⏸Z{i} A row | routine/flowsets-and-more-{i}.py | nightfix-and-a-long-branch-{i} | d794ce6e189c2d10a239 | 2026-11-03T02:00:0{i} "
+            f"| /home/someone/HQ/workspace/HQ/roadmap-{i}.md |\n"
+            for i in range(2, 6))
         site_roadmap(site).write_text(rm)
         harness = r"""
 <script>
@@ -34936,11 +35543,15 @@ print("H88OUT " + json.dumps(out))
   const W = document.documentElement.clientWidth, out = [];
   out.push('page:' + document.documentElement.scrollWidth + '/' + W);
   const wide = [];
+  let boxed = 0;
   for (const el of document.querySelectorAll('main *')) {
     const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.right > W + 1 && el.parentElement && el.parentElement.closest('.scroll')) { boxed++; continue; }
     if (r.width > 0 && r.right > W + 1) wide.push(el.tagName + '.' + el.className + ' ' + Math.round(r.right) + ' ' + el.textContent.slice(0, 40).replace(/[|:]/g, ' '));
   }
   out.push('wide:' + wide.length + (wide.length ? ' ' + wide.slice(0, 3).join(' ; ') : ''));
+  const sc = document.querySelector('.prose .scroll');
+  out.push('boxed:' + boxed + '/' + (sc ? getComputedStyle(sc).overflowX + ' ' + (sc.scrollWidth > sc.clientWidth ? 'scrolls' : 'fits') : 'none'));
   out.push('found:' + (document.body.textContent.includes('sync-conflict-20261012') ? 'yes' : 'no'));
   out.push('key:' + (document.body.textContent.includes('Lund+DC/zojPxxxx') ? 'yes' : 'no'));
   const pre = document.createElement('pre'); pre.id = 'f18'; pre.textContent = 'F18RESULT ' + out.join(' | ') + ' END';
@@ -34951,7 +35562,11 @@ print("H88OUT " + json.dumps(out))
         idx = site / "status/index.html"
         idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
         port = 4798
-        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1"}
+        env ={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_FIX_DRY": "1", "HQ_SUPPORT": str(site / "support"), "HQ_LAPTOP": "0", "HQ_PEER_USAGE_CACHE": "0"}
+        for k in ("HQ_ROADMAP", "HQ_WORKSPACE", "HQ_CYCLES_STATE", "HQ_CYCLES_FOLDER", "HQ_CYCLES_OLD_STATE", "HQ_HELPERS", "HQ_LABEL", "HQ_USAGE",
+                  "HQ_DIRECT_DIR", "HQ_TEAM_LINE_DIR"):
+            env.pop(k, None)  # F119: only its own copy, never what the run around it points at
+        (site / "support").mkdir(exist_ok=True)
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         seen = []
@@ -34977,11 +35592,14 @@ print("H88OUT " + json.dumps(out))
                 sw, cw = (int(x) for x in res["page"].split("/"))
                 need(sw <= cw, f"at {w} the page is {sw} wide on a {cw} screen: it swipes sideways")
                 need(res["wide"] == "0", f"at {w} something sticks out past the screen: {res['wide']}")
+                bn, bw = res["boxed"].split("/", 1)
+                need(bw == "auto scrolls" and int(bn) > 0, f"at {w} the wide note table doesn't scroll inside its own box: {res['boxed']}")
                 seen.append(f"{w}: {sw}/{cw}")
         finally:
             proc.terminate()
             proc.wait(timeout=10)
-        return "with a long path in a job and the schedule and a key in a roadmap note, every fold open: " + ", ".join(seen) + " wide, nothing sticks out; the redraw only scrolls back when it moved"
+        return ("on its own roadmap, with a long path in a job and the schedule, a key in a roadmap note and a wide note table, every fold open: "
+                + ", ".join(seen) + " wide, nothing sticks out, the wide table scrolls in its own box; the redraw only scrolls back when it moved")
 
     async def flow74(self) -> str:
         """H100, no Claude: the coaching log keeps three hours. On a throwaway workspace: entries older than three hours
@@ -36910,6 +37528,17 @@ FLOWS = {
     441: ("The small list: a download says why it can't go back yet, never that there's no version before; made a git copy with one tag, one back is found", False, "flow441"),
     442: ("The small list: forward brings back what she hadn't committed when she went back, and says so; where it can't land it stays on its branch, named", False, "flow442"),
     443: ("The small list: a workspace without backend switches gets the briefing and every start is under the cap; the undo takes back only its own file; a Deep start is measured whole", False, "flow443"),
+    444: ("F97: each second look of the ledger is kept with what it cost, a failed one marked, another part's look left out, and the score prints the week's total", False, "flow444"),
+    445: ("F97: the pass reads every transcript it hasn't read: a late one with an older name once, one it can't read counted as not read in both scores and tried again, a call read until it ends, a late text", False, "flow445"),
+    446: ("F79: the main's minute puts one quiet note per missed job on her line; a repeat (two of a kind in a row, or more than 1 in 20) she raises with him once a day, once it went; a real close told; never from a bare test", False, "flow446"),
+    447: ("F79: the Friday report holds the week to the latest end each job started with and nine in ten, per kind, rough and older jobs apart, and the last 20 against 1 in 20", False, "flow447"),
+    448: ("F79: one job closed twice, on both computers, is one note and counts once in the last 20 by its latest close: alone it trips no rule", False, "flow448"),
+    449: ("F79: two computers on one line: the backup tells and raises nothing, the main once, a second main adds no note and no text", False, "flow449"),
+    450: ("F79: a note not written and a repeat whose text failed are never marked done, and go at the next minute; the note carries its row's id and the record its step", False, "flow450"),
+    451: ("F79: with no line of hers no note goes on Donna's line, it's kept in its own file; the Mac app counts no quiet note and shows none", False, "flow451"),
+    452: ("F79: a quiet note in her answer's history once and not his text twice, not counted as her text in her score, shown as a note on her page with is typing kept", False, "flow452"),
+    453: ("F79 and F97: her words for a repeat can't invent an action, an idea only as a proposal; an empty stub left a day is read and empty, a fresh one waits", False, "flow453"),
+    454: ("F79: six failed sends stop and open an incident, a new day's repeat starts over and closes it; the hold is the calendar day; past 500 misses none is told twice", False, "flow454"),
     470: ("H301: the five backend switches on by default at the stable version: a fresh install has all five; an HQ that updates gets them once unless it set its own; the undo gives its file back", False, "flow470"),
     471: ("H235, gap 3: an extension's own flows have a home: a made-up one with a passing and a failing flow, each on its own copy; the command and the nightly's flow name the failure as the extension's", False, "flow471"),
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
@@ -37228,6 +37857,7 @@ FLOWS = {
     333: ("F112: back to a version with no forward of its own, once the release after it wrote that down; its own update brings HQ forward", False, "flow333"),
     334: ("F112: the history read holds what read clean, so a release's privacy check finishes; a hit is never held", False, "flow334"),
     335: ("F112: the installer's last step fits Linux: the set, the limit, and the fix line names the right system", False, "flow335"),
+    336: ("F120: a commit listed for a row its subject doesn't name counts for that row and waits for its QA; one with other changes isn't covered", False, "flow336"),
     340: ("F116: a store the page can't read shows red with which one, never none so far or all working; a broken incident log kept aside", False, "flow340"),
     341: ("F116: waiting for you is worked out: only when nothing runs and something is truly his (a parked job, a question, a door)", False, "flow341"),
     342: ("F116: Donna's watch, reminders, weather, news, calendar and coaching each have a line; a throw goes red, on the page too", False, "flow342"),
