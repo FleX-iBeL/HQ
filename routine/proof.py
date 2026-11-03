@@ -262,30 +262,30 @@ def run_rows(labels: list[str]) -> int:
     if not labels or bad:
         print("Which rows? Give their labels, like F121" + (f": not {', '.join(bad)}." if bad else "."))
         return 2
-    if subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD"]).returncode:
-        print("HQ has changes that aren't committed: commit them first; a record stands for a commit.")
-        return 2
-    text = q.read()[0]
-    rows, none = {}, []
-    for label in labels:
-        commits = commits_of(label)
-        commits += [c for c in listed_commits(label) if c not in commits]
-        if commits:
-            rows[label] = {"commits": commits, "named": named_flows(row_of(text, label))}
-        else:
-            none.append(label)
-    if none:
-        print(f"No commits in this commit for {', '.join(none)}: no record for {'it' if len(none) == 1 else 'them'}.")
-    if not rows:
-        print("Nothing to run.")
-        return 2
     lock = open(lock_path(), "a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         print(f"Another full run holds {lock_path()}: waiting for it.", flush=True)
         fcntl.flock(lock, fcntl.LOCK_EX)
-    try:
+    try:  # what's in the commit is read once it's this run's turn: HQ may have moved on while it waited
+        if subprocess.run(["git", "-C", str(ROOT), "diff", "--quiet", "HEAD"]).returncode:
+            print("HQ has changes that aren't committed: commit them first; a record stands for a commit.")
+            return 2
+        text = q.read()[0]
+        rows, none = {}, []
+        for label in labels:
+            commits = commits_of(label)
+            commits += [c for c in listed_commits(label) if c not in commits]
+            if commits:
+                rows[label] = {"commits": commits, "named": named_flows(row_of(text, label))}
+            else:
+                none.append(label)
+        if none:
+            print(f"No commits in this commit for {', '.join(none)}: no record for {'it' if len(none) == 1 else 'them'}.")
+        if not rows:
+            print("Nothing to run.")
+            return 2
         head = _git("rev-parse", "HEAD")
         runid = time.strftime("%Y%m%d-%H%M%S") + "-" + head[:7]
         at, t = time.strftime("%Y-%m-%d %H:%M"), time.time()
