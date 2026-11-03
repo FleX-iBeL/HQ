@@ -142,6 +142,7 @@ Only the thinking goes to Anthropic, the same as any Claude chat. The listening 
 
 - [ABOUT.md](ABOUT.md): the big picture. What HQ is, how each part works, and what's coming.
 - [INSTALL.md](INSTALL.md): the install step by step, in technical detail, for Claude or anyone technical helping out. Also the Linux server, two HQs, Windows, your own builds in `local/`, and how updates and versions work.
+- [MAINTAINING.md](MAINTAINING.md): keeping HQ running: the two computers, restarts, updates and releases, the usage, the tests, the privacy check, checkpoints, and what never to do.
 - [CHANGELOG.md](CHANGELOG.md): what changed in each version.
 
 ---

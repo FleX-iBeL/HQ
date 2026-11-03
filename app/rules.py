@@ -8,6 +8,7 @@ rest work stands here, and the agent reads a topic before she acts on it.
     python3 app/rules.py TOPIC            the rule of one topic
     python3 app/rules.py craft AGENT      how she works (her craft)
     python3 app/rules.py handbook AGENT   the handbook's part one and her own section
+    python3 app/rules.py maintain [N]     the walkthrough on keeping HQ running (MAINTAINING.md): its sections, or section N
 """
 from __future__ import annotations
 
@@ -20,11 +21,26 @@ os.environ.setdefault("HQ_RULES_LOOKUP", "1")
 import agents  # noqa: E402
 import config  # noqa: E402
 import handbook  # noqa: E402
+import maintaining  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
     if not argv:
         print("\n".join(f"{k}: {v}" for k, v in config.topics().items()))
+        return 0
+    if argv[0] == "maintain":  # the walkthrough on keeping HQ running, a section at a time
+        secs = maintaining.sections()
+        if not secs:
+            print(f"No walkthrough here ({maintaining.FILE}).")
+            return 2
+        if len(argv) == 1:
+            print("\n".join(f"{n}. {t}" for n, t, _ in secs))
+            return 0
+        body = maintaining.section(" ".join(argv[1:]))
+        if not body:
+            print(f"No section {' '.join(argv[1:])}. There are: " + "; ".join(f"{n} {t}" for n, t, _ in secs) + ".")
+            return 2
+        print(body.rstrip())
         return 0
     if argv[0] in ("craft", "handbook") and len(argv) > 1:
         a = next((x for x in agents.load(config.FOLDER) if argv[1].lower() in (x["id"], x["name"].lower())), None)
