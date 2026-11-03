@@ -1613,6 +1613,7 @@
         // F102: what used to fail without a sound; each shows once it has written a line.
         ['maillist', 'Mail list', 'Checked by a program after every mail check; red when it has not been checked for 2 hours between 8:00 and midnight'],
         ['mailmarker', 'Newest mail seen', 'Red when a good mail check leaves it over 24 hours old: real mail never stops that long'],
+        ['mailreach', 'Mail read in full', 'Red when a day holds more mail than the searches could reach; that day is read again every hour until it is all read (F110)'],
         ['saving', 'Saving to GitHub', 'What stays unsaved for ten minutes is committed by itself'],
         ['review', 'Reviewer', 'A second pair of eyes on every item'],
         ['qa', 'QA', 'Checks the team\'s work before it goes out'],
@@ -1638,7 +1639,7 @@
         ['temp', 'Laptop temperature', 'Every minute, free, no password'],
         ['battery', 'Laptop battery', 'Every minute, free'],
       ].filter(([key]) => LAPTOP || (key !== 'temp' && key !== 'battery'));  // H92
-      const OPTIONAL_LINES = new Set(['maillist', 'mailmarker', 'saving', 'review', 'qa', 'nightly', 'release', 'cycles', 'briefing', 'routines-file',
+      const OPTIONAL_LINES = new Set(['maillist', 'mailmarker', 'mailreach', 'saving', 'review', 'qa', 'nightly', 'release', 'cycles', 'briefing', 'routines-file',
         'incidents-file', 'mistakes', 'feedback', 'data', 'record', 'helpers', 'about', 'donna', 'reminders', 'weather', 'news', 'calendar', 'coaching']);  // F116
       /** H88: with a second HQ, a heartbeat line for each computer (Laptop, VPS), right after Main or backup and
           the sync, in the order of their names; its graph bar too. Taken from the lines themselves. */

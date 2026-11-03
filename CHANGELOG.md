@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A busy mail day no longer loses mail: when a day has more than one search can show, the mail check splits it until it has read all of it, and a program checks that it did. If a day still can't be read in full, it's read again every hour until it is, nothing gets written down twice, and Donna texts you once (in the morning if you're asleep) and passes it on to Moneypenny (F110).
+
 - What you hand over is picked up the same day: every agent now looks at her own list three times a day inside her hours (morning, midday and evening), and each new request on it becomes her next step, once, however often she looks. A request after her evening look waits for the morning. If her share of the usage has no room, the look waits for the next one and her ledger says so and how much it needed. How many looks a day is one setting per agent, and a change counts from the next day; a new agent gets three (H308).
 - Donna's chat has a switch at the top to Moneypenny's chat, with her earlier texts in it, and one tap brings you back. Texting her there reaches her and she answers there. Without Moneypenny on your HQ the switch doesn't show (H300).
 

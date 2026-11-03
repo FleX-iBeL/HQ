@@ -694,6 +694,7 @@ PLAIN_WHAT = {
     "helper": "the routine", "watchdog": "the watchdog", "usage": "the usage check", "status": "the status page",
     "schedule": "the scheduler", "role": "the backup", "temp": "the laptop's temperature",
     "battery": "the laptop's battery", "github": "sending the team's work to GitHub",
+    "maillist": "the mail list", "mailmarker": "the mail check", "mailreach": "the mail check",
 }
 
 
@@ -1360,7 +1361,9 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
             if iid not in told and (e.get("key") in ("role", "github", "workspace-push") or now - float(e.get("down") or now) >= DOWN_AFTER):
                 if not first:
                     fixes = "; ".join(f.get("what", "") for f in (e.get("fixes") or [])[-2:])
-                    downs.append(f"{e.get('key')}: {e.get('why') or 'down'}" + (f" (done so far: {fixes})" if fixes else ""))
+                    passed = _pass_on(e, main and not dry)  # F110: an incident for an agent too, handed on by her
+                    downs.append(f"{e.get('key')}: {e.get('why') or 'down'}" + (f" (done so far: {fixes})" if fixes else "")
+                                 + (f" (passed on to {passed}, who takes it from here)" if passed else ""))
                 told[iid] = now
         elif iid in told:
             backs.append(f"{e.get('key')}: back" + (f", {(e.get('fixes') or [{}])[-1].get('what', '')}"
@@ -1387,6 +1390,30 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
         for why, facts in out:
             (spawn or _spawn)(why, facts)
     return out
+
+
+def _pass_on(e: dict, write: bool) -> str:
+    """F110, his words (2 November 2026): "escalate to me and moneypenny through donna". An incident that names an agent (`to`)
+    goes to her too, the moment Donna texts him about it: a dated entry in that agent's ledger (written on the main only), and
+    her start shows it while it's open (app/quick_context.py). Returns her name for the text, or "" when there's no such agent."""
+    to = str(e.get("to") or "")
+    if not to:
+        return ""
+    try:
+        a = next((x for x in _agents.load(Path(hqpaths.FOLDER)) if x["id"] == to), None)
+    except Exception:
+        a = None
+    if not a:
+        return ""
+    if write:
+        try:
+            import ledger
+            ledger.entry(to, f"Escalated by {agent()['name']}: {PLAIN_WHAT.get(str(e.get('key')), 'one of the systems')}",
+                         [e.get("why") or "down", f"Incident {e.get('id')}; {agent()['name']} texted him about it.",
+                          "It closes by itself once the cause is gone; while it stays open it's yours to look at, and to give the team."])
+        except Exception as ex:
+            print(f"watch: passing {e.get('id')} on to {to}: {ex!r}", file=sys.stderr)
+    return a.get("name") or to
 
 
 def _spawn(why: str, facts: str) -> None:

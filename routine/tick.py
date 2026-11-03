@@ -608,6 +608,8 @@ MAIL_ALLOW = ",".join([
     f"Bash(python3 {os.path.join(JV, 'routine', 'pings.py')} match:*)",
     # F109: which of the mails the date searches found can be new (only reads; only that command).
     f"Bash(python3 {os.path.join(JV, 'routine', 'mailguard.py')} newer:*)",
+    # F110: every search and its number of threads, so a program knows what was really reached (only that command).
+    f"Bash(python3 {os.path.join(JV, 'routine', 'mailguard.py')} reach:*)",
     "mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread", "mcp__claude_ai_Gmail__get_message",
 ])
 MAIL_DENY = ",".join("mcp__claude_ai_Gmail__" + t for t in (
@@ -713,6 +715,7 @@ def mail_running():
     if pid and alive(pid):
         if time.time() - started > MAIL_TIMEOUT:
             end_chat(pid)
+            mailguard.after_run(False, incidents, routines, log=log)  # F110: a run cut off still holds the marker; the guard too
             log("mail check ran over 20 minutes; ended it")
             incidents.down("mail", "Ran over 20 minutes", at=started)
             incidents.fix("mail", "Ended it; the next one starts on the hour")
@@ -1342,10 +1345,11 @@ def on_backup():
     text = f"Runs on the main one, {peer}; this HQ is the backup"
     for key in ("mail", "jobs", "schedule"):
         routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="", detail=[], run="")
-    for key in ("maillist", "mailmarker", "saving", "cycles") + PART_LINES[1:]:  # F102: these run on the main only; never overdue here (F116: Donna's parts too)
+    for key in ("maillist", "mailmarker", "mailreach", "saving", "cycles") + PART_LINES[1:]:  # F102: these run on the main only; never overdue here (F116: Donna's parts too)
         if key in routines.read():
             routines.beat(key, state="ok", text=text, last=None, next=None, every=60, why="")
     incidents.up("mailmarker", what="This HQ is the backup now; the main keeps that watch")  # F109: the main keeps that watch
+    incidents.up("mailreach", what="This HQ is the backup now; the main reads the mail")  # F110
     clear(GATE_NOTE, TRUST_NOTE)
 
 

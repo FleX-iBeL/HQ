@@ -153,12 +153,30 @@ JOB_LINE_MOST = 180   # a line of the team's open jobs
 JOBS_MOST = 12        # how many of those lines
 
 
+def _when(t) -> str:
+    try:
+        return datetime.datetime.fromtimestamp(float(t)).strftime("%-d %B %H:%M")
+    except (TypeError, ValueError, OSError):
+        return "a while"
+
+
 def _planning(folder: Path) -> str:
     """The roadmap's status block, the team's open jobs and the open items of the planning, for a build call
     (Fable clean-up, 27 October 2026). Before Sunday 25 October Pepper had these at hand on every call; the split took
     them away, and Moneypenny had to dig in a planning file over 1 MB, which killed the call's line (F60). The open
     items come from sprint.py open (H288): a closed row only when asked for, with sprint.py show LABEL."""
     out = []
+    try:  # F110: what Donna passed on to her, open incidents that name her, first of all
+        sys.path.insert(0, str(config.ROOT / "routine"))
+        import incidents as _inc
+        mine = [i for i in _inc.read().get("incidents") or [] if i.get("to") == "moneypenny" and not i.get("back")]
+        if mine:
+            out.append("Passed on to you by Donna, still open (raise it first; it closes by itself once the cause is gone, and "
+                       "while it's open it's yours to look at and to give the team):\n" +
+                       "\n".join(f"- {i.get('key')}, since {_when(i.get('down'))}: {' '.join(str(i.get('why') or '').split())[:400]}"
+                                  for i in mine[-5:]))
+    except Exception:
+        pass
     try:  # F77: the rows the automatic review flagged, first, so she raises them before anything else (her calls only)
         import os
         import subprocess
