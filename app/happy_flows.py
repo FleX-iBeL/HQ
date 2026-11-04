@@ -21167,7 +21167,9 @@ print(json.dumps(out))
         file with two line numbers; one in the plain form; one in the aside form with a quote he never said. field_texts reads
         His words and Sources in the aside form as in the plain one, the aside's date and time are neither a quote nor a source,
         a bare time or line number stays with the source before it; the (stand-in) review passes all three, and with the fields
-        on the Ready mark goes on the first two and is refused on the made-up quote."""
+        on the Ready mark goes on the first two and is refused on the made-up quote. The loopholes: an aside with a quote mark in it is no
+        label (a quote can't hide there), and in Sources only a bare time or a :N line number stays with the source before it ("rule 1, 99",
+        "rule 1, 13" and "rule 1; 2026-10-27" are each refused on their second piece)."""
         import subprocess as _sp
         import time as _t
         ws, env = self._h298_ws("f140")
@@ -21175,6 +21177,7 @@ print(json.dumps(out))
         (ws / "HQ/calls/2026-01-07-1030.md").write_text(
             "# Call 7 January 2026, 10:30\n\nStarted 10:30:00 · agent Moneypenny · brain opus\n\n"
             "- 10:31 **Me:** When the list is empty it should say nothing planned yet, so it feels less final.\n- 10:32 **HQ:** Noted.\n")
+        (ws / "rules.md").write_text("# Rules\n\n1. Talk like a person.\n2. Only say what benefits them.\n")
         t0 = int(_t.time())
         env = {**env, "HQ_SPRINT": str(ws / "HQ/sprint.json"), "HQ_READY_FIELDS": "1", "HQ_LOOK": "0", "HQ_REVIEW_FAKE": "auto",
                "HQ_REVIEW_NOW": str(t0)}
@@ -21190,7 +21193,13 @@ print(json.dumps(out))
                 'The empty list, the plain way. His words: "it should say nothing planned yet, so it feels less final". '
                 'What right looks like: it says so. Sources: the call of 7 January 2026.',
                 'A made-up one. His words (7 January 2026, 10:31): "make the dock purple with stars". What right looks like: purple. '
-                'Sources: the call of 7 January 2026.')
+                'Sources: the call of 7 January 2026.',
+                # the loopholes the check of f140 found: a quote can't hide in an aside, a letterless piece that isn't a time or a :N is a source of its own
+                'A quote in the aside. His words ("make the dock purple with stars"): "it should say nothing planned yet, so it feels less final". '
+                'Sources: the call of 7 January 2026.',
+                'A bare number. His words: "it should say nothing planned yet, so it feels less final". Sources: rule 1, 99.',
+                'A row meant as F13. His words: "it should say nothing planned yet, so it feels less final". Sources: rule 1, 13.',
+                'A bare date. His words: "it should say nothing planned yet, so it feels less final". Sources: rule 1; 2026-10-27.')
         r = tool("review.py", "tick")  # the first start takes the rows already there as reviewed; the new ones come after it
         need(r.returncode == 0, f"the review's first tick: {r.stdout[-300:]} {r.stderr[-500:]}")
         labels = []
@@ -21199,7 +21208,7 @@ print(json.dumps(out))
             m = re.search(r"\b(F\d+) is on the planning", r.stdout)
             need(r.returncode == 0 and m, f"the writer didn't put the row on the planning: {r.stdout[-300:]} {r.stderr[-500:]}")
             labels.append(m.group(1))
-        aside, plain, made_up = labels
+        aside, plain, made_up, in_aside, *bare = labels
         code = ("import sys, json; sys.path.insert(0, %r); import sprint as S\n"
                 "out = {}\n"
                 "for lb in %r:\n"
@@ -21220,9 +21229,16 @@ print(json.dumps(out))
         need(a["ok"] and p["ok"], f"a row whose fields are right doesn't hold: aside {a['hw_why']} {a['src_why']}; plain {p['hw_why']} {p['src_why']}")
         need(not b["ok"] and b["ft"]["his_words"].startswith('"make the dock') and "not found in the calls" in b["hw_why"],
              f"the aside form lets a made-up quote through, or doesn't read it: {b}")
+        q_ = d[in_aside]
+        need(not q_["ok"] and not q_["ft"]["his_words"] and q_["hw_why"] == "no His words field",
+             f"a quote in the aside isn't refused: {q_}")
+        for lb, piece in zip(bare, ("99", "13", "2026-10-27")):
+            x = d[lb]
+            need(not x["ok"] and piece in [k.strip(" .") for k in x["held"]] and not x["held"][next(k for k in x["held"] if k.strip(" .") == piece)]
+                 and "a source that isn't there" in x["src_why"], f"a letterless source that's no time or :N was merged and hidden: {x['named']} {x['src_why']}")
         # the review: seen, then quiet long enough, a stand-in pass for each
         st = lambda: json.loads((ws / "HQ/sprint.json").read_text()).get("review", {}).get("rows", {})  # noqa: E731
-        for i in range(1, 13):
+        for i in range(1, 25):
             env["HQ_REVIEW_NOW"] = str(t0 + i * 400)
             r = tool("review.py", "tick")
             need(r.returncode == 0, f"the review's tick: {r.stdout[-300:]} {r.stderr[-500:]}")
@@ -21232,16 +21248,21 @@ print(json.dumps(out))
                 _t.sleep(0.1)
             if all(st().get(lb, {}).get("verdict") == "pass" for lb in labels):
                 break
-        need(all(st().get(lb, {}).get("verdict") == "pass" for lb in labels), f"the review didn't pass the three rows: {st()}")
+        need(all(st().get(lb, {}).get("verdict") == "pass" for lb in labels), f"the review didn't pass the rows: {st()}")
         for lb in (aside, plain):
             r = tool("sprint.py", "ready", lb)
             need(r.returncode == 0 and "marked ready" in r.stdout, f"{lb} was refused the Ready mark: {r.stdout} {r.stderr}")
         r = tool("sprint.py", "ready", made_up)
         need(r.returncode != 0 and "not found" in r.stdout + r.stderr, f"the made-up quote got the Ready mark: {r.stdout} {r.stderr}")
+        r = tool("sprint.py", "ready", in_aside)
+        need(r.returncode != 0 and "no His words field" in r.stdout + r.stderr, f"a quote in the aside got the Ready mark: {r.stdout} {r.stderr}")
+        for lb in bare:
+            r = tool("sprint.py", "ready", lb)
+            need(r.returncode != 0 and "a source that isn't there" in r.stdout + r.stderr, f"{lb}, a hidden missing source, got the Ready mark: {r.stdout} {r.stderr}")
         out = tool("sprint.py", "fields", aside).stdout
         need(f"{aside}: the fields hold." in out and "his call of 7 January 2026, 10:31 (call of 7 January 2026)" in out, f"fields doesn't say it: {out}")
         return ("a label with an aside in brackets reads as the label: His words and Sources the same as in the plain form, the aside's date and "
-                "time no quote or source, a bare time or line number kept with the source before it; reviewed, marked ready; a made-up quote still refused")
+                "time no quote or source, a bare time or line number kept with the source before it; reviewed, marked ready; a made-up quote, a quote in the aside and a bare number or date as a source still refused")
 
     async def flow474(self) -> str:
         """The walkthrough on keeping HQ running, no Claude: MAINTAINING.md has its sections (the two computers, restarts, releases, the usage,

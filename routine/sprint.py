@@ -321,7 +321,9 @@ TEAM_NOTE = re.compile(r"(?:\b(?:Built|Done|Fixed|Shipped|Released|Merged|Finish
 
 # F140: a label may carry a short aside in brackets before its colon, "His words (3 November 2026, 23:25): …", and reads
 # exactly as "His words: …"; the aside is no part of the field, so its date or time is never read as a quote or a source.
-FIELD_ASIDE = r"(?:\s*\([^()\n|]{1,60}\))?"
+# No quote mark in an aside: its text is never checked, so a quote can't hide in it (an aside with one is no label).
+FIELD_ASIDE = r"(?:\s*\([^()\n|\"“”‘’'`]{1,60}\))?"
+_SOURCE_TAIL = re.compile(r"\s*(?:\d{1,2}:\d{2}|:\d+)\.?\s*")  # F140: a bare time or a :N line number, the source before it's own
 _ASK_GOES_ON = re.compile(r"\b(?:what'?s asked|what'?s wrong|what right looks like|done means|how to check|his words|"
                          r"out of scope|sources?)" + FIELD_ASIDE + r"\s*:", re.I)
 
@@ -1070,7 +1072,7 @@ def ready_fields(row, ws=None):
     for x in re.split(r"[;,]| and ", ft["sources"]):
         if not x.strip():
             continue
-        if named and not re.search(r"[A-Za-z]", x):  # F140: no word in it ("3 November 2026, 23:25", "schedule.py:125 and :391"): it is the one before's
+        if named and _SOURCE_TAIL.fullmatch(x):  # F140: "3 November 2026, 23:25", "schedule.py:125 and :391": the one before's; "rule 1, 99" stays two
             named[-1] += ", " + x.strip()
         else:
             named.append(x)
