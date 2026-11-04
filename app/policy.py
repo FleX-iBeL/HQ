@@ -176,8 +176,9 @@ _SHELL_WRITE = re.compile(
     rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{_GUARDED_NAME}"
     rf"|\btee\b[^|;&]*{_GUARDED_NAME}"
     rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod)\b[^|;&]*{_GUARDED_NAME}"
-    rf"|\bpython3?\s+-c\b[^|;&]*{_GUARDED_NAME}"
     rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_GUARDED_NAME}", re.I)
+# Code handed to python -c that names these files counts only when it writes (F114's reading): a json.load of calendar.json
+# on a call is a read, and refusing it left Donna saying the calendar "wouldn't open" (4 November 2026).
 # F114: his own setup and the log through the shell, refused also with a yes: the agents' settings (the mail switch is in them),
 # their state, the handbook, me.md, the backend's switches and the coaching log. An Edit he says yes to, or the log's script.
 _HIS_NAME = (r"(?:(?<![\w-])cycles(?:-state)?\.json|(?<![\w-])backend\.json|(?<![\w-])handbook\.md|(?<![\w-])me\.md|(?<![\w-])agents\.json|"
@@ -202,6 +203,7 @@ def _writes_on(name: str) -> "re.Pattern":
 
 
 _SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+_SHELL_WRITE_GUARDED = _writes_on(_GUARDED_NAME)
 # F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
 _HIS_NAMES = ("cycles.py", "usageline.py", "feedback.py")
 _NAMES_SCRIPT = re.compile(r"(cycles|usageline|feedback)\.py\b")
@@ -812,6 +814,8 @@ class Policy:
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _SHELL_WRITE_GUARDED.search(runs):  # F99's files through code handed inline that writes them
+            return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         if _starts_a_claude(cmd, runs):  # F145: no general-purpose Claude through the shell either, also with a yes
             return Decision(DENY, HELPER_ROADS, road=True, door=True)
         if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes

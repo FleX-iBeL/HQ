@@ -272,6 +272,8 @@ def copy_hq(root: str, real_hq: str, real_ws: str, dest: str) -> None:
     os.symlink(".", os.path.join(dest, "HQ"))  # the workspace's ../HQ paths
     _copy_git(root, dest)
     os.makedirs(os.path.join(dest, "scratch"))
+    if os.path.isdir(os.path.join(real_hq, "scratch", "fillers")):  # the recorded filler lines: an empty cache re-records them all during the first call, and the call runs slow
+        _tree(os.path.join(real_hq, "scratch", "fillers"), os.path.join(dest, "scratch", "fillers"))
     if os.path.isdir(os.path.join(real_hq, ".status")):
         _tree(os.path.join(real_hq, ".status"), os.path.join(dest, ".status"))
     _copy_workspace(real_ws, os.path.join(dest, "workspace"))
