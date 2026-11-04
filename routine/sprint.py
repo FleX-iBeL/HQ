@@ -811,7 +811,52 @@ def keep_say_so(labels, quote, where):
     _save(RANKS, d)
 
 
-def gate(text, job_text_, say_so=False, said=None):
+NOW_ABOUT = ("giving {names} to the team now, to be built today, not waiting for the sprint planning or the night: his 'now'. Moneypenny gets it "
+             "ready herself; what the review still has open goes with the job as notes for the team to settle")
+
+
+# nowroad: his now, read by the program when it's plain, so one small look's mood can't turn it down (the look said no to "Please give it to
+# the team and lets run it immediately once it's ready" one time in four on 4 November). Plain is: a line of his from today, in the place this
+# text or call came in, with one sentence holding a now word and a go to the team or the build and nothing holding that sentence back, and the row's own His words quote that very
+# line, so a now about another thing never opens this row. Anything else goes to the look as before.
+_NOW_WORD = re.compile(r"(?<![\w'])(?:now|right now|immediately|right away|straight away|asap|today|this afternoon|this morning)(?![\w'])")
+_NOW_GO = re.compile(r"(?<![\w'])(?:give it to the team|to the team|run it|build it|start it|start building|send it|get it built|"
+                     r"let'?s go|let'?s run|let'?s build|go ahead)(?![\w'])")
+
+
+def now_reading(said, labels, ws=None):
+    """Where his now for these rows stands (its place), or None when it isn't plain: see above."""
+    hits = his_said_now(said or "", ws, places=words_from_env())
+    if not hits or not labels:
+        return None
+    hit = hits[-1]
+    low = " ".join(str(hit["line"]).lower().replace("\u2019", "'").split())
+    bits = [x for x in re.split(r"(?<=[.!?])\s+", low) if _NOW_WORD.search(x) and _NOW_GO.search(x)]  # one sentence holds both
+    if not bits or any(held_back(x) for x in bits):
+        return None
+    line = _bare(hit["line"])
+    for label in labels:
+        row = next((r for r in open_rows() if r["label"] == label), None)
+        his = field_texts(row["line"])["his_words"] if row else ""
+        quotes = [m.group(1) for marks in QUOTE_MARKS for m in marks.finditer(his)]
+        if not any(_bare(q) and _bare(q) in line for q in quotes):
+            return None
+    return hit["where"]
+
+
+def review_notes(labels):
+    """nowroad: the review's open points on these rows, in one line for a job's text, or ""."""
+    try:
+        import review
+        st = review.states([r for r in open_rows() if r["label"] in labels])
+    except Exception:
+        return ""
+    bits = [f"{l}: " + "; ".join(st[l]["findings"]) for l in labels if st.get(l, {}).get("state") == "flagged" and st[l].get("findings")]
+    return (" The review's open points, for the team to settle while building (they don't hold it back): " + " | ".join(bits).replace("|", "/")
+            + ".") if bits else ""
+
+
+def gate(text, job_text_, say_so=False, said=None, now=False):
     """H272, for a call adding work for the team (jobs.py add, schedule.py add): the open rows it names must be ready.
     Returns the job's words to use (with a line that it went without the mark, on the say-so); exits with why when a
     row isn't ready and there's no say-so. F99: the say-so is a quote found in his own lines (--said), kept with the
@@ -827,14 +872,20 @@ def gate(text, job_text_, say_so=False, said=None):
         sys.exit("; ".join(whys) + ". Only rows marked ready go to the team; mark it ready first "
                  "(sprint.py ready LABEL), or, on his explicit say-so, add it with --not-ready --said \"his words\".")
     names = [r["label"] for r in rows if states.get(r["label"]) != "ready"]
-    where, no = his_yes(said, f"giving {', '.join(names)} to the team without the Ready mark, although: {'; '.join(whys)}", names=names)
+    if now:  # nowroad: his now, said today, is the say-so for the whole road: he decided, getting it ready is ours
+        if not his_said_now(said or "", places=words_from_env()):
+            sys.exit("Refused: now takes his own words from today, as he said or typed them on this call or in this text. Nothing added.")
+        where = now_reading(said, names)
+        where, no = (where, "") if where else his_yes(said, NOW_ABOUT.format(names=", ".join(names)), names=names)
+    else:
+        where, no = his_yes(said, f"giving {', '.join(names)} to the team without the Ready mark, although: {'; '.join(whys)}", names=names)
     if not where:
         sys.exit("Refused: --not-ready needs --said with his own words, at least three of them, as they stand in a call, "
                  f"a text or a quick note of his, and his yes to this. {no.capitalize() + '.' if said else 'None were given.'}")
     said = q.one_line(said or "")
     keep_say_so(names, said, where)
     return (job_text_.rstrip() + f" It went to the team without the Ready mark ({', '.join(names)}), on his say-so: "
-            f"\"{said}\" ({where}, {time.strftime('%Y-%m-%d %H:%M')}); check the row's points before building.")
+            f"\"{said}\" ({where}, {time.strftime('%Y-%m-%d %H:%M')}); check the row's points before building." + review_notes(names))
 
 
 # ---------- H298, piece 4: the ready check's mechanical fields ----------

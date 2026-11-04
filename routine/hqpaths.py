@@ -416,6 +416,20 @@ def cells(line: str) -> list[str]:
     return [c.strip() for c in re.split(r"(?<!\\)\|", line.rstrip())[1:-1]]
 
 
+def cell_spans(line: str) -> list[tuple[int, int]]:
+    """nowroad: where each of cells(line) stands in the line, as (start, end) of its stripped words, so one cell can be changed and every
+    other byte of the row stays as it was (join_cells doesn't give back a row's own spacing)."""
+    import re
+    line = line.rstrip()
+    bars = [m.start() for m in re.finditer(r"(?<!\\)\|", line)]
+    out = []
+    for a, b in zip(bars, bars[1:]):
+        seg = line[a + 1:b]
+        lead = len(seg) - len(seg.lstrip())
+        out.append((a + 1 + lead, a + 1 + lead + len(seg.strip())))
+    return out
+
+
 def join_cells(cs: list[str]) -> str:
     """F101: the row back from cells(), its escaped pipes untouched."""
     return ("| " + " | ".join(cs) + " |").replace("|  |", "| |").replace("|  |", "| |")

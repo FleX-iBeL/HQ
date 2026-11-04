@@ -157,6 +157,8 @@ def add(kind: str, agent: str, words: str, *, where: str = "", handoff: str = ""
     try:
         if not path(base):
             return None
+        if hqpaths.under_test() and os.path.realpath(path(base)) == os.path.join(os.path.dirname(hqpaths.real_roadmap()), "mistakes.jsonl"):
+            return None  # nowroad: a test, a flow or a probe never writes his real ledger, whatever folder it was given
         if _workspace(base) and _backup():  # one-way sync: what's written here would stay here for good
             import role
             code, _o, _e, how = role.hand("mistakes", ["put", json.dumps(line, ensure_ascii=False)], timeout=15)

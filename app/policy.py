@@ -476,7 +476,9 @@ class Policy:
             sys.path.insert(0, str(HQ_ROUTINE))
             import hqpaths
             import mistakes
-            if hqpaths.under_test() and str(self.folder) == os.path.dirname(os.path.dirname(hqpaths.real_roadmap())):
+            if not self.agent:
+                return  # nowroad: a policy with no agent is no call and no text (a probe, a check, a flow): it never writes a ledger
+            if hqpaths.under_test() and os.path.realpath(str(self.folder)) == os.path.dirname(os.path.dirname(hqpaths.real_roadmap())):
                 return  # F114: a test's refusal never lands on his real ledger (the agent "unknown" lines of 31 October)
             mistakes.add("refused", self.agent or "unknown", f"{summary}: {d.why}", where="a call or a text", base=self.folder,
                          key=f"refused|{self.agent}|{tool}|{summary}"[:200])
@@ -954,9 +956,10 @@ class Policy:
         # F77: the automatic review of the planning's rows: read it, and take a flag off on his say-so (sprint.json only).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):
             sub = args[1] if len(args) > 1 else "list"
-            if sub in ("list", "flags", "clear", "reword", "keep"):  # F99: reword is a call's way to change an open row; F86: keep, his keep it
+            if sub in ("list", "flags", "clear", "reword", "keep",  # F99: reword is a call's way to change an open row; F86: keep, his keep it
+                       "add"):  # nowroad: her words and his quotes added in one marked place, the walls in add itself (his quotes checked, ADD_MOST)
                 return Decision(ALLOW, "the planning's review and its flags")
-            return Decision(DENY, "from a call, the review script takes list, flags, clear, reword or keep")
+            return Decision(DENY, "from a call, the review script takes list, flags, clear, reword, add or keep")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

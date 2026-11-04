@@ -381,12 +381,97 @@ def verdict(a, ask=None):
     return ok, ([] if ok else fs[:5])
 
 
-def ask_reviewer(row):
+# nowroad (4 November 2026): the review settles. His design, 30 October 2026: "It gets reviewed through a tool, the work is correct, and it can bounce
+# back and forth up to three times". Until now every change brought a whole new review: the five probes found fresh "what if it happens twice, is
+# missing, stops halfway" holes each round, and a row that had passed was flagged again after any change (61 rows flagged against 9 passed on
+# 4 November). A row that has had a verdict is now looked at again only for: whether each earlier point is settled by a sentence that stands in
+# it now, and whether a sentence that changed brings in a hole of its own. A new point must quote the changed sentence it comes from, or it
+# doesn't count; a point about something that didn't change can't come up again.
+RESYSTEM = (
+    "You check one item of a software project's planning again, after it was changed. You did not write it; you read only what you're given, you "
+    "have no tools and change nothing. An earlier review raised the points listed. Do exactly two things. 1. For each earlier point, in order: copy, "
+    "word for word, the sentence of the item as it is now that settles it, or null when nothing does. A point is settled when the item now answers "
+    "it, puts it out of scope, or says how the team decides it. 2. Look only at the changed sentences listed: does one of them, by itself, bring in "
+    "a real hole, something that would make a careful team build or check the wrong thing? Not a hole: anything in a sentence that didn't change, "
+    "a detail a careful team settles the obvious way, a new what-if about a case the change didn't raise, style or wording. Answer with JSON only: "
+    '{"earlier": [{"point": "...", "settled_by": "the sentence" or null}, ... one per earlier point, in order], '
+    '"new": [{"hole": "one plain sentence", "in": "the changed sentence it comes from, word for word"}]}, at most two new.')
+
+
+def _sentences(t):
+    return [x.strip() for x in re.split(r"(?<=[.!?;])\s+", str(t or "")) if x.strip()]
+
+
+def changed_text(old, new):
+    """The sentences of the new ask that weren't in the old one (punctuation and case aside), in order."""
+    had = {S._bare(x) for x in _sentences(old)}
+    return [x for x in _sentences(new) if S._bare(x) not in had]
+
+
+def _dedupe(fs):
+    out, seen = [], set()
+    for f in fs:
+        k = S._bare(f)[:120]
+        if k and k not in seen:
+            seen.add(k)
+            out.append(f)
+    return out
+
+
+def again_input(row, prior):
+    ask = S.ask_of(row["line"])[:REVIEW_READS]
+    ch = prior.get("changed") or []
+    pts = prior.get("findings") or []
+    return ("The earlier points:\n" + ("".join(f"{i + 1}. {f}\n" for i, f in enumerate(pts)) or "(none)\n")
+            + "\nThe changed sentences:\n" + ("".join(f"- {x}\n" for x in ch) or "(none)\n")
+            + "\nThe item as it is now:\n\n" + ask)
+
+
+def again_verdict(a, ask, prior):
+    """The re-review's JSON to (pass, findings), or None when it's not an answer: an earlier point stays open unless its sentence stands in the
+    item now; a new point counts only when the sentence it quotes is one that changed."""
+    if not isinstance(a, dict) or not isinstance(a.get("earlier", []), list) or not isinstance(a.get("new", []), list):
+        return None
+    pts = prior.get("findings") or []
+    got = [x for x in a.get("earlier") or [] if isinstance(x, dict)]
+    open_ = []
+    for i, f in enumerate(pts):
+        q = got[i].get("settled_by") if i < len(got) else None
+        if not (isinstance(q, str) and q.strip() and in_item(q, ask)):
+            open_.append(f)
+    ch = " ".join(prior.get("changed") or [])
+    for x in a.get("new") or []:
+        if isinstance(x, dict) and str(x.get("hole") or "").strip() and isinstance(x.get("in"), str) and ch and in_item(x["in"], ch):
+            open_.append(_one(x["hole"]))
+    open_ = _dedupe(open_)
+    return (not open_), open_[:5]
+
+
+def prior_of(e, ask):
+    """What a re-review needs from the row's last verdict, or None for a first review: a row with no real verdict yet (new, or taken as it was
+    at the first start), or a passed row whose words before aren't kept (verdicts from before 4 November)."""
+    e = e or {}
+    if e.get("verdict") not in ("pass", "flag"):
+        return None
+    old = e.get("text")
+    if old is None:
+        if e.get("verdict") == "pass":
+            return None
+        m = S.ADDITION.search(ask)  # before the words were kept: what a round added is what changed
+        ch = _sentences(ask[m.start():]) if m else []
+    else:
+        ch = changed_text(old, ask)
+    return {"findings": _dedupe(e.get("findings") or []), "changed": ch, "verdict": e.get("verdict")}
+
+
+def ask_reviewer(row, prior=None):
     """The reviewer's answer: {"pass", "findings", "cost" (dollars), "s", "model", "effort"}; when it didn't run (a
     time-out, over its budget, no answer) {"failed": True, "why", "cost" (what it cost, when the run said), ...} (F80:
     a failed attempt's cost is kept too)."""
     if os.environ.get("HQ_REVIEW_FAKE"):
         return _fake(row)
+    if prior is not None and not prior["findings"] and not prior["changed"]:
+        return {"pass": True, "findings": [], "cost": 0.0, "s": 0.0, "model": "none", "effort": "", "again": True}  # nothing open, nothing new
     try:
         import hqpaths
         claude = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
@@ -398,19 +483,19 @@ def ask_reviewer(row):
     try:
         p = subprocess.run([claude, "-p", "--model", MODEL, "--output-format", "json", "--tools", "",
                             "--strict-mcp-config", "--setting-sources", "", "--effort", EFFORT,
-                            "--max-budget-usd", str(BUDGET), "--no-session-persistence", "--system-prompt", SYSTEM],
-                           input=_input(row), capture_output=True, text=True, timeout=TIMEOUT, cwd=E.ROOT)
+                            "--max-budget-usd", str(BUDGET), "--no-session-persistence", "--system-prompt", RESYSTEM if prior else SYSTEM],
+                           input=again_input(row, prior) if prior else _input(row), capture_output=True, text=True, timeout=TIMEOUT, cwd=E.ROOT)
         d = json.loads(p.stdout)
         cost = d.get("total_cost_usd")
         if d.get("is_error") or d.get("subtype") not in (None, "success"):
             raise ValueError(f"the run ended {d.get('subtype') or 'with an error'}")
         found = re.findall(r"\{.*\}", d.get("result") or "", re.S)
         a = json.loads(found[-1])
-        v = verdict(a, S.ask_of(row["line"]))
+        v = again_verdict(a, S.ask_of(row["line"]), prior) if prior else verdict(a, S.ask_of(row["line"]))
         if v is None:
-            raise ValueError("the answer wasn't a verdict with all five probes")
+            raise ValueError("the answer wasn't a verdict" + ("" if prior else " with all five probes"))
         ok, fs = v
-        return {"pass": ok, "findings": fs, "cost": cost, "s": round(time.time() - t0, 1), **base}
+        return {"pass": ok, "findings": fs, "cost": cost, "s": round(time.time() - t0, 1), **base, **({"again": True} if prior else {})}
     except subprocess.TimeoutExpired:
         return {"failed": True, "why": f"timed out after {TIMEOUT} s", "cost": cost, "s": round(time.time() - t0, 1), **base}
     except Exception as ex:
@@ -426,10 +511,11 @@ def _attempt(label, now_fn=_clock, extra=None):
         return next((r for r in S.open_rows() if r["label"] == label), None)
     with q.locked():
         r = now_row()
+        prior = prior_of(((_state()[1].get("rows") or {}).get(label) or {}), S.ask_of(r["line"])) if r else None
     if not r:
         return None
     fp = S.ask_fp(r["line"])
-    a = ask_reviewer(r) or {"failed": True, "why": "no answer", "cost": None}
+    a = ask_reviewer(r, prior) or {"failed": True, "why": "no answer", "cost": None}
     failed = bool(a.get("failed"))
     lost = False
     try:  # F102: a reviewer that doesn't run turns its line red and opens an incident; the next good run closes it
@@ -453,7 +539,8 @@ def _attempt(label, now_fn=_clock, extra=None):
             e["next_try"] = now + RETRY_S
         elif r2 and S.ask_fp(r2["line"]) == fp:
             e.update({"ask": fp, "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "at": now,
-                      "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort")})
+                      "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort"),
+                      "text": S.ask_of(r["line"])[:REVIEW_READS], "again": bool(a.get("again"))})  # nowroad: the words this verdict is on
             e.pop("tries", None)
             import trail  # F105: the verdict on the item's record
             trail.step(trail.resolve(label), "review", verdict="pass" if a["pass"] else "flag", findings=len(a["findings"]))
@@ -963,6 +1050,36 @@ def _note_of(line):
     return "" if at is None else desc[at:]
 
 
+def ask_edit(line, edits):
+    """nowroad (4 November 2026): the edits applied inside the row's ask only, its title and its description before the team's notes, each old
+    text found there once; every other cell and the notes stay byte for byte. Rows written before 4 November held the same words again in the
+    Model column, so an edit of the whole line met them twice and was refused, or changed one copy and not the other."""
+    import handover
+    cs, spans = hqpaths.cells(line), hqpaths.cell_spans(line)
+    if len(cs) < 3 or len(spans) != len(cs):
+        raise ValueError("the row has no description to change")
+    desc = cs[2]
+    at = S.team_note_at(desc)
+    ask = desc if at is None else desc[:at].rstrip()
+    sep = "\n"
+    fixed = []
+    for e in edits:
+        e = dict(e)
+        e["new"] = re.sub(r"(?<!\\)\|", r"\\|", str(e.get("new") or ""))  # a pipe in the new words would split the row
+        if "\n" in str(e.get("old") or "") + e["new"]:
+            raise ValueError("a row is one line: no line breaks in an edit")
+        fixed.append(e)
+    try:
+        both = handover.apply(cs[1] + sep + ask, fixed)
+    except LookupError as ex:
+        raise LookupError(str(ex).replace("the main's copy", "the row's title and words")) from None
+    title, _, ask2 = both.partition(sep)
+    a1, b1 = spans[1]
+    a2 = spans[2][0]
+    b2 = a2 + len(ask)
+    return line[:a1] + title + line[b1:a2] + ask2 + line[b2:]
+
+
 def reword(label, payload):
     """A call's edits inside this one row's ask, all or nothing, under the queue's lock: its status, its label, its other cells
     and the team's notes stay as they are, and a new quote anywhere in it must be found in a call, the notes or the log. A round
@@ -983,7 +1100,7 @@ def reword(label, payload):
             sys.exit(f"Refused: {label} isn't an open row on the planning.")
         line = row["line"]
         try:
-            new = handover.apply(line, edits)
+            new = ask_edit(line, edits)
         except (LookupError, ValueError) as ex:
             sys.exit(f"Not written: {ex}.")
         was, now_ = hqpaths.cells(line), hqpaths.cells(new)

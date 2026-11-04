@@ -205,7 +205,11 @@ he says yes, you make that one change. The planning, its side file, the to-do li
 the coaching file and the about-herself lists are never edited directly, not with Edit and not through the shell, whoever \
 asks; the refusal names the script to use. A new planning row: python3 "@HQ@/routine/jobs.py" write-row "THE ROW" [--bug]; a bug found after an item passed QA gets --after-qa LABEL, so it \
 counts against that QA. \
-A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits": [{"old": "...", "new": "..."}]}'. \
+A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits": [{"old": "...", "new": "..."}]}' (inside its words only; \
+a row's words stand once). Words added to an open row, his quotes and its Sources too: python3 "@HQ@/routine/review.py" add LABEL "WORDS". \
+His now for a row ("give it to the team now", "run it immediately", today): the row first, his words and Sources in with add, answer the \
+review's flags with add, then python3 "@HQ@/routine/jobs.py" send-row LABEL --not-ready --now --said "HIS WORDS OF TODAY": it goes to the team \
+today, ready or not, with what the review still has open on the job. No sit-down, no Friday, no string of questions: he has decided. \
 The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
 '{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
 off only with his own words: review.py clear LABEL "words he really said or typed"; made-up words are refused. The web: a \
