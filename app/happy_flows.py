@@ -39292,7 +39292,8 @@ async def _happy_call(self, drop: bool) -> str:
     new = after.replace(before, "", 1) if before and before in after else after
     say(f"   after-call work {secs:.0f} s: {(live.call.wrap_up_reply or '').strip()[:200]!r}")
     need(after != before, "the call's notes weren't written: coaching/log.md is unchanged")
-    need(word in new.lower(), f"the notes don't have his words ({word!r}): {new[:300]!r}")
+    key = word.split()[0]  # Whisper may hear "jasmine tea" as "Jasmine T": the first word is enough
+    need(key in new.lower(), f"the notes don't have his words ({word!r}): {new[:300]!r}")
     need(re.search(r"^## \d{4}-\d{2}-\d{2} .*call", new, re.M), f"no dated call section in the notes: {new[:300]!r}")
     if drop:
         need("drop" in new.lower(), f"the notes don't say the call dropped: {new[:300]!r}")
