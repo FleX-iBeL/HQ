@@ -365,6 +365,22 @@ def verdict(a, sents) -> tuple[bool, list[str]] | None:
     return ok, ([] if ok else fs[:5])
 
 
+def _last_object(text: str) -> dict:
+    """The last JSON object in the reviewer's answer that holds a verdict: the answer may carry text or a second block
+    around it, which a greedy match from the first { to the last } turns into "Extra data"."""
+    dec, best = json.JSONDecoder(), None
+    for m in re.finditer(r"\{", text):
+        try:
+            obj, _ = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and "pass" in obj:
+            best = obj
+    if best is None:
+        raise ValueError("no verdict in the answer")
+    return best
+
+
 def ask_reviewer(row, d) -> dict:
     sents = his_sentences(row)
     claude = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
@@ -378,8 +394,7 @@ def ask_reviewer(row, d) -> dict:
         cost = dd.get("total_cost_usd")
         if dd.get("is_error") or dd.get("subtype") not in (None, "success"):
             raise ValueError(f"the run ended {dd.get('subtype') or 'with an error'}")
-        found = re.findall(r"\{.*\}", dd.get("result") or "", re.S)
-        v = verdict(json.loads(found[-1]), sents)
+        v = verdict(_last_object(dd.get("result") or ""), sents)
         if v is None:
             raise ValueError("the answer wasn't a verdict on every sentence")
         return {"pass": v[0], "findings": v[1], "cost": cost, "s": round(time.time() - t0, 1)}
