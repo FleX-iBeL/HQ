@@ -518,6 +518,11 @@ def minute(on, incidents, routines, now=None) -> str:
         open(_ok_file(), "w").write(str(int(now)))
         last = now
     _marker_minute(last, incidents, routines)
+    # H162 (4 November 2026): Mail read in full is written by the hourly check only, so three minutes after each one the page
+    # showed it red as overdue. Each minute keeps its last word fresh (beat merges: only its time changes), unless it was off.
+    reach = (getattr(routines, "read", dict)() or {}).get(REACH_KEY)
+    if reach and reach.get("state") != "off":
+        routines.beat(REACH_KEY)
     old = now - last
     if old > STALE_S and in_hours(now):
         why = f"Not checked for {int(old // 3600)} h {int(old % 3600 // 60)} min"

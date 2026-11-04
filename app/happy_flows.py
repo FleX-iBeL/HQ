@@ -17136,6 +17136,12 @@ need(not reach_inc() and all_reach()[-1].get("back"), f"reading it all didn't cl
 need(mk() == held_day + DAY + HOUR + 4 * 600, f"the marker didn't move on: {mk()}")
 need(all(text.count(f"· alike {i} ·") == 1 for i in range(120)), "the alike day isn't all written down, once")
 need(routines.read()["mailreach"]["state"] == "ok", "the line isn't green again")
+# H162 (4 November 2026): between the hourly checks each minute keeps the line fresh, so the page doesn't show it overdue.
+reach_said, was_at = routines.read()["mailreach"]["text"], routines.read()["mailreach"]["at"]
+time.sleep(0.05)
+M.minute(True, incidents, routines)
+fresh_line = routines.read()["mailreach"]
+need(fresh_line["at"] > was_at and fresh_line["text"] == reach_said and fresh_line["state"] == "ok", f"a minute left Mail read in full to go overdue: {fresh_line}")
 donna()
 need(any(w == "back" and "mailreach" in f for w, f in got_texts), f"Donna didn't say it's back: {got_texts}")
 need("Passed on to you by Donna" not in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "a closed one stays at her start")
@@ -38687,6 +38693,21 @@ def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
 
+def rss_mb() -> int | None:
+    """H162 (4 November 2026): this process's memory now, in MB (Linux only; None elsewhere). A full run had grown to 3.2 GB on the
+    server, and with a job and a proof at the same time the kernel killed the night's jobs (494, 496, 498)."""
+    try:
+        for line in open("/proc/self/status"):
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        return None
+    return None
+
+
+MEMORY_STEP_MB = 100  # a flow that leaves the run this much bigger is named under it and in the summary
+
+
 async def one_flow(res: Result, method, n: int) -> None:
     """One flow, and how it came out in res."""
     try:
@@ -38743,6 +38764,8 @@ async def main(args) -> bool:
     # Flow 7 closes the live call; if it runs, it must come after the others that use that call.
     results: list[Result] = []
     t_all = time.perf_counter()
+    mem_start = rss_mb()
+    grew: list[tuple[int, int]] = []  # (flow, MB it added)
     dead = await canary()
     if dead:
         results.append(Result(0, "The canary", "FAIL", 0.0, dead))
@@ -38761,10 +38784,15 @@ async def main(args) -> bool:
             print(f"\n-- {n} · {name}", flush=True)
             testwall.mark(n, uses_claude)
             t = time.perf_counter()
+            before = rss_mb()
             await one_flow(res, getattr(run_, method), n)
             res.secs = time.perf_counter() - t
             watch.after(n)
             say(f"{res.status}: {res.note}")
+            after = rss_mb()
+            if before is not None and after is not None and after - before >= MEMORY_STEP_MB:
+                grew.append((n, after - before))
+                say(f"memory: {after} MB, {after - before} MB more after this flow")
     finally:
         try:
             if run_.live:
@@ -38790,6 +38818,10 @@ async def main(args) -> bool:
     guard = "live server on 7860 untouched" if live_after == run_.live_pid_before else \
         f"WARNING: the live server's pid changed ({run_.live_pid_before} -> {live_after})"
     real_runs, stopped = testwall.model_calls()  # F111: the true counts, from every call that went through the stand-in
+    mem_end = rss_mb()
+    if mem_start is not None and mem_end is not None:
+        most = ", ".join(f"{n} (+{mb} MB)" for n, mb in sorted(grew, key=lambda g: -g[1])[:8])
+        print(f"\n== Memory\n{mem_start} MB at the start, {mem_end} MB at the end" + (f"; grew most in flow {most}" if most else ""))
     print(f"\n{len(ran) - len(failed)} of {len(ran)} passed · {turns} Claude turns · {real_runs} real model runs, {stopped} stopped at the stand-in"
           f" · {time.perf_counter() - t_all:.0f} s · {guard}")
     testwall.finished()
