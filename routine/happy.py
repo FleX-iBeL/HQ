@@ -29,7 +29,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HQ = os.path.dirname(HERE)
@@ -183,11 +182,27 @@ def run(only: list[int] | None = None, keep: bool = False) -> int:
         print(f"      {v['why']}")
         if v["status"] == "PASS" and v["limit"]:
             print(f"      what this doesn't prove: {v['limit']}")
+    if not only:  # the phone's road with the laptop closed: the server's own call line over the tailnet, read only (not one of the 17's flows)
+        print()
+        phone()
     green = [v for v in verdicts if v["status"] == "PASS"]
     print(f"\n{len(green)} of {len(verdicts)} green · {sum(v['status'] == 'NOT TRIED' for v in verdicts)} not tried"
           + (f" · {real[-1][0]} real model runs, {real[-1][1]} stopped at the stand-in" if real else "")
           + f" · {(time.time() - t) / 60:.1f} min")
     return 0 if len(green) == len(verdicts) else 1
+
+
+def _tailnet_ip(host: str) -> str:
+    """The tailnet address of HOST from tailscale's own list, or empty."""
+    for ts in ("tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"):
+        try:
+            st = json.loads(subprocess.run([ts, "status", "--json"], capture_output=True, text=True, timeout=15).stdout or "{}")
+        except Exception:
+            continue
+        for peer in [st.get("Self") or {}, *(st.get("Peer") or {}).values()]:
+            if (peer.get("DNSName") or "").rstrip(".") == host and peer.get("TailscaleIPs"):
+                return peer["TailscaleIPs"][0]
+    return ""
 
 
 def phone(url: str = "") -> int:
@@ -205,12 +220,21 @@ def phone(url: str = "") -> int:
     if not url:
         print("The phone's road: no address for the server's call line (set HQ_PHONE_URL).")
         return 1
+    host = re.sub(r"^https?://([^/:]+).*$", r"\1", url)
+    port = (re.search(r":(\d+)$", url) or [None, "443"])[1]
+    args = ["curl", "-s", "--max-time", "20", "-o", "-", "-w", "\n%{http_code}"]
+    ip = _tailnet_ip(host)  # the phone asks MagicDNS; a plain lookup here can give the public name's address instead
+    if ip:
+        args += ["--resolve", f"{host}:{port}:{ip}"]
     try:
-        with urllib.request.urlopen(url + "/", timeout=20) as r:
-            body = r.read().decode("utf8", "replace")
-            ok = r.status == 200 and "<title>HQ</title>" in body
+        r = subprocess.run(args + [url + "/"], capture_output=True, text=True, timeout=30)
+        body, _, code = r.stdout.rpartition("\n")
+        ok = code == "200" and "<title>HQ</title>" in body
     except Exception as e:
         print(f"The phone's road: {url} didn't answer: {e!r}")
+        return 1
+    if not ok:
+        print(f"The phone's road: {url} didn't give the call page (HTTP {r.stdout[-3:]}, {r.stderr.strip()[:120]})")
         return 1
     print(f"The phone's road: {url} answers over the tailnet with the call page" if ok else f"The phone's road: {url} isn't HQ's call page")
     return 0 if ok else 1
