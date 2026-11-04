@@ -17180,7 +17180,7 @@ print("OK")
         and the commands come from the routine's real start, what was reached from the real reach command, the end of the run
         from the routine and the guard. 300 threads in one day: all found, the marker moves. 120 alike in one day that no word
         splits: an incident for Moneypenny, the marker held before that day while the later mail is still written down, Donna
-        texts once and it's in Moneypenny's ledger and at her start; a second run adds no incident, no text and no line twice, and
+        texts once (Moneypenny herself since F146, Donna as the backup) and it's in Moneypenny's ledger and at her start as hers; a second run adds no incident, no text and no line twice, and
         the stuck-marker incident stays quiet; a run that stops halfway moves nothing; once he's archived and read some, the next
         run reads it all, the incident closes and the marker moves. A split that answers less than the search it splits, or a
         search not reported, isn't reached. While he sleeps the text waits for the morning."""
@@ -17323,10 +17323,14 @@ incidents._write(data)
 donna()
 downs = [f for w, f in got_texts if w == "down" and "mailreach" in f]
 need(len(downs) == 1 and "Moneypenny" in downs[0], f"Donna didn't text him, naming Moneypenny: {got_texts}")
-need("Escalated by Donna" in ledger.text("moneypenny") and "couldn't read all the mail" in ledger.text("moneypenny"),
-     "it isn't in Moneypenny's ledger")
+# F146: an incident is a build message, so with her line on Moneypenny texts him herself; her ledger and her start say it's hers
+need(direct_line.line_for("down") == "team", "Moneypenny's line isn't on in this flow")
+need("Escalated to you" in ledger.text("moneypenny") and "you texted him about it" in ledger.text("moneypenny")
+     and "couldn't read all the mail" in ledger.text("moneypenny") and "Escalated by" not in ledger.text("moneypenny"),
+     "it isn't in Moneypenny's ledger as hers")
 import quick_context
-need("Passed on to you by Donna" in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "it isn't at Moneypenny's start")
+her_start = quick_context._planning(Path(os.environ["HQ_WORKSPACE"]))
+need("Passed on to you, still open (you texted him" in her_start and "by Donna" not in her_start, "it isn't at Moneypenny's start as hers")
 # 3. The next run: the same day again, read again; no second incident, no second text, no line twice.
 before_lines = open(inbox).read()
 new, fresh = run(c)
@@ -17337,7 +17341,7 @@ need(all(text.count(f"· alike {i} ·") <= 1 for i in range(120)) and all(text.c
 need(start <= mk() < held_day, "the second run moved the marker past the day")
 donna()
 need(len([f for w, f in got_texts if w == "down" and "mailreach" in f]) == 1, f"a second text: {got_texts}")
-need(ledger.text("moneypenny").count("Escalated by Donna") == 1, "a second escalation in her ledger")
+need(ledger.text("moneypenny").count("Escalated to you") == 1, "a second escalation in her ledger")
 # the stuck-marker incident stays quiet about the same cause: a good run now, a marker over 24 hours old
 need(now - mk() > M.STUCK_S, "the held marker isn't a day old in this flow")
 open(M._ok_file(), "w").write(str(now))
@@ -17367,7 +17371,15 @@ fresh_line = routines.read()["mailreach"]
 need(fresh_line["at"] > was_at and fresh_line["text"] == reach_said and fresh_line["state"] == "ok", f"a minute left Mail read in full to go overdue: {fresh_line}")
 donna()
 need(any(w == "back" and "mailreach" in f for w, f in got_texts), f"Donna didn't say it's back: {got_texts}")
-need("Passed on to you by Donna" not in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "a closed one stays at her start")
+need("Passed on to you" not in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "a closed one stays at her start")
+# F146, the backup: with her line switched off Donna texts him, and passes it on to her by name
+os.environ["HQ_TEAM_LINE"] = "0"
+need(direct_line._pass_on({"id": "mailreach-b", "key": "mailreach", "to": "moneypenny", "why": "the backup's day"}, True) == "Moneypenny",
+     "the backup didn't pass it on to Moneypenny")
+need("Escalated by Donna" in ledger.text("moneypenny") and "Donna texted him about it" in ledger.text("moneypenny"), "the backup's escalation isn't Donna's")
+incidents.down("mailreach", "the backup's day", to="moneypenny")
+need("Passed on to you by Donna" in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "the backup's start doesn't name Donna")
+os.environ.pop("HQ_TEAM_LINE")
 # 6. What isn't reached: a search not reported, a split that answers less than the search it splits.
 r = "after:2030/03/10 before:2030/03/11"
 need(M.reached([r], {}) and "wasn't reported" in M.reached([r], {})[0][1], "an unreported search counts as reached")
@@ -17441,7 +17453,7 @@ print("OK")
         mc = (ROOT / "routine/mail-check.md").read_text()
         need("with `in:inbox` and with `-in:inbox` added" not in mc and "reach N" in mc, "the instructions still split by hand")
         need("['mailreach'" in (ROOT / "status/index.html").read_text(), "the status page has no line for it")
-        return "300 in one day all read; a day no word splits: one incident, one text from Donna to him and Moneypenny, held marker, no line twice, read in full later"
+        return "300 in one day all read; a day no word splits: one incident, one text to him from Moneypenny, hers in her ledger and start (Donna by name as the backup), held marker, no line twice, read in full later"
 
     async def flow222(self) -> str:
         """F102, no Claude: failures turn red. Through the routine's real minute: a reviewer that throws, or a review that doesn't run,
@@ -39091,7 +39103,7 @@ FLOWS = {
     224: ("F102: a key is masked in every transcript line, the push key lives in HQ's own folder at 600", False, "flow224"),
     223: ("F102: one night rule: a text that can wait sends nothing and one summary at waking; what can't wait goes", False, "flow223"),
     222: ("F102: a failing reviewer, cycle, briefing, QA or release turns red with an incident within the minute; a broken lines file shows red", False, "flow222"),
-    405: ("F110: a day over 50 threads read in full by splitting the search (300 in one day all found); a day that can't be: one incident, one text from Donna to him and Moneypenny, the marker held, no line twice; read in full later, closed", False, "flow405"),
+    405: ("F110: a day over 50 threads read in full by splitting the search (300 in one day all found); a day that can't be: one incident, one text to him from Moneypenny (Donna as the backup) and in her ledger as hers, the marker held, no line twice; read in full later, closed", False, "flow405"),
     240: ("F109: the mail check searches by date and counts only mail newer than the marker, against a stand-in connector that answers nothing to an epoch query; a marker standing still for 24 hours opens an incident Donna gets", False, "flow240"),
     221: ("F102: a mail run that moves the marker back or drops a very important line is put back with an incident; red after 2 hours between 8:00 and midnight", False, "flow221"),
     220: ("F102: two processes adding 150 notes lose none; one lock across processes for the to-do list, the notes, the games, the coaching file and the mail list", False, "flow220"),
