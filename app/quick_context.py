@@ -170,8 +170,14 @@ def _planning(folder: Path) -> str:
         sys.path.insert(0, str(config.ROOT / "routine"))
         import incidents as _inc
         mine = [i for i in _inc.read().get("incidents") or [] if i.get("to") == "moneypenny" and not i.get("back")]
+        try:  # F146: an incident is a build message; with her own line on, she texted him herself, Donna didn't
+            import direct_line as _dl
+            hers = _dl.line_for("down") == "team"
+        except Exception:
+            hers = False
         if mine:
-            out.append("Passed on to you by Donna, still open (raise it first; it closes by itself once the cause is gone, and "
+            out.append(("Passed on to you, still open (you texted him about it; raise it first; it closes by itself once the cause is gone, and "
+                        if hers else "Passed on to you by Donna, still open (raise it first; it closes by itself once the cause is gone, and ") +
                        "while it's open it's yours to look at and to give the team):\n" +
                        "\n".join(f"- {i.get('key')}, since {_when(i.get('down'))}: {' '.join(str(i.get('why') or '').split())[:400]}"
                                   for i in mine[-5:]))

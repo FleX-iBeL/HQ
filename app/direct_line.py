@@ -1482,8 +1482,9 @@ def _pass_on(e: dict, write: bool) -> str:
             import ledger
             with _Env(team_env() if line_for("down") == "team" else {}):  # F146: who texts him about it
                 who = agent()["name"]
-            ledger.entry(to, f"Escalated by {who}: {PLAIN_WHAT.get(str(e.get('key')), 'one of the systems')}",
-                         [e.get("why") or "down", f"Incident {e.get('id')}; {who} texted him about it.",
+            mine = who == (a.get("name") or to)  # F146: she texted him herself; nobody passed it on to her
+            ledger.entry(to, ("Escalated to you: " if mine else f"Escalated by {who}: ") + PLAIN_WHAT.get(str(e.get('key')), 'one of the systems'),
+                         [e.get("why") or "down", f"Incident {e.get('id')}; {'you' if mine else who} texted him about it.",
                           "It closes by itself once the cause is gone; while it stays open it's yours to look at, and to give the team."])
         except Exception as ex:
             print(f"watch: passing {e.get('id')} on to {to}: {ex!r}", file=sys.stderr)
