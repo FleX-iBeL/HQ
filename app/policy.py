@@ -811,6 +811,9 @@ class Policy:
             return Decision(DENY, "empty command")
         # Only plain commands, joined by && or |. No redirection into files, no
         # subshells, variables or here-documents (quoted text may contain anything).
+        if re.match(r"\s*ssh\s", cmd) and not is_backup():  # 4 November 2026: she's on the main and tried to log in to it
+            return Decision(DENY, "you are already on the main computer, where HQ, the team, the planning and the tests run: "
+                                  "run the same command here, without ssh; no yes is needed to look")
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
