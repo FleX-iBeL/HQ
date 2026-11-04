@@ -16,7 +16,7 @@ If the person you're helping says something like *"read me and install everythin
 python3 install/install.py
 ```
 
-It runs two rounds and ticks every step off on a live checklist, http://localhost:4749 while it runs and afterwards on the status page at http://localhost:4748/install (also on the phone's status address), so the person, or whoever helps them, can see exactly where it stopped and why. Round one sets everything up: what's needed, the workspace from the template (an existing workspace is never touched), the Python environment, the voice, and every password and macOS permission once (the helper's Documents access, Terminal windows, the watchdog, the lid switch, the status page, the call line). It tells them up front about the password and Allow. Round two is the installer's happy flow: everything again, and nothing may ask any more; a check that would need a password or a click fails instead of waiting.
+It runs two rounds and ticks every step off on a live checklist, http://localhost:4749 while it runs and afterwards on the status page at http://localhost:4748/install (also on the phone's status address), so the person, or whoever helps them, can see exactly where it stopped and why. Round one sets everything up: what's needed, the workspace from the template (an existing workspace is never touched), the Python environment, the voice, and every password and macOS permission once (the helper's Documents access, Terminal windows, the watchdog, the lid switch, the status page, the call line). It tells them up front about the password and Allow. Round two is the installer's detailed flow: everything again, and nothing may ask any more; a check that would need a password or a click fails instead of waiting.
 
 - `--test-only`: only round two, read only. Run it any time to check an install.
 - `--skip lidsleep,tailscale,flows,helper`: leave optional parts out.
@@ -107,13 +107,19 @@ These keep HQ running without anyone watching. All three ask macOS for permissio
 
 Paths inside that `.plist` and `routine/routine.applescript` must point at this HQ folder; fix them if they don't, and rebuild.
 
-### 8. Check everything: the happy flows
+### 8. Check everything: the happy flows, then the detailed flows
 
-The happy flows are HQ's tests: the main things that must work when all goes well.
+The happy flows are the 17 things that make HQ usable (a call, a text, a reminder, the to-do list, the calendar, the planning, a fresh install...). They run for real, with the real model, on a throwaway copy, so they cost a little usage:
+
+```sh
+python3 routine/happy.py list                  # the 17, and any that can't be tried here yet, with why
+python3 routine/happy.py run                   # all of them, about ten minutes
+```
+
+The detailed flows are HQ's other tests, hundreds of them, most with stand-ins:
 
 ```sh
 .venv/bin/python app/happy_flows.py --quick   # the ones without Claude, about a minute
-.venv/bin/python app/happy_flows.py           # all of them, about five minutes, a few Claude turns
 .venv/bin/python app/happy_flows.py --only 3,5
 ```
 
@@ -132,7 +138,7 @@ Then the real test: a call from the phone or the browser, a question about today
 
 ## On a Linux server
 
-On Linux the helper app and the LaunchAgents are systemd user units instead: `sh routine/install-linux.sh` puts in `hq-routine.timer` (the routine, every minute), `hq-watchdog.timer` (every 5 minutes, starts the routine again when it's gone, ends a run that hangs), both in UTC so the clocks going back doesn't stop them for an hour (F52) and `hq-start.service` (the call line, through `app/start-linux.sh`, when the server starts), switches lingering on, and starts them. They start by themselves after a restart. HQ's own memory is `~/.local/state/hq` there. `--dry` shows the units, `--remove` takes them out. Tailscale's serve settings belong to root on Linux, so HQ calls it with `sudo -n` (no password; `HQ_TS_SUDO=0` if the user is Tailscale's operator). Battery, temperature, the laptop stats and the lid switch stay Mac only (the status page leaves them out on a server). Jobs and the hourly mail check run in tmux sessions there instead of Terminal windows (`tmux attach -t hq-job-<N>` to watch one); without tmux, your own `local/open-window` stands in. Happy flow 61 checks all of it on a Linux machine: run it there, or from a Mac with `HQ_TEST_LINUX=<ssh host>`. Since H56.5 the installer does all of this on Linux too: `python3 install/install.py --yes --no-page` on the server installs nothing with sudo (what's missing is named with the line to install it), makes the Python environment without MLX (faster-whisper listens there), puts in the units, checks a tmux session, and checks that Claude trusts the workspace (run `claude` once in it and answer yes, since nobody answers that question for a job). Its test round runs the happy flows that hold on Linux, without the long ones (`flowsets.INSTALL_LEAVE_OUT`), inside `flowsets.INSTALL_SECONDS_LINUX`.
+On Linux the helper app and the LaunchAgents are systemd user units instead: `sh routine/install-linux.sh` puts in `hq-routine.timer` (the routine, every minute), `hq-watchdog.timer` (every 5 minutes, starts the routine again when it's gone, ends a run that hangs), both in UTC so the clocks going back doesn't stop them for an hour (F52) and `hq-start.service` (the call line, through `app/start-linux.sh`, when the server starts), switches lingering on, and starts them. They start by themselves after a restart. HQ's own memory is `~/.local/state/hq` there. `--dry` shows the units, `--remove` takes them out. Tailscale's serve settings belong to root on Linux, so HQ calls it with `sudo -n` (no password; `HQ_TS_SUDO=0` if the user is Tailscale's operator). Battery, temperature, the laptop stats and the lid switch stay Mac only (the status page leaves them out on a server). Jobs and the hourly mail check run in tmux sessions there instead of Terminal windows (`tmux attach -t hq-job-<N>` to watch one); without tmux, your own `local/open-window` stands in. Detailed flow 61 checks all of it on a Linux machine: run it there, or from a Mac with `HQ_TEST_LINUX=<ssh host>`. Since H56.5 the installer does all of this on Linux too: `python3 install/install.py --yes --no-page` on the server installs nothing with sudo (what's missing is named with the line to install it), makes the Python environment without MLX (faster-whisper listens there), puts in the units, checks a tmux session, and checks that Claude trusts the workspace (run `claude` once in it and answer yes, since nobody answers that question for a job). Its test round runs the detailed flows that hold on Linux, without the long ones (`flowsets.INSTALL_LEAVE_OUT`), inside `flowsets.INSTALL_SECONDS_LINUX`.
 
 A server needs: Ubuntu or another Linux with systemd, about 4 GB of memory or more (speech recognition on the CPU is the biggest user), the same 4 GB of disk as a Mac, Python 3.12 with `uv`, Node.js 20+, git, tmux, Claude Code signed in, and Tailscale for the phone. On the phone the server's call page is `https://<server>.<tailnet>.ts.net:8443` and its status page `:8444`, the same as a Mac's.
 
@@ -184,7 +190,7 @@ HQ is public, so nothing of anyone's own may go in it: their notes stay in `work
 python3 app/privacy.py --history
 ```
 
-It looks through HQ's files and its whole git history for the person's name and **Private words** (from `workspace/me.md`), home folder paths, Tailscale names and addresses, mail addresses, and keys or tokens. Happy flow 44 runs the same check. Paths in the shipped files are written as `/Users/you/HQ`; the installer and `routine/build-app.sh` put the real path in.
+It looks through HQ's files and its whole git history for the person's name and **Private words** (from `workspace/me.md`), home folder paths, Tailscale names and addresses, mail addresses, and keys or tokens. Detailed flow 44 runs the same check. Paths in the shipped files are written as `/Users/you/HQ`; the installer and `routine/build-app.sh` put the real path in.
 
 ## Updating HQ
 

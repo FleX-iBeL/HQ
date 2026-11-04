@@ -25,7 +25,7 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
   - pause (jobs.py pause): the running job held, nothing new starts, and no reviewer or first look starts.
 
 The gate itself is status/save-usage.mjs: a reading older than 30 minutes stops it, and --reserve takes the reserve off.
-Off only for a test: HQ_NO_WALL under HQ_UNDER_TEST (the happy flows set it, so the flows from before keep to one thing; a
+Off only for a test: HQ_NO_WALL under HQ_UNDER_TEST (the detailed flows set it, so the flows from before keep to one thing; a
 wall flow takes it out again). HQ_WALL_HOUR pins the hour for a test.
 
 [The numbers that aren't his: BOX_OVER 1.5 (the review's example: 2 jobs in 10 run past their latest end), BOX_MIN 20, RAISE 2,

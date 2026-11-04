@@ -29,7 +29,7 @@ steps for the mail check). HQ reads them at its fixed points:
                  also on a quiet hour (step 3's {QUIET})   quiet_step()
     scripts      a call, a text or the mail check runs one       run EXT SCRIPT [ARGS]
     routines     tick.py every minute, each at its own `every`  routines()
-    its flows    the nightly run (happy flow 472), on a copy     flows()
+    its flows    the nightly run (detailed flow 472), on a copy     flows()
 HQ's version leads: an extension never replaces one of HQ's own text kinds, files or rules; where both say something,
 HQ's counts.
 
@@ -376,7 +376,7 @@ def _end_group(pid: int) -> None:
 def flows(only: str | None = None) -> list[dict]:
     """Every extension's own test flows that's on (or only that one), each run from a throwaway copy of HQ (_flow_hq) in a
     process group of its own, at most FLOW_MAX seconds: one result each, {"ext", "name", "flow", "ok", "exit", "said"}. A
-    flow passes when it exits 0. Used by the nightly run (happy flow 472) and by `extensions.py flows`."""
+    flow passes when it exits 0. Used by the nightly run (detailed flow 472) and by `extensions.py flows`."""
     import tempfile
     out, files = [], None
     for e in on():

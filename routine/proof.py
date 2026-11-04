@@ -5,10 +5,15 @@ His words: "yes exactly, i want here we put it on our roadmap and planning, and 
 for only works when each step is proven by a program. A build's done used to be a clean exit, and QA's pass a typed form.
 Here a program runs the tests on a copy and keeps a record; `jobs.py done` and `qa.py pass` read the record and nothing else.
 
-    python3 routine/proof.py run N       job N's record: the commits, the flows its row names plus the quick set, on a copy
+    python3 routine/proof.py run N       job N's record: the commits, the flows its row names plus the 17 happy flows, on a copy
     python3 routine/proof.py show N      the record, as it stands
     python3 routine/proof.py latest ROW  the newest record for a row (F99, H283)
-    python3 routine/proof.py run-rows ROW [ROW ...]  F121: the quick set once, each row's own flows, a record per row
+    python3 routine/proof.py run-rows ROW [ROW ...]  F121: the 17 happy flows once, each row's own flows, a record per row
+
+H313 (4 November 2026): the gate is the 17 happy flows he asked for (routine/happy.py), run for real with the real model, plus the
+row's own flows, also for real (no --quick: a pass with stand-ins isn't a pass). The detailed flows (the quick set) run at night, in
+routine/nightly.py, no longer here. A happy flow that can't be driven yet is a "not tried" line in the record (rec["not_tried"]), and
+a record with one isn't green: it holds QA and the release until it's run for real.
 
 A record says what was run and how it came out: {"n", "label", "head", "commits", "named", "ran", "passed", "failed", "green",
 "at"}. It stands for the commit it ran on: new commits after it mean a new run. HQ_PROOF_RUNNER is a test's stand-in for the
@@ -18,7 +23,7 @@ test runs (HQ_UNDER_TEST) the gate is off unless HQ_PROOF_ON says it's the gate 
 F121 (3 November 2026): items built and checked in a supervised chat, not as jobs, have no record. `run-rows` runs the quick set
 once on the commit HQ is on, then each row's own named flows (one group per row), and writes `rows-<run id>-<ROW>.json` for every
 row with commits in that commit (`commits_of`, or listed in qa.COMMITS_FOR); a row without any gets no record and is named. Each
-is a record as above plus "shared" (the run's id) and "rows" (every row of that run): green only when the shared quick set and that
+is a record as above plus "shared" (the run's id) and "rows" (every row of that run): green only when the shared happy flows (H313; the quick set before) and that
 row's own flows all passed. `latest()` reads it by its "t" like a job's; `jobs.py done` still needs a job's own record. It takes
 ~/hq-fullrun.lock (HQ_FULLRUN_LOCK for a test's own), the lock the whole quick sets by hand take turns on, so two full runs never
 run at once. Exit 0 when every record is green, 1 when one is red, 2 when there was nothing to run.
@@ -52,6 +57,7 @@ sys.path.insert(0, HERE)
 import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
 import nightly  # noqa: E402
+import happy  # noqa: E402  (H313: the 17 happy flows are the gate)
 
 ROOT = os.environ.get("HQ_PROOF_ROOT") or hqpaths.HQ
 BUILDS = ("build", "bigbuild")
@@ -328,6 +334,12 @@ def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
     return p.returncode, out
 
 
+def _not_tried() -> list[str]:
+    """H313: the happy flows not run for real here, each one holding the record. A test's stand-in for the flows (HQ_PROOF_RUNNER) tests
+    the proof's own workings, not the app, so it has none."""
+    return [] if os.environ.get("HQ_PROOF_RUNNER") else happy.not_tried()
+
+
 def skipped_flows(out: str) -> list[int]:
     """F121: the flows the run's result says were skipped under --quick (a Claude flow): named, not ran."""
     tail = out.rpartition("\n== Result")[2]
@@ -360,7 +372,8 @@ def _run(n: int) -> int:
     rowtext = (j["text"] + " " + row_of(text, label))
     named = named_flows(rowtext)
     rec = {"n": n, "label": label, "item": (j.get("item") or {}).get("id"), "head": head, "commits": commits_of(label, head), "named": named,
-           "skipped": [], "ran": 0, "passed": 0, "failed": [], "green": False, "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
+           "skipped": [], "ran": 0, "passed": 0, "failed": [], "not_tried": _not_tried(), "green": False,
+           "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
     logpath = path(n)[:-5] + ".log"
     os.makedirs(folder(), exist_ok=True)
     import wall
@@ -371,18 +384,18 @@ def _run(n: int) -> int:
         with open(logpath, "w", encoding="utf8") as log:
             if named:
                 # F105: a flow with Claude turns needs a live voice and usage; a row that only mentions one doesn't turn the record red
-                code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, named))], log)
+                code, out = _flows(wt, ["--only", ",".join(map(str, named))], log)  # H313: for real, no --quick
                 p, r_ = nightly.summary(out)
                 rec["ran"], rec["passed"] = r_, p
                 rec["skipped"] = [x for x in skipped_flows(out) if x in named]
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}"])
             if not rec["failed"]:
-                code, out = _flows(wt, nightly.flow_args(), log)
+                code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real; the quick set is the night's
                 p, r_ = nightly.summary(out)
                 rec["ran"] += r_
                 rec["passed"] += p
-                rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the quick set ended with exit {code}, {p} of {r_}"])
-        rec["green"] = not rec["failed"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
+                rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}"])
+        rec["green"] = not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
     finally:
         wall.proof_end(n)
         if wt:
@@ -390,7 +403,7 @@ def _run(n: int) -> int:
     _save(rec)
     print(f"Job {n}: {rec['passed']} of {rec['ran']} passed on a copy of {head[:7]}"
           + (f", named flows {named}" if named else "") + (f", skipped {rec['skipped']}" if rec["skipped"] else "")
-          + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'])[:600]}"))
+          + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'] + rec['not_tried'])[:900]}"))
     return 0 if rec["green"] else 1
 
 
@@ -514,14 +527,14 @@ def _run_rows(labels: list[str]) -> int:
         try:
             wt = _copy(head)
             with open(os.path.join(folder(), f"rows-{runid}.log"), "w", encoding="utf8") as log:
-                code, out = _flows(wt, nightly.flow_args(), log)
+                code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real
                 p, r_ = nightly.summary(out)
-                shared.update(ran=r_, passed=p, failed=nightly.failures(out)
-                              or ([] if code == 0 and r_ else [f"the quick set ended with exit {code}, {p} of {r_}"]))
+                shared.update(ran=r_, passed=p, not_tried=_not_tried(), failed=nightly.failures(out)
+                              or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}"]))
                 for label, row in rows.items():
                     row.update(ran=0, passed=0, failed=[], skipped=[])
                     if row["named"]:
-                        code, out = _flows(wt, ["--quick", "--only", ",".join(map(str, row["named"]))], log)
+                        code, out = _flows(wt, ["--only", ",".join(map(str, row["named"]))], log)  # H313: for real
                         p, r_ = nightly.summary(out)
                         row.update(ran=r_, passed=p, skipped=[x for x in skipped_flows(out) if x in row["named"]], failed=nightly.failures(out)
                                    or ([] if code == 0 else [f"the named flows {row['named']} ended with exit {code}, {p} of {r_}"]))
@@ -531,21 +544,22 @@ def _run_rows(labels: list[str]) -> int:
                 wall.forget(key)
             if wt:
                 _uncopy(wt)
-        sgreen = not shared["failed"] and shared["ran"] > 0 and shared["passed"] == shared["ran"]
+        sgreen = not shared["failed"] and not shared.get("not_tried") and shared["ran"] > 0 and shared["passed"] == shared["ran"]
         red = 0
         for label, row in rows.items():
             ran, passed = shared["ran"] + row["ran"], shared["passed"] + row["passed"]
             failed = shared["failed"] + row["failed"]
             green = sgreen and not row["failed"] and row["passed"] == row["ran"]
             rec = {"n": None, "label": label, "item": None, "head": head, "commits": row["commits"][:40], "named": row["named"],
-                   "skipped": row["skipped"], "ran": ran, "passed": passed, "failed": failed, "green": green, "at": at, "t": t,
+                   "skipped": row["skipped"], "ran": ran, "passed": passed, "failed": failed, "not_tried": shared.get("not_tried") or [],
+                   "green": green, "at": at, "t": t,
                    "shared": runid, "rows": list(rows)}
             _save(rec, os.path.join(folder(), f"rows-{runid}-{label}.json"))
             red += not green
             print(f"{label}: {passed} of {ran} passed on a copy of {head[:7]}" + (f", named flows {row['named']}" if row["named"] else "")
                   + (f", skipped {row['skipped']}" if row["skipped"] else "")
-                  + (": green." if green else f". Failed: {'; '.join(failed)[:600]}"))
-        print(f"One run ({runid}): the quick set {shared['passed']} of {shared['ran']}, {len(rows)} record{'' if len(rows) == 1 else 's'}"
+                  + (": green." if green else f". Failed: {'; '.join(failed + (shared.get('not_tried') or []))[:900]}"))
+        print(f"One run ({runid}): the happy flows {shared['passed']} of {shared['ran']}, {len(rows)} record{'' if len(rows) == 1 else 's'}"
               + (f", {red} red." if red else ", all green."))
         return 1 if red else 0
     finally:

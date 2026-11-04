@@ -30,7 +30,7 @@ import json, os, subprocess, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 JV = os.path.normpath(os.path.join(HERE, ".."))
-RUN = os.environ.get("HQ_NUDGE_DIR") or os.path.join(JV, "scratch", "routine")  # the env: for the happy flow
+RUN = os.environ.get("HQ_NUDGE_DIR") or os.path.join(JV, "scratch", "routine")  # the env: for the detailed flow
 ACTIVITY = os.path.join(RUN, "job-activity.json")  # written by statusline.py: {"at", "session", "transcript"}
 REQUEST = os.path.join(RUN, "nudge-request.json")  # {"n", "at", "text"}: read by nudge.py in job n's window
 RESULT = os.path.join(RUN, "nudge-result.json")  # {"n", "at", "ok", "said"}: written by nudge.py

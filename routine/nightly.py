@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""The nightly run (H169, 16 October 2026): every night, all the happy flows, to find bugs.
+"""The nightly run (H169, 16 October 2026): every night, all the detailed flows, to find bugs.
 
 The user on the call of 16 October 2026 at 11:56: "I was thinking maybe we can each night, during those usage
 hours, just run all the flows or something like that and just find bugs. ... We don't have to plan those
 maintenance moments because we just do it daily whenever we have space." and "Maybe we do the nightly check at
 2 am". A repeating planned item (H171) carries one job text (in the H169 row); that job runs this script:
 
-  python3 "routine/nightly.py" run          on the main only: round 1, the happy flows for this computer, no Claude
+  python3 "routine/nightly.py" run          on the main only: round 1, the detailed flows for this computer, no Claude
                                             turns. All pass: one line in the H169 row's nights, exit 0, nothing else.
                                             One fails: the failed flows and the log, exit 1 (the job fixes them all).
                                             Not the main: says so, changes nothing, exit 0.
@@ -39,7 +39,7 @@ commit and its free files (release.night_tied). One run at a time (running): a s
 
 The tutorial stays right (H227, 22 October 2026). The user on the call at 12:13: "If we keep adding features and
 changing things, then the tutorial still needs to work the same." and "Yeah, every night is fine. It doesn't need to
-skip it. ... Just included. Every night is good." Two parts, every night, no skipping: happy flow 134 (in both sets)
+skip it. ... Just included. Every night is good." Two parts, every night, no skipping: detailed flow 134 (in both sets)
 fails when a button or screen on the call page has no tutorial piece; and after the flows the job reads the tutorial
 (app/web/tour.json) against what HQ does now and `tutorial`'s changes, and fixes what's outdated or missing the same
 night, in everyday words, demo content only, then `tutorial done`.

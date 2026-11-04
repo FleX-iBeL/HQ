@@ -76,7 +76,7 @@ def line_dir() -> Path:
 
 
 def _now() -> datetime:
-    t = os.environ.get("HQ_COACHING_NOW")  # the happy flows' own now
+    t = os.environ.get("HQ_COACHING_NOW")  # the detailed flows' own now
     return datetime.fromisoformat(t) if t else datetime.now()
 
 

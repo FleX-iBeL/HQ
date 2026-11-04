@@ -27,13 +27,13 @@ FOLDER = os.path.realpath(WORKSPACE)
 DATA = os.path.join(FOLDER, "HQ")
 ROADMAP = os.environ.get("HQ_ROADMAP") or os.path.join(DATA, "roadmap.md")
 
-# F17 (12 October 2026): the happy flows on the VPS reached the real job list (through the backup's forward to
+# F17 (12 October 2026): the detailed flows on the VPS reached the real job list (through the backup's forward to
 # the main). A test (HQ_UNDER_TEST, set by app/happy_flows.py for itself and everything it starts) may never change
 # the real workspace's roadmap, nor hand anything to the other HQ through this HQ's real pairing.
 
 
 def real_roadmap() -> str:
-    """The real workspace's roadmap, whatever HQ_ROADMAP says: HQ_REAL_ROADMAP (the happy flows name it once, so
+    """The real workspace's roadmap, whatever HQ_ROADMAP says: HQ_REAL_ROADMAP (the detailed flows name it once, so
     every copy of HQ a flow starts knows it), else this HQ's own workspace link."""
     return os.path.realpath(os.environ.get("HQ_REAL_ROADMAP")
                             or os.path.join(os.path.realpath(os.path.join(HQ, "workspace")), "HQ", "roadmap.md"))
