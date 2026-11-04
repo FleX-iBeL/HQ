@@ -30133,6 +30133,63 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         need("done N --at HH:MM" in config.VOICE_RULES, "the call rules don't say how to tick off a job")
         return "the nudge names the done mark; a never-ending wait loop stops counting after 15 minutes, output keeps a shell alive; every job's text ends with the done mark; done --at ticks off at the real time"
 
+    async def flow478(self) -> str:
+        """F141, no Claude: a switch still built in pieces gets its own settings boxes in Settings, as once it's shipped.
+        A throwaway in-pieces list (HQ_FEATURES_PIECES) holds agents_run (the agents' cycles) and driving (the maps
+        key). On the maker's HQ (HQ_MAKER=1) features.listing gives agents_run cycles True with on as switched (off,
+        then on by his tap), and driving its key status; on another HQ (HQ_MAKER=0) both are hidden with no cycles
+        and no key. With the list empty (agents_run shipped) it still gives cycles."""
+        import features as ft
+        tmp = self.tmp / "f141"
+        mkr, other = tmp / "maker", tmp / "other"
+        for d in (mkr, other):
+            (d / "HQ").mkdir(parents=True)
+        pieces = tmp / "in-pieces.json"
+        pieces.write_text(json.dumps({"features": [
+            {"id": "agents_run", "name": "The agents run themselves", "line": "", "buttons": [], "row": "H298", "pieces": "nine pieces"},
+            {"id": "driving", "name": "Driving to appointments", "line": "", "buttons": [], "row": "H230", "pieces": "a piece"}]}))
+        tapped = {"at": "2026-11-04 03:30", "how": "tapped"}
+        keep = {k: os.environ.get(k) for k in ("HQ_FEATURES_PIECES", "HQ_MAKER", "HQ_WORKFLOWS_FOLDER")}
+        try:
+            os.environ["HQ_FEATURES_PIECES"] = str(pieces)
+            os.environ["HQ_WORKFLOWS_FOLDER"] = str(tmp)
+            os.environ["HQ_MAKER"] = "1"
+            (mkr / "HQ/features.json").write_text(json.dumps({"off": ["agents_run"], "maker": True}))
+            ml = {i["id"]: i for i in ft.listing(mkr)}
+            a = ml["agents_run"]
+            need(a.get("cycles") is True and a["on"] is False and "Still being built (H298" in a.get("pieces", ""),
+                 f"the maker's HQ, switched off: {a}")
+            (mkr / "HQ/features.json").write_text(json.dumps({"off": [], "on": ["agents_run", "driving"], "maker": True,
+                                                              "say_so": {"agents_run": tapped, "driving": tapped}}))
+            ml = {i["id"]: i for i in ft.listing(mkr)}
+            a, dr = ml["agents_run"], ml["driving"]
+            need(a.get("cycles") is True and a["on"] is True and not a.get("hidden"),
+                 f"the maker's HQ, switched on, gives no settings box per agent: {a}")
+            need(isinstance(dr.get("key"), dict) and "key" in dr["key"] and not dr.get("hidden"),
+                 f"the maker's HQ gives no maps key box for a switch in pieces: {dr}")
+            say(f"   maker: agents_run on={a['on']} cycles={a.get('cycles')}; driving key={sorted(dr['key'])}")
+            os.environ["HQ_MAKER"] = "0"
+            (other / "HQ/features.json").write_text(json.dumps({"off": [], "on": ["agents_run", "driving"],
+                                                                "say_so": {"agents_run": tapped, "driving": tapped}}))
+            ol = {i["id"]: i for i in ft.listing(other)}
+            for fid in ("agents_run", "driving"):
+                o = ol[fid]
+                need(o.get("hidden") and not o["on"] and "cycles" not in o and "key" not in o and "pieces" not in o,
+                     f"another HQ shows {fid} or its box: {o}")
+            pieces.write_text(json.dumps({"features": []}))
+            os.environ["HQ_MAKER"] = "1"
+            sl = {i["id"]: i for i in ft.listing(mkr)}
+            need(sl["agents_run"].get("cycles") is True and not sl["agents_run"].get("in_pieces") and "pieces" not in sl["agents_run"],
+                 f"shipped, agents_run lost its settings box: {sl['agents_run']}")
+            need(isinstance(sl["driving"].get("key"), dict), f"shipped, driving lost its key box: {sl['driving']}")
+        finally:
+            for k, v in keep.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return "a switch in pieces: on the maker's HQ the agents' box and the maps key box, as shipped; on another HQ hidden with neither"
+
     async def flow166(self) -> str:
         """F56 piece 2, no Claude: a feature built in pieces ships switched off until its last piece passes QA. A
         throwaway in-pieces list (HQ_FEATURES_PIECES) holds a demo feature for row H900 with a button. On a friend's
@@ -38318,6 +38375,7 @@ FLOWS = {
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
+    478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
