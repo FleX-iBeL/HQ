@@ -482,6 +482,15 @@
       .incident pre, .routine .said pre { margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--soft-bg, rgba(127,127,127,.12));
         font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; max-height: 9em; overflow: auto; }
       footer { padding-top: 20px; border-top: 1px solid var(--rule); }
+      /* F93: the search box above the page, with its open-only or all toggle. */
+      #search { max-width: 760px; margin: 16px auto 0; display: grid; gap: 6px; }
+      #search .bar { display: flex; gap: 8px; align-items: center; }
+      #search input { flex: 1; min-width: 0; font: inherit; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--page); color: var(--ink); }
+      #search input:focus-visible { outline: 2px solid var(--blue); outline-offset: 0; }
+      #search .which { display: flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; flex: none; }
+      #search .which button { font: inherit; font-size: 14px; padding: 8px 12px; border: 0; background: none; color: var(--soft); cursor: pointer; }
+      #search .which button[aria-checked="true"] { background: var(--tint); color: var(--ink); font-weight: 600; }
+      #search .said { margin: 0; font-size: 14px; color: var(--soft); }
       @media (prefers-reduced-motion: reduce) { .phase svg, .fold-title svg { transition: none; } }
       @media (max-width: 700px) {
         /* H14: smaller text and spacing on the phone. */
@@ -544,6 +553,16 @@
       <div id="hqu-banner"></div>
     </div>
     <p id="for-you" hidden></p>
+    <div id="search" role="search">
+      <div class="bar">
+        <input id="search-box" type="search" placeholder="Search an item: F86, or words" aria-label="Search the items" autocomplete="off" spellcheck="false">
+        <div class="which" role="radiogroup" aria-label="Which items">
+          <button type="button" role="radio" aria-checked="true" data-which="open">Open only</button>
+          <button type="button" role="radio" aria-checked="false" data-which="all">All</button>
+        </div>
+      </div>
+      <p class="said" id="search-said" hidden></p>
+    </div>
     <main id="app"><p>Reading the roadmap…</p></main>
     <script src="./update-ui.js"></script>
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>
@@ -1578,6 +1597,7 @@
       /** A part that folds open and closed with an arrow. start: open or folded the first time. */
       function foldPart(key, start, title, counts, sub = false, late = '') {
         const fold = el('details', `fold${sub ? ' sub' : ''}`);
+        fold.dataset.fold = `part:${key}`;
         fold.open = isOpen(key, start);
         fold.addEventListener('toggle', () => {
           folds.set(key, fold.open);
@@ -2269,6 +2289,7 @@
         fiveOn = hasFive(usage);  // F107: before anything is drawn
         lastDraw = true;
         roadmapNow = s;
+        sxOut.length = 0;  // F93: a redraw starts the page new; search() takes out again what it doesn't show
         app.replaceChildren();
 
         const top = el('header', 'head top');
@@ -2545,6 +2566,7 @@
         // finished starts folded. Inside a phase, its finished steps fold away the same way.
         if (s.phases.length) {
           const box = el('section');
+          box.dataset.roadmap = 'yes';
           box.append(el('h2', '', 'Roadmap'));
           // Every phase starts closed and opens on a click (12 October 2026, the user's pick).
           const complete = (p) => p.steps.length > 0 && p.steps.every((x) => x.status === 'done');
@@ -2554,6 +2576,10 @@
           const teamJobs = s.queue?.jobs ?? [];
           const stepItem = (st, p) => {
             const li = el('li', st.status);
+            li.dataset.sx = st.name.split(' ')[0].toUpperCase();
+            li.dataset.sxOpen = st.status === 'done' ? '' : 'yes';  // F93: open is everything not done yet
+            li.dataset.sxName = st.name.toLowerCase();
+            li.dataset.sxText = [st.name, ...st.details.map((d) => d.text)].join(' ').toLowerCase();
             const text = el('div');
             text.append(el('strong', '', `${st.name} · ${STEP_WORD[st.status]}`));
             const what = st.details.find((d) => /what/i.test(d.label)) ?? st.details[0];
@@ -2575,6 +2601,7 @@
             const repeats = p.steps.filter((x) => x.status === 'repeat');
             const counted = p.steps.length - repeats.length;
             const fold = el('details');
+            fold.dataset.fold = `phase:${p.id}`;
             fold.open = opened.has(p.id);
             fold.addEventListener('toggle', () => {
               if (fold.open) opened.add(p.id);
@@ -2689,11 +2716,77 @@
           last = key;
           const y = window.scrollY;
           draw(s, new Date().toLocaleTimeString('en-GB'), usage, routines, truth);
+          search();  // F93: a redraw keeps the search as it was
           // F18: only put the page back when the redraw moved it; scrolling to the same place anyway stops
           // the phone's swipe halfway (it seemed not to reach the bottom), and kept the page sideways too.
           if (window.scrollY !== y || window.scrollX !== 0) window.scrollTo(0, y);
         }
       }
+      // F93: the search box finds any row of the roadmap by its number (F86) or its words ("talk button"), on open items only
+      // or on all (starts on open only). Every row is on the page from the start (finished ones folded), so the search and
+      // cmd+F reach all of them; cmd+F isn't limited by the toggle, and Chrome and Safari open a folded part by themselves.
+      // A search shows only the rows it found, opens the folds they sit in, and folds them back when it's changed or cleared.
+      const sxBox = document.getElementById('search-box');
+      const sxSaid = document.getElementById('search-said');
+      const sxWhich = [...document.querySelectorAll('#search [data-which]')];
+      let sxAll = false;
+      const sxOpened = new Set();  // the folds the search opened: 'phase:F' or 'part:roadmap-done'
+      function sxFold(key, open) {
+        const [kind, id] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+        if (kind === 'phase') { if (open) opened.add(id); else opened.delete(id); }
+        else folds.set(id, open);
+        for (const d of app.querySelectorAll('details[data-fold]')) if (d.dataset.fold === key) d.open = open;
+      }
+      function search() {
+        const q = sxBox.value.trim();
+        sxBack();
+        const rows = q ? [...app.querySelectorAll('li[data-sx]')] : [];
+        const label = /^[a-z]\d+(\.\d+)*$/i.test(q) ? q.toUpperCase() : '';
+        const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+        // words: the rows with them in their title; only when no title has them, the rows with them anywhere in their text
+        const has = (li, key) => words.every((w) => li.dataset[key].includes(w));
+        const pool = rows.filter((li) => sxAll || li.dataset.sxOpen);
+        let hits = label ? pool.filter((li) => li.dataset.sx === label || li.dataset.sx.startsWith(`${label}.`)) : pool.filter((li) => has(li, 'sxName'));
+        if (!label && !hits.length) hits = pool.filter((li) => has(li, 'sxText'));
+        // the folds the hits sit in; the ones it opened before and doesn't need any more fold back
+        const need = new Set();
+        for (const li of hits) for (let e = li.parentElement; e && e !== app; e = e.parentElement) if (e.dataset?.fold) need.add(e.dataset.fold);
+        for (const key of [...sxOpened]) if (!need.has(key)) { sxOpened.delete(key); sxFold(key, false); }
+        for (const d of app.querySelectorAll('details[data-fold]')) {
+          if (need.has(d.dataset.fold) && !d.open) { sxOpened.add(d.dataset.fold); sxFold(d.dataset.fold, true); }
+        }
+        sxSaid.hidden = !q;
+        if (!q) return;
+        if (!hits.length) {
+          sxSaid.textContent = `Nothing found for ${q}${sxAll ? '' : ' among the open items (All also searches the finished ones)'}`;
+          return;
+        }
+        sxSaid.textContent = `${hits.length} found${sxAll ? '' : ' among the open items'}; clear the box for the whole page`;
+        // only the rows found, with the folds and parts around them; everything else is taken out of the page until the
+        // box is cleared or changed (out, not only hidden, so the page's other words don't come up in a cmd+F meanwhile)
+        const keep = new Set(hits);
+        for (const li of hits) for (let e = li.parentElement; e && e !== app; e = e.parentElement) keep.add(e);
+        const out = [...app.children].filter((n) => !keep.has(n));
+        out.push(...rows.filter((li) => !keep.has(li)));
+        out.push(...[...app.querySelectorAll('section[data-roadmap] details[data-fold], section[data-roadmap] .detail > *, section[data-roadmap] .card > *')]
+          .filter((n) => !keep.has(n)));
+        for (const n of out) if (n.isConnected) { sxOut.push([n, n.parentNode, n.nextSibling]); n.remove(); }
+      }
+      /** Puts back what the last search took out, in the reverse order (a redraw empties it: the page is new then). */
+      const sxOut = [];
+      function sxBack() {
+        while (sxOut.length) {
+          const [n, parent, next] = sxOut.pop();
+          parent.insertBefore(n, next);
+        }
+      }
+      let sxWait = 0;
+      sxBox.addEventListener('input', () => { clearTimeout(sxWait); sxWait = setTimeout(search, 150); });
+      for (const b of sxWhich) b.addEventListener('click', () => {
+        sxAll = b.dataset.which === 'all';
+        for (const x of sxWhich) x.setAttribute('aria-checked', String(x === b));
+        search();
+      });
       tick();
       setInterval(tick, 3000);
     </script>
