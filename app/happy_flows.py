@@ -17461,7 +17461,7 @@ print("OK")
         r = _sp.run([sys.executable, "-c", child, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         need(r.stdout.strip().endswith("OK"), (r.stdout + r.stderr)[-900:])
         src = (ROOT / "app/direct_line.py").read_text()
-        need("summary = morning_summary()" in src, "the look doesn't send the summary")
+        need("out += morning_summaries()" in src, "the look doesn't send the summary")  # F146: split by line
         return "a night incident that can wait sends nothing and one summary at waking; what can't wait goes"
 
     async def flow224(self) -> str:
@@ -30796,7 +30796,7 @@ console.log(JSON.stringify({{problems: r.problems, job: r.queue.jobs.find((j) =>
             for why in dl.TEAM_KINDS:
                 need(why in dl.KINDS and dl.plain(why, "the facts"), f"H266: the kind {why} has no words")
                 need(dl.line_for(why) == "team", f"H266: {why} isn't on her line")
-            for why in ("mail", "down", "remind", "appt", "weather" if False else "rain"):
+            for why in ("mail", "remind", "appt", "weather" if False else "rain"):  # F146: down and back are hers now
                 need(dl.line_for(why) == "direct", f"H266: Donna's {why} moved to Moneypenny")
             # 2. her text pushes to the same phone as Donna's, titled with her name, a tap opening her chat
             phone = ec.generate_private_key(ec.SECP256R1())

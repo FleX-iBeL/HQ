@@ -93,7 +93,11 @@ VENV_PY = ROOT / ".venv" / "bin" / "python"
 AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")  # at import; agent() reads the variable each time (H266)
 TEAM_AGENT = "moneypenny"  # H266: the team line is hers
 TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team", "estimate-miss", "estimate-misses",
-              "report")  # F145: a report he asked for, written by the team
+              "report",  # F145: a report he asked for, written by the team
+              # F146 (4 November 2026): the build's own messages are hers too, on every HQ: HQ acting up and back, news on
+              # feedback he sent, the heads-up before the call lines restart, and what of them waited through the night.
+              # Without her (switched off or not set up) line_for gives them to Donna, the backup.
+              "down", "back", "feedback-status", "restart", "team-night-summary")
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
 SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
@@ -620,6 +624,9 @@ def push(text: str, title: str | None = None, extra: dict | None = None) -> list
 # is just texting in between". The plain lines (no Claude) come in a few versions, never the same one twice in a row.
 PLAIN = {
     "night-summary": "While you slept: {facts}",
+    "team-night-summary": "From the team while you slept: {facts}",  # F146: the build's held texts, on Moneypenny's line
+    "restart": ["Heads up: {facts}",
+                "Quick one before it happens: {facts}"],  # F146: before the call lines restart
     "jobs": ["The team just wrapped up. All built 🙌",
              "Dev team's done for now, everything's in.",
              "That's a wrap from the team.",
@@ -859,6 +866,12 @@ KINDS = {
                  "be the reason there is no connection\". Short, calm.",
     "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
                       "all-clear in a few words; don't say the other computer came back, it never went away.",
+    "team-night-summary": "He just got up. Some of the team's news waited through the night so it wouldn't wake him (the facts "
+                          "list it: HQ acting up or back, news on his feedback). One short text with what still matters, "
+                          "in plain words, no technical details.",
+    "restart": "The call lines (and maybe the status page) restart in about a minute, for the reason in the facts. A quick "
+               "heads-up: what restarts and why in everyday words, that a call on now drops for a moment and he can ring "
+               "back, and that texts still get through.",
     "night-summary": "He just got up. Some things waited through the night so they wouldn't wake him (the facts list them). One "
                      "short text with what he needs to know: what happened in plain words and what, if anything, still needs "
                      "him. Nothing that resolved itself gets more than a few words. No details, no apology.",
@@ -982,7 +995,7 @@ def _clean(text: str) -> str:
 # me at night." While he sleeps only what can't wait goes out: a time he named himself (a reminder, an appointment he picked, a
 # call he missed), a server down, a refused push, a security warning. The rest waits, and goes in one summary when he's up.
 # [Which kinds count is Claude's first reading of his rule, his to correct.]
-CANT_WAIT = ("remind", "appt", "missed-call", "night-summary")
+CANT_WAIT = ("remind", "appt", "missed-call", "night-summary", "team-night-summary", "restart")  # F146: a heads-up is now or never
 CANT_WAIT_DOWN = ("role", "github", "workspace-push", "beat-")  # a line of a "down" text starts with its incident's key
 SECURITY = re.compile(r"\b(security|sign-?in|password|new device|logged in|login)\b", re.I)
 SUMMARY_MOST = 1500
@@ -1031,6 +1044,18 @@ def morning_summary() -> tuple[str, str] | None:
         return None
     lines = [f"{x['why']}: {' '.join(str(x['facts']).split())}" for x in d]
     return "night-summary", "\n".join(lines)[:SUMMARY_MOST]
+
+
+def morning_summaries() -> list[tuple[str, str]]:
+    """F146: the morning summary split by line: what waited of the team's kinds comes from Moneypenny (team-night-summary,
+    Donna's when she has no line), the rest from Donna. [(why, facts)], empty when nothing waited or he still sleeps."""
+    s = morning_summary()
+    if not s:
+        return []
+    team, own = [], []
+    for ln in s[1].splitlines():
+        (team if ln.split(":", 1)[0] in TEAM_KINDS and line_for(ln.split(":", 1)[0]) == "team" else own).append(ln)
+    return ([("night-summary", "\n".join(own))] if own else []) + ([("team-night-summary", "\n".join(team))] if team else [])
 
 
 def _on_record(item: str, why: str, state: str, line: str = "") -> None:
@@ -1431,9 +1456,7 @@ def watch(q: dict | None = None, *, main: bool = True, incidents_data: list | No
     s["told"] = told
     s["looked"] = now
     if not dry:  # F102: he's up: what waited in the night, in one text
-        summary = morning_summary()
-        if summary:
-            out.append(summary)
+        out += morning_summaries()  # F146: the team's part from Moneypenny
     if not dry:
         _write(path, s)
         for why, facts in out:
@@ -1457,8 +1480,10 @@ def _pass_on(e: dict, write: bool) -> str:
     if write:
         try:
             import ledger
-            ledger.entry(to, f"Escalated by {agent()['name']}: {PLAIN_WHAT.get(str(e.get('key')), 'one of the systems')}",
-                         [e.get("why") or "down", f"Incident {e.get('id')}; {agent()['name']} texted him about it.",
+            with _Env(team_env() if line_for("down") == "team" else {}):  # F146: who texts him about it
+                who = agent()["name"]
+            ledger.entry(to, f"Escalated by {who}: {PLAIN_WHAT.get(str(e.get('key')), 'one of the systems')}",
+                         [e.get("why") or "down", f"Incident {e.get('id')}; {who} texted him about it.",
                           "It closes by itself once the cause is gone; while it stays open it's yours to look at, and to give the team."])
         except Exception as ex:
             print(f"watch: passing {e.get('id')} on to {to}: {ex!r}", file=sys.stderr)
