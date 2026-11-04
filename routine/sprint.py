@@ -319,8 +319,11 @@ TEAM_NOTE = re.compile(r"(?:\b(?:Built|Done|Fixed|Shipped|Released|Merged|Finish
                        r"|\bQA (?:passed|failed) \((?:by hand|job \d+))")
 
 
+# F140: a label may carry a short aside in brackets before its colon, "His words (3 November 2026, 23:25): …", and reads
+# exactly as "His words: …"; the aside is no part of the field, so its date or time is never read as a quote or a source.
+FIELD_ASIDE = r"(?:\s*\([^()\n|]{1,60}\))?"
 _ASK_GOES_ON = re.compile(r"\b(?:what'?s asked|what'?s wrong|what right looks like|done means|how to check|his words|"
-                         r"out of scope|sources?)\s*:", re.I)
+                         r"out of scope|sources?)" + FIELD_ASIDE + r"\s*:", re.I)
 
 
 def team_note_at(desc):
@@ -890,7 +893,7 @@ def field_texts(line):
     ask = _ROW_NOTE.sub(" ", ask_of(line))  # F105: the page's own note on a row is no part of its last field
     pos = []
     for key, pat in FIELD_LABELS:
-        for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")\s*:\s*", ask, re.I):
+        for m in re.finditer(r"(?:^|[\s(;.,*])(?:" + pat + r")" + FIELD_ASIDE + r"\s*:\s*", ask, re.I):
             pos.append((m.end(), key, m.start()))
     pos += [(m.end(), None, m.start()) for m in ADDITION.finditer(ask)]
     pos.sort()
@@ -1050,7 +1053,7 @@ def ready_fields(row, ws=None):
     # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
     # something, it needs his yes with a date ("his yes, 29 October 2026"); an empty one still says nothing.
     add = ft["additions"].strip(" .,;:*")
-    has_label = bool(re.search(r"(?:^|[\s(;.,*])(?:" + dict(FIELD_LABELS)["additions"] + r")\s*:", ask_of(row["line"]), re.I))
+    has_label = bool(re.search(r"(?:^|[\s(;.,*])(?:" + dict(FIELD_LABELS)["additions"] + r")" + FIELD_ASIDE + r"\s*:", ask_of(row["line"]), re.I))
     none = bool(re.fullmatch(r"none|nothing|no(?:ne)? additions?", add, re.I))
     yes = bool(re.search(r"\byes\b", add, re.I) and _DATE.search(add))
     if not has_label:
@@ -1063,7 +1066,14 @@ def ready_fields(row, ws=None):
         a_ok, a_why = False, ("an addition without his yes and its date: it goes on the sit-down list first (F81), "
                               "or write his yes with the date")
     out["additions"] = {"ok": a_ok, "text": add or ("none" if not has_label else ""), "why": a_why}
-    named = [x for x in re.split(r"[;,]| and ", ft["sources"]) if x.strip()]
+    named = []
+    for x in re.split(r"[;,]| and ", ft["sources"]):
+        if not x.strip():
+            continue
+        if named and not re.search(r"[A-Za-z]", x):  # F140: no word in it ("3 November 2026, 23:25", "schedule.py:125 and :391"): it is the one before's
+            named[-1] += ", " + x.strip()
+        else:
+            named.append(x)
     labels = {r["label"] for r in open_rows()}
     held = {x.strip(): _source_ok(x, ws, labels) for x in named}
     bad = [x for x, ok in held.items() if not ok]

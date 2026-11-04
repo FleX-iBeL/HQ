@@ -21160,6 +21160,89 @@ print(json.dumps(out))
             shutil.rmtree(base, ignore_errors=True)
         return ("with one-way sync on, synced files are the main's on the backup and its own files stay local; a Write of 90 KB or less "
                 "is handed whole as put and written by the main, a bigger one is a not yet, an Edit is made by the main")
+    async def flow477(self) -> str:
+        """F140, no Claude: a field label with a short aside in brackets before its colon reads as the label. On a throwaway
+        workspace with a made-up call, three rows written the writer's own way (jobs.py write-row): one as Moneypenny wrote it on
+        3 November 2026, "His words (7 January 2026, 10:31): ..." and Sources naming the call with its time after a comma and a
+        file with two line numbers; one in the plain form; one in the aside form with a quote he never said. field_texts reads
+        His words and Sources in the aside form as in the plain one, the aside's date and time are neither a quote nor a source,
+        a bare time or line number stays with the source before it; the (stand-in) review passes all three, and with the fields
+        on the Ready mark goes on the first two and is refused on the made-up quote."""
+        import subprocess as _sp
+        import time as _t
+        ws, env = self._h298_ws("f140")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        (ws / "HQ/calls/2026-01-07-1030.md").write_text(
+            "# Call 7 January 2026, 10:30\n\nStarted 10:30:00 · agent Moneypenny · brain opus\n\n"
+            "- 10:31 **Me:** When the list is empty it should say nothing planned yet, so it feels less final.\n- 10:32 **HQ:** Noted.\n")
+        t0 = int(_t.time())
+        env = {**env, "HQ_SPRINT": str(ws / "HQ/sprint.json"), "HQ_READY_FIELDS": "1", "HQ_LOOK": "0", "HQ_REVIEW_FAKE": "auto",
+               "HQ_REVIEW_NOW": str(t0)}
+        for k in ("HQ_REVIEW", "HQ_REVIEW_QUIET", "HQ_JOB", "HQ_DIRECT_AGENT"):
+            env.pop(k, None)
+
+        def tool(name, *a):
+            return _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+
+        rows = ('The empty list is too final. His words (7 January 2026, 10:31): "it should say nothing planned yet, so it feels less final". '
+                'What right looks like: the empty list says Nothing planned yet. How to check: flow 10 with nothing planned. '
+                'Sources: his call of 7 January 2026, 10:31; routine/sprint.py:887 and :1029.',
+                'The empty list, the plain way. His words: "it should say nothing planned yet, so it feels less final". '
+                'What right looks like: it says so. Sources: the call of 7 January 2026.',
+                'A made-up one. His words (7 January 2026, 10:31): "make the dock purple with stars". What right looks like: purple. '
+                'Sources: the call of 7 January 2026.')
+        r = tool("review.py", "tick")  # the first start takes the rows already there as reviewed; the new ones come after it
+        need(r.returncode == 0, f"the review's first tick: {r.stdout[-300:]} {r.stderr[-500:]}")
+        labels = []
+        for row in rows:
+            r = tool("jobs.py", "write-row", "--bug", row)
+            m = re.search(r"\b(F\d+) is on the planning", r.stdout)
+            need(r.returncode == 0 and m, f"the writer didn't put the row on the planning: {r.stdout[-300:]} {r.stderr[-500:]}")
+            labels.append(m.group(1))
+        aside, plain, made_up = labels
+        code = ("import sys, json; sys.path.insert(0, %r); import sprint as S\n"
+                "out = {}\n"
+                "for lb in %r:\n"
+                "    row = S.row_of(lb); f = S.ready_fields(row)\n"
+                "    out[lb] = {'ft': S.field_texts(row['line']), 'ok': f['ok'], 'quotes': f['his_words']['quotes'], 'hw_why': f['his_words']['why'],\n"
+                "               'named': f['sources']['named'], 'held': f['sources']['held'], 'src_why': f['sources']['why']}\n"
+                "print('RESULT ' + json.dumps(out))") % (str(ROOT / "routine"), labels)
+        d = json.loads(re.search(r"RESULT (.*)", self._h298_py(env, code)).group(1))
+        a, p, b = d[aside], d[plain], d[made_up]
+        need(a["ft"]["his_words"].startswith('"it should say nothing planned yet') and "10:31" not in a["ft"]["his_words"]
+             and "January" not in a["ft"]["his_words"], f"His words in the aside form isn't read as the field: {a['ft']}")
+        need(a["quotes"] == ["it should say nothing planned yet, so it feels less final"] and a["quotes"] == p["quotes"],
+             f"the aside form's quote isn't the plain form's: {a['quotes']} {p['quotes']}")
+        need([x.strip() for x in a["named"]] == ["his call of 7 January 2026, 10:31", "routine/sprint.py:887, :1029."],
+             f"the aside's time or a line number was read as a source of its own: {a['named']}")
+        need(all(a["held"].values()) and "call of 7 January 2026" in a["held"].values() and not any(k.strip() in ("10:31", ":1029.") for k in a["held"]),
+             f"the sources don't hold: {a['held']} {a['src_why']}")
+        need(a["ok"] and p["ok"], f"a row whose fields are right doesn't hold: aside {a['hw_why']} {a['src_why']}; plain {p['hw_why']} {p['src_why']}")
+        need(not b["ok"] and b["ft"]["his_words"].startswith('"make the dock') and "not found in the calls" in b["hw_why"],
+             f"the aside form lets a made-up quote through, or doesn't read it: {b}")
+        # the review: seen, then quiet long enough, a stand-in pass for each
+        st = lambda: json.loads((ws / "HQ/sprint.json").read_text()).get("review", {}).get("rows", {})  # noqa: E731
+        for i in range(1, 13):
+            env["HQ_REVIEW_NOW"] = str(t0 + i * 400)
+            r = tool("review.py", "tick")
+            need(r.returncode == 0, f"the review's tick: {r.stdout[-300:]} {r.stderr[-500:]}")
+            for _ in range(100):
+                if not any(v.get("pending") for v in st().values()):
+                    break
+                _t.sleep(0.1)
+            if all(st().get(lb, {}).get("verdict") == "pass" for lb in labels):
+                break
+        need(all(st().get(lb, {}).get("verdict") == "pass" for lb in labels), f"the review didn't pass the three rows: {st()}")
+        for lb in (aside, plain):
+            r = tool("sprint.py", "ready", lb)
+            need(r.returncode == 0 and "marked ready" in r.stdout, f"{lb} was refused the Ready mark: {r.stdout} {r.stderr}")
+        r = tool("sprint.py", "ready", made_up)
+        need(r.returncode != 0 and "not found" in r.stdout + r.stderr, f"the made-up quote got the Ready mark: {r.stdout} {r.stderr}")
+        out = tool("sprint.py", "fields", aside).stdout
+        need(f"{aside}: the fields hold." in out and "his call of 7 January 2026, 10:31 (call of 7 January 2026)" in out, f"fields doesn't say it: {out}")
+        return ("a label with an aside in brackets reads as the label: His words and Sources the same as in the plain form, the aside's date and "
+                "time no quote or source, a bare time or line number kept with the source before it; reviewed, marked ready; a made-up quote still refused")
+
     async def flow474(self) -> str:
         """The walkthrough on keeping HQ running, no Claude: MAINTAINING.md has its sections (the two computers, restarts, releases, the usage,
         the doors, the status page, the tests, the privacy check, checkpoints, what never to do); Moneypenny's start carries its index, with the
@@ -38063,6 +38146,7 @@ FLOWS = {
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
+    477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
