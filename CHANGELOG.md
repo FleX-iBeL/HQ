@@ -4,6 +4,14 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 1.0.0 · 4 November 2026
+
+- Your data: A feature in pieces you already had on stays on: it's noted as turned on before HQ kept who turned it on. Going back a version undoes it.
+
+- Your data: A workspace without backend switches gets the briefing on, so a call starts small, as on a fresh install. Going back a version undoes it.
+
+- Your data: The five backend switches are on by default: an HQ whose switches are still the ones HQ gave it gets the open line, one-way sync and the planning index too. Going back a version undoes it.
+
 - HQ's own tests on the second computer can no longer reach your real to-do list on the main one. A test that lost track of its own memory used that computer's real link to the main and added empty rows there; now any test that would use the real link is stopped, the tests that did it keep to their own folder, and a new test checks it (F137).
 - Items built and checked by hand get their proof from one test run: the quick set runs once on the commit, each item's own tests run after it, and every item with changes in that commit gets its own record, red only for what failed for it or for all. QA only passes an item on a run that holds all of its changes, and a run stopped by its time limit cleans up after itself (F121).
 - Your own extensions can bring their own tests. Put them in a folder inside the extension and name it under "flows" in its extension.json: HQ runs them every night together with its own checks, each on a throwaway copy so nothing touches your real files, and when one fails the morning's result names your extension, not HQ. You can also run them yourself with app/extensions.py flows. EXTENSIONS.md says how.
