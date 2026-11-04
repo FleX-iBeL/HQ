@@ -1218,7 +1218,8 @@ _PROMISE = re.compile(r"\b(I'll|I will|I'm going to|next I|then I|I can now|so I
 def _promises(text: str) -> bool:
     """Her text ends on a step she says she'll take herself, not on a question for him."""
     tail = (text or "").strip().split("\n\n")[-1]
-    return bool(_PROMISE.search(text or "")) and "?" not in tail
+    waits = re.search(r"\b(once you|until you|your call|waiting on you|when you answer|if you|no change|nothing'?s moved)\b", text or "", re.I)
+    return bool(_PROMISE.search(text or "")) and "?" not in tail and not waits
 
 
 def reply() -> str | None:
@@ -1607,15 +1608,10 @@ if __name__ == "__main__":
     elif cmd == "reply":
         print(reply() or "")
     elif cmd == "carry":  # HQ puts her back to work on what he already said, without a new text from him
-        answer = _answer(CARRY_NOTE + " What he already answered in the chat stands: use it, never ask it again.", [])
+        extra = " ".join(args[1:])
+        answer = _answer(CARRY_NOTE + " What he already answered in the chat stands: use it, never ask it again. " + extra, [])
         add("agent", answer, "reply")
         push(answer)
-        for _k in range(CARRY_MOST):
-            if unanswered() or not _promises(answer):
-                break
-            answer = _answer(CARRY_NOTE, [])
-            add("agent", answer, "reply")
-            push(answer)
         print(answer)
     elif cmd == "reset":  # her chat starts fresh: the thread keeps every line, her view begins after this mark
         print(json.dumps(add("agent", "(Chat reset: she starts fresh from here.)", "reset", quiet=True), ensure_ascii=False))
