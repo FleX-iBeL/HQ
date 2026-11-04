@@ -16026,6 +16026,128 @@ print("OK")
         need("direct_line.py text restart" in m and "direct_line.py text remind" not in m, "the restart steps still send the heads-up as Donna's reminder")
         return "the four build messages from Moneypenny, Donna's only without her: " + ", ".join(said)
 
+    async def flow483(self) -> str:
+        """Real QA, no Claude: a row whose build landed before real QA existed (its team job sent before real QA's merge, 61fe185,
+        4 November 2026 22:26) is still judged by her tests: qatests.py check LABEL --before COMMIT runs the must-fail check on a
+        throwaway copy of COMMIT, the code before the build, instead of HEAD. On a throwaway repo (the code before, the build on top,
+        a side branch) and a throwaway planning: without --before, tests of a build that's already in fail to seal (they pass on
+        HEAD); with --before the commit before the build they seal, and the seal keeps the commit; a row whose job was sent after
+        real QA's merge, or that has no team job, is refused; a commit that isn't an ancestor of HEAD, or isn't a commit, is refused;
+        tests that already pass on COMMIT are refused. While the old job is parked her next round may seal again; while it runs, not.
+        The end run on the built code is green."""
+        import shutil as _sh
+        import subprocess as _sp
+        ws, env = self._h298_ws("qabefore")
+        d = self.tmp / "qabefore"
+        d.mkdir(exist_ok=True)
+        repo = d / "repo"
+        repo.mkdir()
+        g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True).stdout.strip()  # noqa: E731
+        g("init", "-q", "-b", "main")
+        g("config", "user.email", "flow@example.invalid")
+        g("config", "user.name", "flow 483")
+        (repo / "page.txt").write_text("Nothing planned.\n")
+        g("add", "page.txt")
+        g("commit", "-q", "-m", "the code before the build")
+        before = g("rev-parse", "HEAD")
+        g("checkout", "-q", "-b", "side")
+        (repo / "side.txt").write_text("elsewhere\n")
+        g("add", "side.txt")
+        g("commit", "-q", "-m", "a side branch, never merged")
+        side = g("rev-parse", "HEAD")
+        g("checkout", "-q", "main")
+        (repo / "page.txt").write_text("Nothing planned yet.\n")
+        g("commit", "-q", "-am", "the team's build, before real QA")
+        built = g("rev-parse", "HEAD")
+        words = 'His words: "The empty schedule says Nothing planned. I\'d like it to say Nothing planned yet."'
+        rows = "".join(f"| ⬜ | {lab} {title} | What's wrong: the empty schedule's words. Done means: it says Nothing planned yet. {words} | | | |\n"
+                       for lab, title in (("F9483", "Sent before real QA"), ("F9484", "Sent after real QA"), ("F9485", "Never sent")))
+        jobs = ("- Job 901 · paused: ended, no record · agreed 2026-11-04 20:29 · F9483 on the HQ roadmap, sent to the team from the "
+                "status page: read the F9483 row and do what it says. ⟪item r-f9483⟫ F9483\n"
+                "- Job 902 · paused: ended, no record · agreed 2026-11-04 22:40 · F9484 on the HQ roadmap, sent to the team from the "
+                "status page: read the F9484 row and do what it says. ⟪item r-f9484⟫ F9484\n")
+        rm = ws / "HQ/roadmap.md"
+        t = rm.read_text()
+        head = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+        need(head in t and "**Routine:** on\n" in t, "the template's roadmap changed shape")
+        rm.write_text(t.replace(head, head + rows, 1).replace("**Routine:** on\n", jobs + "\n**Routine:** on\n", 1))
+        seals = d / "seals"
+        env = {**env, "HQ_PROOF_ROOT": str(repo), "HQ_QA_SEALS": str(seals), "HQ_SPRINT": str(ws / "HQ/sprint.json")}
+        good = ("#!/usr/bin/env python3\nimport sys, pathlib\nhq = pathlib.Path(sys.argv[1])\nsaid = (hq / 'page.txt').read_text().strip()\n"
+                "print(('PASS ' if said == 'Nothing planned yet.' else 'FAIL ') + 'says_yet' + ('' if said == 'Nothing planned yet.' else ': it says ' + said))\n"
+                "print(('PASS ' if said != 'Nothing planned.' else 'FAIL ') + 'old_gone' + ('' if said != 'Nothing planned.' else ': the old words stand'))\n")
+        passes = good + "print('PASS page_there')\n"
+
+        def tests(lab, script, extra=()):
+            f = ws / "HQ/qa-tests" / lab
+            f.mkdir(parents=True, exist_ok=True)
+            (f / "test.py").write_text(script)
+            (f / "tests.json").write_text(json.dumps({"sentences": [{"his": "The empty schedule says Nothing planned.", "tests": ["old_gone", *extra]},
+                                                                    {"his": "I'd like it to say Nothing planned yet.", "tests": ["says_yet"]}],
+                                                      "tests": {"old_gone": "the old words are off the page", "says_yet": "the page says Nothing planned yet.",
+                                                                "page_there": "the page is there"}}))
+
+        def qt(*a):
+            r = _sp.run([sys.executable, str(ROOT / "routine/qatests.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+            return r.returncode, (r.stdout + r.stderr).strip()
+
+        def sealed(lab):
+            s = json.loads((ws / "HQ/sprint.json").read_text()) if (ws / "HQ/sprint.json").exists() else {}
+            return ((s.get("qa_tests") or {}).get(lab) or {}).get("sealed") or {}
+
+        def job_state(n, state):
+            t = rm.read_text()
+            t = re.sub(rf"^(- Job {n} · )[^·]+?( · agreed)", lambda m: m.group(1) + state + m.group(2), t, count=1, flags=re.M)
+            rm.write_text(t)
+
+        said = []
+        tests("F9483", good)
+        code, out = qt("check", "F9483")
+        need(code != 0 and "already pass" in out and not sealed("F9483"), f"without --before, tests of a build that's in already seal: {code} {out[-300:]}")
+        said.append("without --before refused (they pass on HEAD)")
+        code, out = qt("check", "F9483", "--before", side)
+        need(code != 0 and "ancestor" in out and not sealed("F9483"), f"a commit that isn't an ancestor of HEAD: {code} {out[-300:]}")
+        code, out = qt("check", "F9483", "--before", "0" * 40)
+        need(code != 0 and "isn't a commit" in out and not sealed("F9483"), f"a commit that isn't one: {code} {out[-300:]}")
+        said.append("a side commit and a made-up one refused")
+        tests("F9483", passes, ("page_there",))
+        code, out = qt("check", "F9483", "--before", before)
+        need(code != 0 and "page_there" in out and "already pass" in out and not sealed("F9483"), f"a test that passes on COMMIT: {code} {out[-300:]}")
+        code, out = qt("check", "F9483", "--before", built)
+        need(code != 0 and "already pass" in out and not sealed("F9483"), f"--before HEAD, where the build is in: {code} {out[-300:]}")
+        said.append("tests passing on COMMIT refused")
+        tests("F9484", good)
+        code, out = qt("check", "F9484", "--before", before)
+        need(code != 0 and "after real QA" in out and "902" in out and not sealed("F9484"), f"a row sent after real QA's merge: {code} {out[-300:]}")
+        tests("F9485", good)
+        code, out = qt("check", "F9485", "--before", before)
+        need(code != 0 and "no team job" in out and not sealed("F9485"), f"a row never sent to the team: {code} {out[-300:]}")
+        said.append("a row sent after real QA and one never sent refused")
+        tests("F9483", good)
+        code, out = qt("check", "F9483", "--before", before)
+        s = sealed("F9483")
+        need(code == 0 and s.get("fp") and s.get("before_commit") == before and (s.get("before") or {}).get("head") == before
+             and (s.get("before") or {}).get("results") == {"old_gone": False, "says_yet": False} and s.get("head") == built,
+             f"--before on a row sent before real QA didn't seal on the commit before: {code} {out[-300:]} {json.dumps(s)[:400]}")
+        need(Path(s["copy"]).is_dir() and str(seals) in s["copy"], f"the program's copy isn't kept: {s.get('copy')}")
+        said.append(f"--before {before[:7]} sealed with the commit kept")
+        (ws / "HQ/qa-tests/F9483/test.py").write_text(good + "# round 2: the review's points, answered\n")
+        code, out = qt("check", "F9483", "--before", before)
+        need(code == 0 and sealed("F9483").get("fp") != s["fp"], f"her next round, the old job parked: {code} {out[-300:]}")
+        job_state(901, "running since 23:10")
+        (ws / "HQ/qa-tests/F9483/test.py").write_text(good + "# round 3\n")
+        code, out = qt("check", "F9483", "--before", before)
+        need(code != 0 and "with the team" in out, f"a new seal while the old job runs: {code} {out[-300:]}")
+        (ws / "HQ/qa-tests/F9483/test.py").write_text(good + "# round 2: the review's points, answered\n")
+        job_state(901, "paused: ended, no record")
+        said.append("a next round sealed while the job is parked, not while it runs")
+        code, out = qt("run", "F9483", str(repo))
+        got = json.loads(out.splitlines()[-1]) if out else {}
+        need(got.get("green") and got.get("passed") == got.get("ran") == 2, f"the end run on the built code: {out[-300:]}")
+        said.append("the end run on the built code green")
+        _sh.rmtree(seals, ignore_errors=True)
+        return "; ".join(said)
+
     async def flow481(self) -> str:
         """nowroad, no Claude: his now reaches the team today, the whole road on real rows of a throwaway planning. A row Moneypenny writes
         from a text holds its words once (the Model column empty), a second row for the same thing is refused naming the first, his text by its line and time is a source; on a row of the old shape, words twice, reword changes the ask only and
@@ -38827,6 +38949,7 @@ FLOWS = {
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now of today starts it with the open points, an old or unquoted now refused, no test line on his ledger", False, "flow481"),
     482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
+    483: ("Real QA: a row whose build landed before real QA is judged by her tests with check --before COMMIT: sealed on the commit before the build, the commit kept; a row sent after real QA or never sent, a commit not an ancestor, tests passing on COMMIT refused; the end run on the built code green", False, "flow483"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),

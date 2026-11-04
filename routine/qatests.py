@@ -26,6 +26,9 @@ before, or the run at the end. The team sees her tests as the target and can't c
 
     python3 routine/qatests.py new LABEL       start her folder: his sentences in tests.json, a test.py to fill in
     python3 routine/qatests.py check LABEL     the two hard checks; seals them when they hold
+    python3 routine/qatests.py check LABEL --before COMMIT
+                                               the same, for a row whose build went to the team before real QA existed: the
+                                               must-fail run is on COMMIT (the code before the build), not HEAD
     python3 routine/qatests.py review LABEL    one round of their own review (the real reviewer), ROUNDS at most
     python3 routine/qatests.py show LABEL      where they stand
     python3 routine/qatests.py run LABEL HQDIR the sealed tests on HQDIR (what proof.py does at the end)
@@ -56,6 +59,12 @@ MODEL = os.environ.get("HQ_QA_REVIEW_MODEL") or os.environ.get("HQ_REVIEW_MODEL"
 EFFORT = os.environ.get("HQ_QA_REVIEW_EFFORT") or "medium"
 READS = 20000
 _LINE = re.compile(r"^\s*(PASS|FAIL)\s+([A-Za-z0-9_.-]+)\s*(?::\s*(.*))?$")
+# Real QA went live with its merge, 61fe185 (4 November 2026 22:26:31). A row whose team job was sent before that was built without
+# her tests, and its build may already be on dev: then no test of hers can fail "on HQ's code as it is". check --before COMMIT
+# judges such a row on COMMIT, the code before its build, and only such a row (job 508, F146: real QA checks what was delivered
+# against what he asked, also for what was built before it existed).
+GATE_AT = 1793827591
+GATE_SAID = "4 November 2026 22:26, merge 61fe185"
 
 SYSTEM = (
     "You review the QA tests written for one item of a software project, before the build team starts on it. You did not write them. "
@@ -227,8 +236,50 @@ def _head() -> str:
     return subprocess.run(["git", "-C", str(proof.ROOT), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
 
 
-def check(label: str) -> tuple[bool, str]:
-    """The two hard checks on her tests as they stand; sealed when both hold. (ok, what to say)."""
+def _git(*a) -> subprocess.CompletedProcess:
+    import proof
+    return subprocess.run(["git", "-C", str(proof.ROOT), *a], text=True, capture_output=True)
+
+
+def _team_jobs(js, label) -> list:
+    """Every job on the list that is for row LABEL (its item, or its text naming the row), in any state."""
+    l = re.escape(label)
+    pat = re.compile(rf"(?<![\w.]){l} on the (hq )?roadmap\b|\bthe {l} row\b", re.I)
+    return [j for j in js if ((j.get("item") or {}).get("label") or "").upper() == label or pat.search(j.get("text") or "")]
+
+
+def _agreed_at(j) -> float | None:
+    try:
+        return time.mktime(time.strptime(j.get("agreed") or "", "%Y-%m-%d %H:%M"))
+    except (ValueError, OverflowError):
+        return None
+
+
+def before_refuses(label: str, js, commit: str, head: str) -> tuple[str | None, str | None]:
+    """check --before COMMIT: (why it's refused, or None; COMMIT's full id). Only for a row with a team job sent before real QA
+    went live, and only on a commit that is in HQ's code as it is (an ancestor of HEAD)."""
+    mine = _team_jobs(js, label)
+    if not mine:
+        return (f"Refused: --before is for a row whose build went to the team before real QA went live ({GATE_SAID}); {label} has no "
+                f"team job. Its tests are written before its build: python3 routine/qatests.py check {label}, without --before."), None
+    early = [j for j in mine if (_agreed_at(j) or GATE_AT) < GATE_AT]
+    if not early:
+        named = ", ".join(f"job {j['n']} (sent {j.get('agreed')})" for j in mine)
+        return (f"Refused: {label}'s team job went to the team after real QA went live ({GATE_SAID}): {named}. Its tests are held "
+                f"against the code as it is: python3 routine/qatests.py check {label}, without --before."), None
+    r = _git("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    sha = r.stdout.strip()
+    if r.returncode or not sha:
+        return f"Refused: {commit} isn't a commit in HQ's code, so there's nothing to run her tests on. Nothing sealed.", None
+    if _git("merge-base", "--is-ancestor", sha, head).returncode:
+        return (f"Refused: {sha[:7]} isn't an ancestor of HQ's code as it is ({head[:7]}), so it isn't the code {label}'s build "
+                "started from. Give the commit just before the build (for example its first commit followed by ^). Nothing sealed."), None
+    return None, sha
+
+
+def check(label: str, before: str | None = None) -> tuple[bool, str]:
+    """The two hard checks on her tests as they stand; sealed when both hold. (ok, what to say). before: a commit, for a row
+    whose build went to the team before real QA went live (before_refuses): the tests must fail on it instead of on HEAD."""
     label = label.strip().upper()
     row = _row(label)
     if not row:
@@ -240,6 +291,8 @@ def check(label: str) -> tuple[bool, str]:
                        f"(python3 routine/qatests.py new {label} starts them).")
     _, js, _ = q.read()
     j = q.with_team(js, label)
+    if j and before and not j["state"].startswith(("running", "stop asked")):
+        j = None  # --before: the old job built without her tests; parked or waiting, her next round may seal while it doesn't run
     if j and (state(label).get("sealed") or {}).get("fp"):  # the team builds to them: no new seal while it does, by anyone
         return False, (f"Refused: {label} is with the team (job {j['n']}, {j['state']}): its QA tests stay as they were sealed while it builds. "
                        "A change to them waits until the job is done or stopped.")
@@ -252,7 +305,13 @@ def check(label: str) -> tuple[bool, str]:
     names = named_tests(t)
     import proof
     head = _head()
-    wt = proof._copy(head)
+    base = head
+    if before:
+        no, sha = before_refuses(label, js, before, head)
+        if no:
+            return False, no
+        base = sha
+    wt = proof._copy(base)
     try:
         got, out = run_on(d, wt)
     finally:
@@ -262,6 +321,9 @@ def check(label: str) -> tuple[bool, str]:
         return False, (f"Refused: {label}'s test.py never reports {', '.join(unrun)} (a line \"PASS name\" or \"FAIL name: why\" for each), "
                        f"so those tests don't exist. Its output: {out[-400:]!r}. Nothing sealed.")
     passing = [n for n in names if got.get(n)]
+    if passing and before:
+        return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {base[:7]}, the code before its build "
+                       "(--before), so they don't test what he asked for. Each test must fail there and pass on the built code. Nothing sealed.")
     if passing:
         return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on HQ's code as it is ({head[:7]}), before any "
                        "build, so they don't test what he asked for. Each test must fail now and pass once it's built. Nothing sealed.")
@@ -271,15 +333,18 @@ def check(label: str) -> tuple[bool, str]:
     for f in ("test.py", "tests.json"):
         shutil.copy2(os.path.join(d, f), os.path.join(keep, f))
     sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names,
-              "before": {"head": head, "results": {n: got[n] for n in names}}}
+              "before": {"head": base, "results": {n: got[n] for n in names}}}
+    if before:  # the run before was on this commit, not on HQ's code as it was: the seal says so
+        sealed.update({"before_commit": base, "head": head})
     _put(label, lambda e: e.update({"sealed": sealed}))
     try:
         import trail
-        trail.step(trail.resolve(label), "qa_tests", fp=fp[:16], tests=len(names), before=head[:12])
+        trail.step(trail.resolve(label), "qa_tests", fp=fp[:16], tests=len(names), before=base[:12], **({"given": True} if before else {}))
     except Exception:
         pass
+    on = f"{base[:7]}, the code before its build (--before)" if before else f"{head[:7]}"
     return True, (f"{label}'s QA tests are sealed: {len(names)} test(s) for his {sealed['his']} sentence(s), every one failing on "
-                  f"{head[:7]} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
+                  f"{on} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
 
 
 def why_not(row, now: bool = False) -> str | None:
@@ -582,7 +647,14 @@ def main(argv) -> int:
     if len(argv) >= 2 and argv[0] in ("check", "review", "new", "show"):
         lab = argv[1]
         if argv[0] == "check":
-            ok, words = check(lab)
+            before = None
+            if "--before" in argv[2:]:
+                i = argv.index("--before", 2)
+                if i + 1 >= len(argv) or argv[i + 1].startswith("-"):
+                    print("Refused: --before needs a commit: python3 routine/qatests.py check LABEL --before COMMIT")
+                    return 1
+                before = argv[i + 1]
+            ok, words = check(lab, before)
             print(words)
             return 0 if ok else 1
         if argv[0] == "review":
