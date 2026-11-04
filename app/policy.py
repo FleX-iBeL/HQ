@@ -214,6 +214,7 @@ _HQ_SCRIPT = re.compile(r"(?:^|[\s/])(?:routine|app|status|install)/[\w.-]+\.(?:
 
 
 def _her_look(cmd: str, runs: str) -> bool:
+    cmd = re.sub(r"\d?>\s*/dev/null|\d>&\d", " ", cmd)  # errors sent nowhere or to the output: not a file written
     if _LOOK_WRITES.search(cmd) or re.search(_CODE_WRITES, runs):
         return False
     return not _HQ_SCRIPT.search(cmd)

@@ -1267,6 +1267,9 @@ def history(ids=(), most: int = 16) -> str:
     text), a quiet note of hers in it as hers (F79), each once."""
     ids = set(i for i in ids if i)
     recent = [m for m in thread(last=most + len(ids)) if m.get("id") not in ids][-most:]
+    cut = [k for k, m in enumerate(recent) if m.get("why") == "reset"]  # his "reset her chat": she starts fresh from there
+    if cut:
+        recent = recent[cut[-1] + 1:]
     if not ids and recent and recent[-1].get("from") == "me":  # called without ids: his newest is the new text, as before
         recent = recent[:-1]
     return "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
@@ -1599,6 +1602,8 @@ if __name__ == "__main__":
         print(json.dumps(m, ensure_ascii=False) if m else "quiet")
     elif cmd == "reply":
         print(reply() or "")
+    elif cmd == "reset":  # her chat starts fresh: the thread keeps every line, her view begins after this mark
+        print(json.dumps(add("agent", "(Chat reset: she starts fresh from here.)", "reset", quiet=True), ensure_ascii=False))
     elif cmd == "reply-bg" and len(args) >= 2 and args[1] in ("team", "donna"):  # the backup handed her answer here
         env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_HERE"}
         if args[1] == "team" and team_on():
