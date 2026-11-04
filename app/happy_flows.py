@@ -28175,6 +28175,156 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
             raise Failed("; ".join(bad))
         return f"{got['label']}: {got['stopped']}"
 
+    async def flow476(self) -> str:
+        """F138, no Claude: what stopped the real chain check. A test run started inside a job's tmux pane ends only its own
+        tmux server, never the pane's (tmux reads $TMUX before TMUX_TMPDIR; the wall's kill-server ended job 497 with signal 1), and
+        the wall hands no pane on; a routine's window opens on the server TMUX_TMPDIR names. A job whose window closes under it
+        (SIGHUP, nothing of the routine's asked it) leaves a note, and the routine's real minute brings it back the crash's way:
+        run once again, first in line, its item carried and on the record; a rerun that loses its window too isn't queued again;
+        without a note it's the usual ended without a done mark. The chain's driver types a say-so once per job however many
+        minutes pass, says a refusal once, follows a rerun, and stops in one line on a job that ended without a done mark."""
+        import shutil as _sh
+        import signal as _sig
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
+        bad = []
+        def check(ok, what):
+            if not ok:
+                bad.append(what)
+        # 1. the tmux part: a pane's server survives a test run's cleanup inside it
+        tmux = _sh.which("tmux")
+        if hqpaths.IS_LINUX and tmux:
+            box = Path(f"/tmp/hqf138-{os.getpid()}")
+            box.mkdir(exist_ok=True)
+            outer = str(box / "o")
+            wall = self.tmp / f"f138wall{os.getpid()}"
+            wall.mkdir(exist_ok=True)
+            got = box / "got.json"
+            other = box / "t2"
+            pane = box / "pane.py"
+            pane.write_text(
+                "import json, os, subprocess, sys, time\n"
+                f"sys.path.insert(0, {str(ROOT / 'routine')!r})\n"
+                "import hqpaths, testwall\n"
+                f"w, got, other = {str(wall)!r}, {str(got)!r}, {str(other)!r}\n"
+                "out = {'pane': bool(os.environ.get('TMUX'))}\n"
+                "t = testwall.tmux_dir(w); os.makedirs(t, exist_ok=True)\n"
+                "nopane = lambda **k: {**{x: v for x, v in os.environ.items() if x not in ('TMUX', 'TMUX_PANE')}, **k}\n"
+                "subprocess.run(['tmux', 'new-session', '-d', '-s', 'inner', 'sleep 60'], env=nopane(TMUX_TMPDIR=t))\n"
+                "sock = os.path.join(t, 'tmux-%d' % os.getuid(), 'default')\n"
+                "out['inner_was'] = os.path.exists(sock)\n"
+                "testwall.stop_tmux(w)\n"
+                "out['inner_gone'] = subprocess.run(['tmux', '-S', sock, 'has-session'], capture_output=True).returncode != 0\n"
+                "env = testwall.wall_env(w, [])\n"
+                "out['wall_pane'] = [k for k in ('TMUX', 'TMUX_PANE') if k in env]\n"
+                "os.makedirs(other, exist_ok=True)\n"
+                "os.environ.update({'TMUX_TMPDIR': other, 'HQ_UNIT': 'f138x'}); os.environ.pop('XDG_RUNTIME_DIR', None)\n"
+                "import tick\n"
+                "open(os.path.join(other, 'w.sh'), 'w').write('sleep 30\\n')\n"
+                "try:\n    tick.open_window(os.path.join(other, 'w.sh'), 'job-1')\nexcept Exception as e:\n    out['open'] = repr(e)\n"
+                "out['own'] = subprocess.run(['tmux', '-S', os.path.join(other, 'tmux-%d' % os.getuid(), 'default'), 'has-session', '-t', '=f138x-job-1'], capture_output=True, env=nopane()).returncode == 0\n"
+                "out['on_pane'] = subprocess.run(['tmux', 'has-session', '-t', '=f138x-job-1'], capture_output=True).returncode == 0\n"
+                "json.dump(out, open(got, 'w'))\n"
+                "time.sleep(30)\n")
+            env0 = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")}
+            try:
+                _sp.run([tmux, "-S", outer, "new-session", "-d", "-s", "probe", f"{sys.executable} {pane} > {box}/pane.log 2>&1"], env=env0, check=True)
+                for _ in range(100):
+                    if got.exists():
+                        break
+                    await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
+                alive_ = _sp.run([tmux, "-S", outer, "has-session", "-t", "=probe"], capture_output=True, env=env0).returncode == 0
+                out = json.loads(got.read_text()) if got.exists() else {}
+                check(out.get("pane") and alive_, f"a test run's cleanup inside a job's pane ended the pane's own server: {out} {(box / 'pane.log').read_text()[-300:] if (box / 'pane.log').exists() else ''}")
+                check(out.get("inner_was") and out.get("inner_gone"), f"the run's own tmux server wasn't ended by its socket: {out}")
+                check(out.get("wall_pane") == [], f"the wall hands a pane on: {out.get('wall_pane')}")
+                check(out.get("own") and not out.get("on_pane"), f"a window opened from a pane isn't on the server TMUX_TMPDIR names: {out}")
+            finally:
+                for s_ in (outer, str(other / f"tmux-{os.getuid()}" / "default")):
+                    if os.path.exists(s_):
+                        _sp.run([tmux, "-S", s_, "kill-server"], capture_output=True, env=env0)
+                _sh.rmtree(box, ignore_errors=True)
+        # 2. a window that closes under a job: the note, then the routine's real minute
+        ws, env, d = self._wall_env("f138")
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        run = Path(env["HQ_JOB_RUN"])
+        n = new("Build the thing on the made-up page", "--item", "H9611")
+        fake = d / "claude"
+        fake.write_text("#!/usr/bin/env python3\nimport json, sys, time\nsys.stdin.read()\n"
+                        "print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 's'}), flush=True)\ntime.sleep(60)\n")
+        fake.chmod(0o755)
+        (run / f"job-{n}.prompt").write_text("go")
+        need(jobs("mark", n, "running since 00:00").returncode == 0, "no mark")
+        p = _sp.Popen([sys.executable, str(ROOT / "routine/runjob.py"), n, "--session-id", "x"], stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True,
+                      env={**env, "HQ_CLAUDE": str(fake)}, cwd=str(ROOT))
+        log_ = run / f"job-{n}.stream.log"
+        for _ in range(100):
+            if log_.exists() and "session open" in (Path(env["HQ_ACTIVITY"]).read_text() if Path(env["HQ_ACTIVITY"]).exists() else ""):
+                break
+            await asyncio.sleep(0.1)
+        p.send_signal(_sig.SIGHUP)
+        out = await asyncio.to_thread(p.communicate, timeout=60)
+        note = run / f"job-{n}.hup"
+        check(note.exists() and "its window closed under it (signal 1)" in out[0], f"a closed window left no note: {out[0][-300:]}")
+        check(state(n).startswith("running"), f"the runner marked it: {state(n)}")
+        (run / "job.json").write_text(json.dumps({"n": int(n), "pid": 0, "started": time.time() - 300}))
+        r = minute()
+        st = state(n)
+        again = (re.search(r"requeued as job (\d+)", st) or [0, ""])[1]
+        check(st.startswith("ended") and "by a crash" in st and again, f"the routine didn't bring it back: {st} {r['log'][-3:]}")
+        check(not note.exists(), "the note stays after it was read")
+        rm = (ws / "HQ/roadmap.md").read_text()
+        line = next((l for l in rm.splitlines() if l.startswith(f"- Job {again} ·")), "")
+        check(again and "Rerun of job " + n in line and "⟪item " in line, f"the rerun doesn't carry its item: {line[:200]}")
+        code = "import sys, json; sys.path.insert(0, %r)\nimport trail\nprint(json.dumps(trail.follow('H9611')))" % str(ROOT / "routine")
+        t = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+        steps = json.loads(t.stdout or "[]")
+        added = [x.get("job") for x in steps if x.get("step") == "job" and x.get("state") == "added"]
+        check(again and added == [int(n), int(again)], f"the rerun isn't on the record as the item's job: {added}")
+        # the rerun loses its window too: not queued again
+        if again:
+            need(jobs("mark", again, "running since 00:00").returncode == 0, "no mark")
+            (run / f"job-{again}.hup").write_text(json.dumps({"at": time.time(), "signal": 1}))
+            (run / "job.json").write_text(json.dumps({"n": int(again), "pid": 0, "started": time.time() - 300}))
+            minute()
+            check("not run again by itself" in state(again), f"a rerun that lost its window was queued again: {state(again)}")
+        # no note: the usual
+        m = new("Build another thing on the made-up page")
+        need(jobs("mark", m, "running since 00:00").returncode == 0, "no mark")
+        (run / "job.json").write_text(json.dumps({"n": int(m), "pid": 0, "started": time.time() - 300}))
+        minute()
+        check("without a done mark" in state(m), f"a job gone without a note: {state(m)}")
+        # 3. the driver: a say-so once, a refusal once, a rerun followed, an end in one line
+        dr = d / "driver-f138"
+        dr.mkdir(exist_ok=True)
+        code = ("import sys, json; sys.path.insert(0, %r)\nimport chainrun as C\nfrom pathlib import Path\nroot = Path(%r)\n"
+                "states, typed, said = {7: 'ready'}, [], []\nC.job_states = lambda env, root: dict(states)\n"
+                "def yes(env, root, n):\n    typed.append(n); (root / 'now.out').write_text('Job %%d is running; only a waiting job can go now.' %% n); return len(typed) > 1\n"
+                "C.day_yes = yes\nseen = {}\nline = lambda k, s='job', **f: {'step': s, 'state': k, **f}\n"
+                "L = [line('added', job=7)]\nwhys = [C.watch_job({}, root, L, seen, said.append, True) for _ in range(30)]\n"
+                "states[7] = 'ended 22:47 by a crash; requeued as job 8'; L.append(line('added', job=8)); states[8] = 'ready'\n"
+                "whys += [C.watch_job({}, root, L[:1], seen, said.append, True) for _ in range(5)]\n"
+                "whys += [C.watch_job({}, root, L, seen, said.append, True) for _ in range(30)]\n"
+                "states[8] = 'ended 23:10 without a done mark'\n"
+                "whys += [C.watch_job({}, root, L, seen, said.append, True) for _ in range(30)]\n"
+                "print(json.dumps({'typed': typed, 'said': said, 'whys': [w for w in whys if w]}))") % (str(ROOT / "routine"), str(dr))
+        r = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+        try:
+            got = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            got = {"typed": None, "said": [r.stderr[-300:]], "whys": []}
+        check(got["typed"] == [7, 8], f"the say-so wasn't typed once per job: {got['typed']}")
+        check(len(got["said"]) == 4 and "refused" in got["said"][0] and "queued it again" in got["said"][1] and "typed by the driver" in got["said"][2]
+              and "the run stops here" in got["said"][3], f"the driver's lines: {got['said']}")
+        check(len(got["whys"]) == 1 and "job 8 ended without a done mark" in got["whys"][0], f"the driver doesn't stop once on an ended job: {got['whys']}")
+        if bad:
+            raise Failed("; ".join(bad))
+        return ("a pane's server survives a test run's cleanup; a closed window brings its job back once, item carried; "
+                "the driver says each say-so and an end once")
+
     async def flow295(self) -> str:
         """F105, the real run, by hand, a few points of the week: --only 295 with HQ_CHAIN_WORKSPACE naming the workspace to copy. One small
         request on a copy with the real model and the routine's real tick every minute; the clock and his two yeses are the driver's, said as it goes."""
@@ -38167,6 +38317,7 @@ FLOWS = {
     472: ("H235, gap 3: their own extensions' flows, every night: each flow of an extension that's on, on a throwaway workspace; a failure is named as the extension's, never HQ's", False, "flow472"),
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
+    476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),

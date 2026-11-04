@@ -20,7 +20,7 @@ rerun, or one queued by hand after a crash) that crashes too is not queued again
 of the line goes on (Claude's choice, so a job that brings the Mac down can't loop). The rerun goes through
 the usage gate like any job.
 """
-import glob, os, re, sys, time
+import glob, json, os, re, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hqpaths  # noqa: E402
@@ -95,6 +95,13 @@ def recover(job, s, jobs, incidents, status, log, boot=None, panic_dir=PANIC_DIR
     record = "macOS wrote a panic report" if hqpaths.IS_MAC else "the kernel left a crash record"
     how = (f"{what} crashed ({record}) and started again at {clock(boot)}" if panic
            else f"{what} went down and started again at {clock(boot)}")
+    _requeue(job, how, boot, now, jobs, incidents, status, log)
+    return True
+
+
+def _requeue(job, how, since, now, jobs, incidents, status, log):
+    """The crash's way back (jobs.py crashed): once, at the top of the line; an agent's own run only through her runner."""
+    n = job["n"]
     out = jobs("crashed", str(n), how).strip()
     m = re.search(r"requeued as job (\d+)", out)
     if "only her runner" in out:  # H298
@@ -110,7 +117,36 @@ def recover(job, s, jobs, incidents, status, log, boot=None, panic_dir=PANIC_DIR
         what = "It had already crashed once, so it isn't queued again by itself: queue it again from a call if you want"
         step = f"Job {n} crashed again; not run again by itself"
         line = f"job {n}: {how}; it was already a rerun, so it isn't queued again; the rest of the line goes on"
-    incidents.past("jobs", boot, now, f"Job {n} ended by a crash: {how}", [(now, what)])
+    item = (job.get("item") or {}).get("id")  # F103: on the item's record too, when the job has one
+    incidents.past("jobs", since, now, f"Job {n} ended by a crash: {how}", [(now, what)], **({"item": item} if item else {}))
     status("STOPPED", step, line)
     log(line)
+
+
+def hup_note(run_dir, n):
+    """F138: the note runjob.py leaves when its window closed under it (SIGHUP) while the roadmap still said running."""
+    return os.path.join(run_dir, f"job-{n}.hup")
+
+
+def window_closed(job, s, jobs, incidents, status, log, run_dir, now=None):
+    """F138: the running job's chat is gone because its window closed under it (the runner heard SIGHUP, nothing of the
+    routine's asked it to stop): something outside the job ended it, as a crash would. Then the crash's way: run once again
+    from the top of the line, picking up from what it left (Claude's pick for F138: the real HQ's way back for a run ended
+    from outside, rather than leaving it). Returns True when dealt with here; False leaves it to the
+    routine's usual "ended without a done mark"."""
+    p = hup_note(run_dir, job["n"])
+    try:
+        note = json.load(open(p))
+    except (OSError, ValueError):
+        return False
+    try:
+        os.remove(p)
+    except OSError:
+        pass
+    now = now or time.time()
+    started = started_of(job, s, now) or 0
+    at = float(note.get("at") or 0)
+    if at < started - 60:  # an old note, from an earlier run of the same number
+        return False
+    _requeue(job, f"its window closed under it at {clock(at)} (signal {note.get('signal', 1)})", at, now, jobs, incidents, status, log)
     return True
