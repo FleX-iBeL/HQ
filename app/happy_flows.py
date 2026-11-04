@@ -38720,6 +38720,26 @@ def rss_mb() -> int | None:
 MEMORY_STEP_MB = 100  # a flow that leaves the run this much bigger is named under it and in the summary
 
 
+def let_go() -> None:
+    """H162 (4 November 2026): after a flow that grew the run, give the memory back. The listener keeps each Whisper model it loaded for
+    the life of the process (pipeline.HQFasterWhisperSTT._MODELS, right for the call line, where every call shares one), so in a run each
+    flow that builds a call's pipeline added to it; and what a flow freed (Kokoro's voice, say) stayed with the process. The next flow
+    that needs a model loads it again."""
+    import gc
+    pl = sys.modules.get("pipeline")
+    stt = getattr(pl, "HQFasterWhisperSTT", None) if pl else None
+    if stt is not None and getattr(stt, "_MODELS", None):
+        with stt._LOCK:
+            stt._MODELS.clear()
+    gc.collect()
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
+
+
 async def one_flow(res: Result, method, n: int) -> None:
     """One flow, and how it came out in res."""
     try:
@@ -38804,7 +38824,8 @@ async def main(args) -> bool:
             after = rss_mb()
             if before is not None and after is not None and after - before >= MEMORY_STEP_MB:
                 grew.append((n, after - before))
-                say(f"memory: {after} MB, {after - before} MB more after this flow")
+                let_go()
+                say(f"memory: {after} MB, {after - before} MB more after this flow; {rss_mb()} MB once let go")
     finally:
         try:
             if run_.live:
