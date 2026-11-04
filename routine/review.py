@@ -515,7 +515,7 @@ def _attempt(label, now_fn=_clock, extra=None):
     if not r:
         return None
     fp = S.ask_fp(r["line"])
-    a = ask_reviewer(r, prior) or {"failed": True, "why": "no answer", "cost": None}
+    a = (ask_reviewer(r, prior) if prior is not None else ask_reviewer(r)) or {"failed": True, "why": "no answer", "cost": None}
     failed = bool(a.get("failed"))
     lost = False
     try:  # F102: a reviewer that doesn't run turns its line red and opens an incident; the next good run closes it
