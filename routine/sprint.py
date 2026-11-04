@@ -875,6 +875,15 @@ def gate(text, job_text_, say_so=False, said=None, now=False):
     if now:  # nowroad: his now, said today, is the say-so for the whole road: he decided, getting it ready is ours
         if not his_said_now(said or "", places=words_from_env()):
             sys.exit("Refused: now takes his own words from today, as he said or typed them on this call or in this text. Nothing added.")
+        try:
+            import review
+            door = [w for w in (review.now_door_why(r) for r in rows if r["label"] in names) if w]
+        except SystemExit:
+            raise
+        except Exception as ex:
+            door = [f"Refused: the review's state couldn't be read ({ex!r})"]
+        if door:  # nowroad: the program holds her to it: his now sends an unready row only after its rounds
+            sys.exit(" ".join(door) + " Nothing added.")
         where = now_reading(said, names)
         where, no = (where, "") if where else his_yes(said, NOW_ABOUT.format(names=", ".join(names)), names=names)
     else:
@@ -1009,6 +1018,36 @@ def quote_found(quote, texts):
     return None
 
 
+# nowroad: a text of his is a source too, named by its line and its time: "his text on the team line, 4 November 2026 17:42". It holds when a
+# line of his really stands in that thread at that minute.
+THREAD_SOURCE = re.compile(r"\bhis (?:texts?|line|words) on (?:the |his )?(team|direct|coaching|moneypenny'?s|donna'?s|pepper'?s)[ -]line,?\s*"
+                           r"(?:of |on )?(\d{1,2} [A-Za-z]+ \d{4}),?\s*(?:at )?(\d{1,2})[:.](\d{2})", re.I)
+_THREAD_OF = {"team": "team-line", "moneypenny": "team-line", "direct": "direct-line", "donna": "direct-line", "coaching": "coaching-line",
+              "pepper": "coaching-line"}
+
+
+def thread_source_ok(m, ws):
+    """Where a THREAD_SOURCE match points, when a line of his stands there at that minute, or None."""
+    import datetime as _dt
+    line = _THREAD_OF.get(re.sub(r"'?s$", "", m.group(1).lower()))
+    try:
+        day = _dt.datetime.strptime(f"{m.group(2).title()} {int(m.group(3)):02d}:{m.group(4)}", "%d %B %Y %H:%M")
+    except ValueError:
+        return None
+    at = time.mktime(day.timetuple())
+    try:
+        for raw in open(os.path.join(ws, "HQ", line, "thread.jsonl"), encoding="utf8", errors="replace"):
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(d, dict) and d.get("from") == "me" and d.get("text") and at <= float(d.get("at") or 0) < at + 60:
+                return f"his text on the {line}, {day:%-d %B %Y %H:%M}"
+    except OSError:
+        pass
+    return None
+
+
 def _source_ok(item, ws, labels):
     """One named source: a planning row (exists), a rule (rules.md has it), a dated call (a transcript that day), or a
     file that exists in the workspace or in HQ."""
@@ -1119,20 +1158,25 @@ def ready_fields(row, ws=None):
         a_ok, a_why = False, ("an addition without his yes and its date: it goes on the sit-down list first (F81), "
                               "or write his yes with the date")
     out["additions"] = {"ok": a_ok, "text": add or ("none" if not has_label else ""), "why": a_why}
-    named = []
-    for x in re.split(r"[;,]| and ", ft["sources"]):
-        if not x.strip():
+    named, held = [], {}
+    srcs = ft["sources"]
+    for m in list(THREAD_SOURCE.finditer(srcs)):  # nowroad: a text of his, by its line and time, before the split on commas
+        held[m.group(0).strip()] = thread_source_ok(m, ws)
+    srcs = THREAD_SOURCE.sub(" ; ", srcs)
+    for x in re.split(r"[;,]| and ", srcs):
+        if not x.strip(" .;,"):  # what the text source left behind
             continue
         if named and _SOURCE_TAIL.fullmatch(x):  # F140: "3 November 2026, 23:25", "schedule.py:125 and :391": the one before's; "rule 1, 99" stays two
             named[-1] += ", " + x.strip()
         else:
             named.append(x)
     labels = {r["label"] for r in open_rows()}
-    held = {x.strip(): _source_ok(x, ws, labels) for x in named}
+    named = list(held) + named
+    held.update({x.strip(): _source_ok(x, ws, labels) for x in named if x not in held})
     bad = [x for x, ok in held.items() if not ok]
     out["sources"] = {"ok": bool(named) and not bad, "named": [x.strip() for x in named], "held": held,
                       "why": ("no Sources field" if not ft["sources"] else "Sources names nothing" if not named
-                              else f"a source that isn't there: {bad[0][:60]!r} (a row, a rule, a dated call or a file)" if bad else "")}
+                              else f"a source that isn't there: {bad[0][:60]!r} (a row, a rule, a dated call, a file, or his text by its line and time: his text on the team line, 4 November 2026 17:42)" if bad else "")}
     out["ok"] = all(out[k]["ok"] for k in ("his_words", "additions", "sources"))
     return out
 

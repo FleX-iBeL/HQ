@@ -374,6 +374,36 @@ def write(text, jobs, on):
 ROW_NUM = re.compile(r"^\| [^|]* \| ([A-Z])(\d+)\b", re.M)
 
 
+def same_open_row(text, said):
+    """nowroad: the open row a new row would repeat, as {"label", "why"}, or None. Its title's first words held against each open row's,
+    in order, case and punctuation aside: nearly the same (three in four) with the same numbers in them; or half the same for a row written
+    today; or the same quote of his (eight words or more) with the titles at least a little alike (one line of his can make two rows)."""
+    import difflib
+    import sprint as sp_
+    bare = sp_._bare
+    mine = bare(said.split(". ")[0]).split()[:14]
+    nums = lambda w: [x for x in w if any(c.isdigit() for c in x)]  # noqa: E731
+    quotes = [bare(m.group(1)) for marks in sp_.QUOTE_MARKS for m in marks.finditer(said)]
+    quotes = [x for x in quotes if len(x.split()) >= 8]
+    today = time.strftime("%-d %B %Y")
+    for r in sp_.open_rows(text):
+        cs = hqpaths.cells(r["line"])
+        theirs = bare(cs[1].split(" ", 1)[1] if " " in cs[1] else cs[1]).split()[:14]
+        k = min(len(mine), len(theirs))
+        if k < 4:
+            continue
+        like = difflib.SequenceMatcher(None, mine[:k], theirs[:k]).ratio()
+        if like >= 0.75 and nums(mine[:k]) == nums(theirs[:k]):
+            return {"label": r["label"], "why": f"its title is nearly the same: {cs[1][:70]}"}
+        if like >= 0.5 and k >= 6 and len(cs) > 2 and cs[2].startswith(today):
+            return {"label": r["label"], "why": f"it was written today and its title is much the same: {cs[1][:70]}"}
+        ask = bare(sp_.ask_of(r["line"]))
+        hit = next((x for x in quotes if x[:200] in ask), None)
+        if hit and like >= 0.4:
+            return {"label": r["label"], "why": f"it holds the same words of his: {hit[:60]}…"}
+    return None
+
+
 def roadmap_row(text, said, bug=False, by="", item=None):
     """H160: a numbered row for work added on the status page, in Phase F (a bug) or Phase H (everything else),
     right after that phase's highest number, in the roadmap's own shape. Returns (text, label)."""
@@ -920,6 +950,10 @@ def main(argv):
                 sys.exit("What goes on the planning? Write it in a line or two.")
             if said.startswith("-"):  # F105: a run looked up its options and --help became a row
                 sys.exit("write-row THE-ROW [--bug] [--order N] [--after-qa LABEL]: a row starts with its words, not with a dash. Nothing written.")
+            dup = same_open_row(text, said)  # nowroad: never a second row for what an open row already holds
+            if dup:
+                sys.exit(f"Refused: {dup['label']} is already on the planning for this ({dup['why']}). Work on that row: python3 routine/review.py add "
+                         f"{dup['label']} \"...\" (or reword), then review.py now {dup['label']}. Nothing written.")
             if after:
                 import qa
                 no = qa.why_no_bug_after(after, text)
@@ -1129,6 +1163,16 @@ def main(argv):
             j = find(jobs, int(args[0]))
             if not (j["state"] == "ready" or j["state"].startswith("held")):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a waiting job can go now.")
+            if "without the Ready mark" in j["text"] and not ticket:  # nowroad: an unready row's job goes in the day only after her rounds
+                import qa as qa_
+                import review as rv_
+                import sprint as sp_
+                lab = qa_.job_label(j["text"])
+                r_ = next((x for x in sp_.open_rows(text) if x["label"] == lab), None)
+                if r_ and sp_.ready_of([r_]).get(lab) != "ready":
+                    no_ = rv_.now_door_why(r_)
+                    if no_:
+                        sys.exit(no_)
             s = sayso(j["n"], his, by, ticket, j["text"])
             if not s:
                 sys.exit("Refused: a build in his day hours goes only on his own say-so: --said with a line he said or typed, or his tap "

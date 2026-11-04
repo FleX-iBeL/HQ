@@ -15941,11 +15941,12 @@ print("OK")
 
     async def flow481(self) -> str:
         """nowroad, no Claude: his now reaches the team today, the whole road on real rows of a throwaway planning. A row Moneypenny writes
-        from a text holds its words once (the Model column empty); on a row of the old shape, words twice, reword changes the ask only and
+        from a text holds its words once (the Model column empty), a second row for the same thing is refused naming the first, his text by its line and time is a source; on a row of the old shape, words twice, reword changes the ask only and
         the other cells stay byte for byte, and data change 004 clears the copy and its undo puts it back. Her words and his quote go in with
         review.py add, which a text may run. A re-review only asks whether the earlier points are settled by a sentence that stands in the row
         and whether a changed sentence brings a hole of its own: a point about words that didn't change doesn't count, a passed row whose words
-        before aren't kept gets a first review. His now: send-row without the Ready mark is refused without his words and says how; with an old
+        before aren't kept gets a first review. Her rounds: review.py now reviews the words as they stand, one round per wording, three at
+        most, and his now refuses an unready row until three rounds ran on its words as they stand. His now: send-row without the Ready mark is refused without his words and says how; with an old
         line of his it's refused; with his line of today, which the row's His words quote, it goes without a look (the look stands in as no)
         and carries the review's open points; a now the row doesn't quote goes to the look and its no holds. The routine's real minute starts
         the job in his day hours. A policy with no agent never writes a ledger, and under test the real ledger is never written."""
@@ -15961,8 +15962,9 @@ print("OK")
         th.mkdir(parents=True, exist_ok=True)
         now_words = "Please give it to the team and lets run it immediately once it's ready."
         his = "Hey MP, the made-up page should say Nothing planned yet, not Nothing planned. " + now_words
+        said_at = time.time()
         (th / "thread.jsonl").write_text(json.dumps({"at": time.time() - 3 * 86400, "from": "me", "text": "Give it to the team and run it now please."}) + "\n"
-                                         + json.dumps({"at": time.time(), "from": "me", "text": his}) + "\n")
+                                         + json.dumps({"at": said_at, "from": "me", "text": his}) + "\n")
         env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
         rm = ws / "HQ/roadmap.md"
 
@@ -15985,6 +15987,8 @@ print("OK")
         label = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
         cs = hqpaths.cells(row(label))
         need(cs[3] == "" and cs[2].count("HOLE: which card") == 1 and "(in a text," in cs[2], f"the row's words don't stand once: {cs}")
+        r = jobs("write-row", "The made-up page says Nothing planned yet, please. Done means the card.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+        need(r.returncode != 0 and label in (r.stdout + r.stderr) and "review.py now" in (r.stdout + r.stderr), f"a second row for the same thing: {r.stdout} {r.stderr}")
         # 2. an old-shape row: reword inside the ask, then data change 004 and its undo
         r = jobs("write-row", "Old shape row. Out of scope: none at all.", "--bug")
         old = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
@@ -16008,8 +16012,10 @@ print("OK")
         py(dc + "m.undo(pathlib.Path(%r))" % str(ws))
         need(row(old) == twice, f"the undo didn't put it back: {row(old)}")
         # 3. his words and Sources go in with add, a text may run it
-        r = script("review.py", "add", label, f'His words: "{his}" Sources: HQ/team-line/thread.jsonl.', HQ_SAYSO_FAKE="yes")
-        need(r.returncode == 0, f"add: {r.stdout} {r.stderr}")
+        r = script("review.py", "add", label, f'His words: "{his}" Sources: his text on the team line, 1 January 2020 10:00.', HQ_SAYSO_FAKE="yes")
+        need(r.returncode != 0 and "a source that isn't there" in (r.stdout + r.stderr), f"a text of his that isn't there counted as a source: {r.stdout}")
+        r = script("review.py", "add", label, f'His words: "{his}" Sources: his text on the team line, {time.strftime("%-d %B %Y %H:%M", time.localtime(said_at))}.', HQ_SAYSO_FAKE="yes")
+        need(r.returncode == 0 and "fields hold" in r.stdout, f"add with his text as the source: {r.stdout} {r.stderr}")
         pol = py("sys.path.insert(0, %r)\nimport policy\np = policy.Policy(%r); p.agent = 'moneypenny'; p.unattended = True\n"
                  "print(p.decide('Bash', {'command': 'python3 %s add %s \"words\"'}).verdict)" % (str(ROOT / "app"), str(ws), ROOT / "routine/review.py", label))
         need(pol == "allow", f"a text can't run review.py add: {pol}")
@@ -16033,7 +16039,24 @@ print("OK")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", "Give it to the team and run it now please.")
         need(r.returncode != 0 and "today" in (r.stdout + r.stderr), f"an old now of his: {r.stdout} {r.stderr}")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+        need(r.returncode != 0 and "0 of 3 rounds" in (r.stdout + r.stderr), f"his now went before her rounds: {r.stdout} {r.stderr}")
+        need(jobs("send-row", label, "--now", "--said", now_words).returncode != 0, "a now without --not-ready went before her rounds")
+        for k in (1, 2, 3):  # her rounds: a review of the words as they stand, each after a change of hers
+            r = script("review.py", "now", label)
+            need(r.returncode == 0 and f"Round {k} of 3" in r.stdout and "which card" in r.stdout, f"round {k}: {r.stdout} {r.stderr}")
+            again = script("review.py", "now", label)
+            need(again.returncode != 0 and "haven't changed" in (again.stdout + again.stderr), f"a round on the same words counted: {again.stdout}")
+            if k < 3:
+                r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+                need(r.returncode != 0 and f"{k} of 3 rounds" in (r.stdout + r.stderr), f"his now went after {k} rounds: {r.stdout} {r.stderr}")
+                need(script("review.py", "add", label, f"Her answer {k}: the team names the card it picks.").returncode == 0, f"her answer {k}")
+        r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
         need(r.returncode == 0, f"his now of today: {r.stdout} {r.stderr}")
+        sent = r
+        need(script("review.py", "add", label, "Her answer 3: the team names the card it picks.").returncode == 0, "her answer 3")
+        r = script("review.py", "now", label)
+        need(r.returncode != 0 and "3 rounds have run" in (r.stdout + r.stderr), f"a fourth round: {r.stdout}")
+        r = sent
         n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
         line = next(l for l in rm.read_text().split("\n") if l.startswith(f"- Job {n} "))
         need("⟪sayso" in line and "The review's open points" in line and "which card" in line, f"the job doesn't carry his now and the open points: {line}")
@@ -21309,7 +21332,7 @@ print(json.dumps(out))
         rows = ('The empty list is too final. His words (7 January 2026, 10:31): "it should say nothing planned yet, so it feels less final". '
                 'What right looks like: the empty list says Nothing planned yet. How to check: flow 10 with nothing planned. '
                 'Sources: his call of 7 January 2026, 10:31; routine/sprint.py:887 and :1029.',
-                'The empty list, the plain way. His words: "it should say nothing planned yet, so it feels less final". '
+                'Plain labels, no aside. His words: "it should say nothing planned yet, so it feels less final". '
                 'What right looks like: it says so. Sources: the call of 7 January 2026.',
                 'A made-up one. His words (7 January 2026, 10:31): "make the dock purple with stars". What right looks like: purple. '
                 'Sources: the call of 7 January 2026.',

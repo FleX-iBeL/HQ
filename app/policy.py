@@ -957,9 +957,9 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):
             sub = args[1] if len(args) > 1 else "list"
             if sub in ("list", "flags", "clear", "reword", "keep",  # F99: reword is a call's way to change an open row; F86: keep, his keep it
-                       "add"):  # nowroad: her words and his quotes added in one marked place, the walls in add itself (his quotes checked, ADD_MOST)
+                       "add", "now"):  # nowroad: add, her words and his quotes in one marked place (its walls in add); now, a round of hers (3 at most)
                 return Decision(ALLOW, "the planning's review and its flags")
-            return Decision(DENY, "from a call, the review script takes list, flags, clear, reword, add or keep")
+            return Decision(DENY, "from a call, the review script takes list, flags, clear, reword, add, now or keep")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

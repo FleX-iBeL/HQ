@@ -20,10 +20,19 @@ th.write_text("\n".join(lines[:i + 1]) + "\n", encoding="utf8")
 his = json.loads(lines[i])
 say(f"the copy as at {time.strftime('%H:%M', time.localtime(his['at']))}: his text the newest on her line: {his['text'][:90]!r}…")
 road = ws / "HQ/roadmap.md"
-t = road.read_text(encoding="utf8")
-f146 = next(l for l in t.split("\n") if re.match(r"^\| [^|]* \| F146 ", l))
-road.write_text(t.replace(f146 + "\n", "", 1), encoding="utf8")
-say("F146 taken off the copy's planning, as before she wrote it")
+if "--fresh" in sys.argv:
+    t = road.read_text(encoding="utf8")
+    f146 = next(l for l in t.split("\n") if re.match(r"^\| [^|]* \| F146 ", l))
+    road.write_text(t.replace(f146 + "\n", "", 1), encoding="utf8")
+    say("F146 taken off the copy's planning, as before she wrote it")
+else:
+    st = json.loads(subprocess.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, 'routine')\nimport review\nprint(json.dumps(review.states()['F146']))"],
+                                   cwd=str(root / "HQ"), env=env, text=True, capture_output=True).stdout)
+    say(f"F146 as on the live planning: {st['state']}, {len(st['findings'])} findings")
+    cmd = [str(root / "HQ/routine/jobs.py"), "send-row", "F146", "--not-ready", "--now", "--said", "Please give it to the team and lets run it immediately once it’s ready."]
+    v, why = nowroad.policy(root, env, "python3 " + " ".join(cmd))
+    r0 = subprocess.run([sys.executable, *cmd], cwd=str(ws), env=nowroad.her_env(env, root), text=True, capture_output=True)
+    say(f"(a) a send without rounds, as her text would run it: policy {v}; exit {r0.returncode}: {(r0.stdout + r0.stderr).strip()[:500]}")
 real = env["NOWROAD_REAL_CLAUDE"]
 renv = {**env, "HQ_CLAUDE": real}
 t1 = time.time()
@@ -35,6 +44,15 @@ ans = [json.loads(l) for l in th.read_text(encoding="utf8").splitlines() if l.st
 mine = [m for m in ans if m.get("from") == "agent" and m.get("at", 0) > his["at"]]
 for m in mine:
     say("SHE TEXTS BACK: " + m["text"].replace("\n", " / ")[:1500])
+proj = Path.home() / ".claude/projects" / ("-" + str(ws).strip("/").replace("/", "-"))
+for f in sorted(proj.glob("*.jsonl"), key=lambda x: x.stat().st_mtime)[-1:]:
+    for l in f.read_text().splitlines():
+        d = json.loads(l)
+        for x in ((d.get("message") or {}).get("content") or []) if isinstance((d.get("message") or {}).get("content"), list) else []:
+            if x.get("type") == "tool_use":
+                say("HER COMMAND: " + str((x.get("input") or {}).get("command") or x.get("input"))[:600])
+            elif x.get("type") == "tool_result":
+                say("  -> " + str(x.get("content"))[:500].replace("\n", " / "))
 t = road.read_text(encoding="utf8")
 rows = [l for l in t.split("\n") if re.match(r"^\| ⬜ \| F14[6-9] ", l)]
 for l in rows:

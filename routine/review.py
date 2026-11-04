@@ -58,6 +58,7 @@ usage:
   python3 routine/review.py tick                 what the routine runs every minute (on the main)
   python3 routine/review.py clear LABEL "WORDS"  take a flag off on his say-so on a call, his words kept with it
   python3 routine/review.py run LABEL            a review now, in the foreground (a test, or by hand)
+  python3 routine/review.py now LABEL            nowroad: a round of hers: the row's words reviewed now, the verdict written, counted (3 at most)
   python3 routine/review.py pass                 F80's one-time pass: every open row never really reviewed gets one
                                                  review, one after another (resumes; a failure is retried once, then named)
   python3 routine/review.py pass-result          what the pass found: each row's verdict, the failures, the total cost
@@ -579,6 +580,76 @@ def _attempt(label, now_fn=_clock, extra=None):
          + (" (its Ready mark taken off)" if lost else "") + (f", ${a['cost']:.4f}" if a.get("cost") else "")
          + (" [the one-time pass]" if (extra or {}).get("pass") else ""))
     return a
+
+
+# nowroad (4 November 2026): his now means she gets the row ready herself, right away, and the program holds her to it. His words: "the team
+# (the tooling/system) is there to keep her in check, prompting is last line of defense not first". `review.py now LABEL` reviews the row's
+# words as they stand, in the foreground, no quiet wait, and counts as a round: one per wording, and from the second on only after a change
+# that answers a flag. At most NOW_ROUNDS. His now sends a row without the Ready mark only when its words as they stand have had a review
+# and that review passed, or NOW_ROUNDS rounds have run (now_door_why); then what's still open goes with the job.
+NOW_ROUNDS = 3
+
+
+def now_rounds(e):
+    """The rounds `review.py now` ran on this row: [{"fp", "at", "verdict", "n"}], oldest first."""
+    return [x for x in ((e or {}).get("now_rounds") or []) if isinstance(x, dict)]
+
+
+def now_review(label, now_fn=_clock):
+    """One round: the row's words reviewed now, its verdict written, the findings back. Exits with why when it can't count."""
+    label = label.strip().upper()
+    with q.locked():
+        row = next((r for r in S.open_rows() if r["label"] == label), None)
+        if not row:
+            sys.exit(f"Refused: {label} isn't an open row on the planning.")
+        fp = S.ask_fp(row["line"])
+        d, rv = _state()
+        rs = rv.setdefault("rows", {})
+        e = rs.setdefault(label, {})
+        e.setdefault("seen", fp)
+        e.setdefault("seen_at", int(now_fn()))
+        rounds = now_rounds(e)
+        if rounds and rounds[-1]["fp"] == fp:
+            sys.exit(f"Refused: {label}'s words haven't changed since round {len(rounds)} ({rounds[-1]['verdict']}). Answer the findings first, "
+                     "in the row's words (review.py add or reword), then review.py now again.")
+        if len(rounds) >= NOW_ROUNDS:
+            sys.exit(f"Refused: {NOW_ROUNDS} rounds have run on {label}. If it isn't ready, his now sends it with the open points: "
+                     f"jobs.py send-row {label} --not-ready --now --said \"HIS WORDS OF TODAY\".")
+        if e.get("pending") and now_fn() - e["pending"] < PENDING:
+            sys.exit(f"{label}'s review is already on its way; look again in a minute (review.py list).")
+        e["pending"] = int(now_fn())
+        S._save(S.RANKS, d)
+    a = _attempt(label, now_fn, {"now_round": len(rounds) + 1}) or {"failed": True, "why": "the row isn't open"}
+    if a.get("failed"):
+        sys.exit(f"The review didn't run ({a.get('why')}); nothing counted. Try review.py now {label} again.")
+    with q.locked():
+        d, rv = _state()
+        e = (rv.get("rows") or {}).get(label) or {}
+        if e.get("ask") != fp:
+            sys.exit(f"{label}'s words changed while it was reviewed; nothing counted. Run review.py now {label} again.")
+        e["now_rounds"] = now_rounds(e) + [{"fp": fp, "at": int(now_fn()), "verdict": "pass" if a["pass"] else "flag", "n": len(a["findings"])}]
+        S._save(S.RANKS, d)
+    k = len(e["now_rounds"])
+    if a["pass"]:
+        return f"Round {k} of {NOW_ROUNDS}: the review passed {label}. Mark it ready (sprint.py ready {label}), then send-row {label} --now --said \"HIS WORDS\"."
+    fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
+    nxt = (f"Answer each in the row's words (review.py add {label} \"...\", or reword), then review.py now {label} for round {k + 1}."
+           if k < NOW_ROUNDS else f"That was the last round: his now sends it with these open points (send-row {label} --not-ready --now --said \"HIS WORDS\").")
+    return f"Round {k} of {NOW_ROUNDS}: the review flagged {label}:{fs}\n{nxt}"
+
+
+def now_door_why(row):
+    """Why his now can't send this unready row yet, or None: its words as they stand must have had a review that passed, or NOW_ROUNDS rounds."""
+    e = ((_state()[1].get("rows") or {}).get(row["label"])) or {}  # a read, no lock: the queue's command that asks may hold it
+    fp = S.ask_fp(row["line"])
+    rounds = now_rounds(e)
+    reviewed = e.get("ask") == fp and e.get("verdict") in ("pass", "flag")
+    if reviewed and (e.get("verdict") == "pass" or len(rounds) >= NOW_ROUNDS):
+        return None
+    done = f"{len(rounds)} of {NOW_ROUNDS} rounds so far" + ("" if reviewed else ", and its words as they stand haven't been reviewed")
+    return (f"Refused: his now means you get {row['label']} ready yourself first ({done}). Answer the review: review.py now {row['label']}, then answer "
+            f"its findings in the row's words with review.py add or reword, and review.py now again. If it passes, mark it ready and send it with "
+            f"--now; after the third round his now may send it with its open points.")
 
 
 def review_run(label, now_fn=_clock):
@@ -1579,6 +1650,8 @@ def main(argv):
         print(", ".join(tick(log=print)) or "no review started")
     elif argv[0] == "review-run" and len(argv) == 2:
         review_run(argv[1].upper())
+    elif argv[0] == "now" and len(argv) == 2:  # nowroad: a round of hers, in the foreground
+        print(now_review(argv[1]))
     elif argv[0] == "run" and len(argv) == 2:
         row = next((r for r in S.open_rows() if r["label"] == argv[1].upper()), None)
         if not row:
