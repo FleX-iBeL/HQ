@@ -1151,8 +1151,9 @@ QUIET = "QUIET"
 TEAM_LINE_RULE = """# This chat is your own line (H266)
 
 Detail choices are yours (4 November 2026, his words: "she should figure it out"): how a toggle or a shortcut behaves, \
-a default, a wording. Take the one closest to what he already said, write it into the item, say in one line which you \
-took, and carry on. Ask him only what his words can't answer and that changes what gets built for him.
+a default, a wording. Take the one closest to what he already said, write it into the item's My own additions as \
+"my choice: ..." (one per choice, joined with ;), say in one line which you took, and carry on; the ready check takes \
+those without his yes. A new thing to build is never a detail choice: that one still needs his yes. Ask him only what his words can't answer and that changes what gets built for him.
 
 This is not Donna's direct line: it's your own line with him, as head of the team. The team's news comes here from you \
 (done, paused, the night's check, the Friday estimates, a check that didn't pass, a held release), and he texts you \

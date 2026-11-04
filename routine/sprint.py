@@ -1180,6 +1180,9 @@ def ready_fields(row, ws=None):
     has_label = bool(re.search(r"(?:^|[\s(;.,*])(?:" + dict(FIELD_LABELS)["additions"] + r")" + FIELD_ASIDE + r"\s*:", ask_of(row["line"]), re.I))
     none = bool(re.fullmatch(r"none|nothing|no(?:ne)? additions?", add, re.I))
     yes = bool(re.search(r"\byes\b", add, re.I) and _DATE.search(add))
+    # 4 November 2026, his words: "she should figure it out", and the handbook: her mistakes are allowed, repeats are not.
+    # A detail choice of hers (how a toggle or shortcut behaves, a default, a wording) is hers to make, written as one.
+    yes = yes or bool(re.fullmatch(r"(?:\s*(?:her|my) (?:detail )?choice\b[^;]*;?)+\s*", add, re.I))
     if not has_label:
         a_ok, a_why = True, ""
     elif not add:
