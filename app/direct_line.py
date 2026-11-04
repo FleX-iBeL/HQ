@@ -77,6 +77,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -796,8 +797,20 @@ def _text_rules() -> str:
             .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule())
             + (("\n" + _config.cycles_rule() + "\n") if _config.cycles_rule() else "")  # H298: only while it's on
             + (("\n" + _config.plan_rule() + "\n") if _config.plan_rule() else "")  # F107: no 5-hour limit on this plan
+            + _where_rule()
             + f"\nWhen {user()} corrects you here (you got it wrong, did what wasn't asked, kept asking, just agreed), put it on the ledger "
               f"with his exact words: python3 \"{ROOT}/routine/mistakes.py\" add correction --line {folder().name} --said \"HIS WORDS\"\n")  # F103
+
+
+def _where_rule() -> str:
+    """4 November 2026: she answered on the main and still tried to log in to "the server", because the chat so far said
+    she was elsewhere. Every answer says which computer she's on."""
+    if _backup():
+        return ("\nYou are answering on the backup computer, because the main can't be reached right now. HQ's planning, "
+                "the team and the tests are the main's; say plainly what has to wait for it.\n")
+    return (f"\nYou are answering on the main computer ({socket.gethostname()}), where HQ runs: the planning, the team, "
+            f"the tests and their browser are all here, in {ROOT}. Look and run things here directly; never log in to "
+            "another computer (no ssh) for them, and never ask for a yes to look.\n")
 
 
 def _extensions_rule() -> str:
