@@ -30142,13 +30142,16 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
     async def flow480(self) -> str:
         """F145, no Claude: Moneypenny's big work goes to the team, and she settles a team job on his words. On a call and in a text,
         Claude's own helpers (Agent, Task, SendMessage) are refused through the session's own hook with the two right roads named
-        (HQ's helper for a quick look, a report job for the team), and left out of the session; a report asked on a call ends as a
-        research job on a copy's queue, its row written on the planning first, its report's place in its text; its done names the
-        report's place, on her line too; jobs.py done N --said passes the policy only on his own words from this call or this text,
-        today, and a refusal says why."""
+        (HQ's helper for a quick look, a report job for the team), on the ledger, and left out of the session; so is a general-purpose
+        Claude through the shell (claude, codex, openclaw, behind timeout, nohup, env, sh -c or in Python's subprocess), also with a yes,
+        while reading about it stays free; a report asked on a call ends as a research job on a copy's queue, only for a row already open
+        on the planning, its report's place in its text; its done names the report's place, on her line too; jobs.py done N --said (with
+        --at or without) passes the policy and the queue only on his own line from this call or this text, today, that names the job and
+        reads as his go, and a refusal says why."""
         import subprocess as _sp
         import policy as P
         import brain
+        import jobs as JB
         ws, env = self._f114_env("f145")
         env.update({"HQ_SAYSO_FAKE": "yes", "HQ_DIRECT_DIR": str(ws / "HQ/direct-line")})
         day = time.strftime("%Y-%m-%d")
@@ -30159,7 +30162,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                         "- 00:00:20 **Me:** yes, hand the report on all open items to the team\n")
         (ws / "HQ/team-line").mkdir(parents=True, exist_ok=True)
         state = self.tmp / "f145-state.json"
-        # 1. Claude's own helpers: refused on a call and in a text, with the two roads; and not in the session at all.
+        # 1. Claude's own helpers: refused on a call and in a text, with the two roads, on the ledger; and not in the session at all.
         for where in ("call", "text"):
             for tool, inp in (("Agent", {"description": "a report", "prompt": "write a report on all 68 items", "subagent_type": "general-purpose"}),
                               ("Task", {"prompt": "x"}), ("SendMessage", {"to": "helper-1", "message": "save the report"})):
@@ -30167,34 +30170,55 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 verdict, said = await self._f114_hook(pol, tool, inp)
                 need(verdict == "deny" and said.startswith("Not this way") and "helper.py" in said and "start" in said
                      and "write-row" in said and "--report" in said, f"{where}: {tool} wasn't refused with the two roads: {verdict} {said[:300]}")
+                d = pol.log[-1][2]
+                need(d.door, f"{where}: refusing {tool} isn't a door, so it isn't on the ledger")
                 pol.approved.add((tool, P._key(inp)))  # a yes doesn't open it either
                 need(pol.decide(tool, inp).verdict == P.DENY, f"{where}: a yes opened {tool}")
         opts = brain.call_session_options(model="opus", folder=ws, voice_rules="(F145 flow)", policy=self._f114_policy(ws, "moneypenny"))
         need({"Agent", "Task", "SendMessage"} <= set(opts.disallowed_tools), f"Claude's helpers are still in the session: {opts.disallowed_tools}")
         import config as C
         need("--report" in C.TEAM_RULE and "done" in C.TEAM_RULE and "Agent" in C.HELPER_RULE, "the call rules don't say the two roads")
+        # 1b. A general-purpose Claude through the shell: refused with the same roads, also after a yes; reading about it stays free.
+        H = str(ROOT)
+        starts = ("claude -p 'write the report'", "timeout 900 claude --agent general-purpose -p x", "nohup claude -p x", "codex exec 'a report'",
+                  "env FOO=1 openclaw run x", "sh -c \"claude -p x\"", "bash -c 'timeout 60 claude -p x'", f"cd {H} && claude -p x",
+                  "python3 -c \"import subprocess; subprocess.run(['claude', '-p', 'x'])\"", "python3 -c \"import os; os.system('claude -p x')\"",
+                  "/usr/local/bin/claude -p x", "sudo -u openclaw claude -p x", "setsid nohup codex exec x")
+        for where in ("call", "text"):
+            pol = self._f114_policy(ws, "moneypenny", state if where == "text" else None)
+            for c in starts:
+                d = pol.decide("Bash", {"command": c})
+                need(d.verdict == P.DENY and d.road and "helper.py" in d.why and d.door, f"{where}: a Claude through the shell wasn't refused: {c}: {d.verdict} {d.why[:120]}")
+                pol.approved.add(("Bash", P._key({"command": c})))
+                need(pol.decide("Bash", {"command": c}).verdict == P.DENY, f"{where}: a yes opened {c}")
+            for c in (f"grep -n claude {H}/app/policy.py", f"grep -rn 'codex' {H}/routine/cyclehook.py", f"python3 {H}/routine/helper.py start \"what does claude -p do in HQ\""):
+                d = pol.decide("Bash", {"command": c})
+                need(d.verdict == P.ALLOW, f"{where}: reading about it was refused: {c}: {d.why[:160]}")
         def jobs(*a, ok=True, extra=None):
             r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT))
             if ok:
                 need(r.returncode == 0, f"jobs.py {a[:2]} failed: {r.stdout}{r.stderr[-400:]}")
             return r
+        jb = f"python3 \"{ROOT}/routine/jobs.py\""
         # 2. A report asked for on the call: the row first, then the team's job, kind research, its report's place in its own text.
+        row = "A report on all open items: for each, what's asked, what's left and what it waits on. His words: \"yes, hand the report on all open items to the team\""
         was = self._f114_proof(env)
         try:
-            pol = self._f114_policy(ws, "moneypenny")
-            jb = f"python3 \"{ROOT}/routine/jobs.py\""
-            row = "A report on all open items: for each, what's asked, what's left and what it waits on. His words: \"yes, hand the report on all open items to the team\""
-            need(pol.decide("Bash", {"command": f"{jb} write-row \"{row}\""}).verdict == P.ALLOW, "a call can't write the report's row")
+            need(self._f114_policy(ws, "moneypenny").decide("Bash", {"command": f"{jb} write-row \"{row}\""}).verdict == P.ALLOW, "a call can't write the report's row")
         finally:
             self._f114_unproof(was)
+        said_yes = ["--not-ready", "--said", "yes, hand the report on all open items to the team", "--guess", "40"]
+        for no_row in ([], ["--item", "H9999"]):  # a report rests on a row already open on the planning
+            r = jobs("add", "Write a report on all open items", *no_row, "--report", *said_yes, ok=False)
+            need(r.returncode != 0 and "Nothing added" in (r.stdout + r.stderr) or r.returncode != 0 and "H9999" in (r.stdout + r.stderr),
+                 f"a report without its row was added: {no_row}: {r.stdout}{r.stderr[-200:]}")
         out = jobs("write-row", row).stdout
         m = re.search(r"\b([HF]\d+) is on the planning", out)
         need(m, f"write-row didn't name the row: {out}")
         label = m.group(1)
         need(f"| ⬜ | {label} " in (ws / "HQ/roadmap.md").read_text(), f"{label} isn't on the planning")
         before = json.loads(jobs("next").stdout)
-        add = ["add", f"Read the {label} row and write the report it asks for", "--item", label, "--report", "--not-ready", "--said",
-               "yes, hand the report on all open items to the team", "--guess", "40"]
+        add = ["add", f"Read the {label} row and write the report it asks for", "--item", label, "--report", *said_yes]
         r = jobs(*add[:5], "--kind", "small", ok=False)
         need(r.returncode != 0 and "research" in (r.stdout + r.stderr), f"a report went as a small build: {r.stdout}{r.stderr[-200:]}")
         was = self._f114_proof(env)
@@ -30218,30 +30242,52 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import estimate; print((estimate._load_state().get(sys.argv[2]) or {}).get('kind'))",
                      str(ROOT / "routine"), str(n)], capture_output=True, text=True, env=env, cwd=str(ROOT))
         need(r.stdout.strip() == "research", f"the report job's kind isn't research: {r.stdout} {r.stderr[-200:]}")
-        # 3. Closing it from her line: refused without his words and on words that aren't his from here; let through on his own.
-        (ws / "HQ/team-line/thread.jsonl").write_text(
-            json.dumps({"at": time.time() - 60, "from": "agent", "text": "The report job is still open. Close it?"}) + "\n" +
-            json.dumps({"at": time.time() - 30, "from": "me", "text": f"Job {n}, the report on all open items, may close as done."}) + "\n")
+        # 3. Closing it: only his own line from this call or this text, today, that names the job and reads as his go.
         his = f"Job {n}, the report on all open items, may close as done."
+        t0 = time.time()
+        thread = [("agent", f"Job {n}, the report, is still open. Shall I close it?"), ("me", f"Yeah, no, keep job {n} open for now"),
+                  ("agent", "Noted."), ("me", f"Should job {n} close or stay open"), ("agent", f"Job {n} is waiting on you."),
+                  ("me", "hello Moneypenny how are you doing today"), ("agent", "All fine. Anything for the team?"), ("me", f"job {n}"),
+                  ("agent", f"The report job, {n}, can close when you say so."), ("me", his)]
+        (ws / "HQ/team-line/thread.jsonl").write_text("".join(json.dumps({"at": t0 - 100 + 5 * i, "from": w, "text": t}) + "\n" for i, (w, t) in enumerate(thread)))
+        yesterday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
+        (ws / f"HQ/calls/{yesterday}-0000.md").write_text(f"# Call, 00:00\n\nStarted 00:00:00 · agent Moneypenny · brain opus\n\n"
+                                                          f"- 00:00:05 **HQ:** Job {n}?\n- 00:00:20 **Me:** yes, close job {n} now, it is finished\n")
+        notes = ws / "HQ/notes.md"
+        notes.write_text((notes.read_text() if notes.exists() else "# Notes\n\n## Notes\n\n") + f"- {day} 00:00:00 · yes close job {n} as done, settled\n")
+        team = [str(ws / "HQ/team-line")]
         was = self._f114_proof(env)
+        old_rm = JB.ROADMAP
+        JB.ROADMAP = str(ws / "HQ/roadmap.md")  # the policy reads the copy's queue, as a call reads the real one
         try:
-            for words_from, ok_words in (([str(ws / "HQ/team-line")], his), ([str(call)], "yes, hand the report on all open items to the team")):
+            for words_from in (team, [str(call)]):
                 pol = P.Policy(ws)
                 pol.agent, pol.words_from = "moneypenny", words_from
-                d = pol.decide("Bash", {"command": f"{jb} done {n}"})
-                need(d.verdict == P.DENY and "his own words" in d.why and "--said" in d.why, f"done without his words: {d.verdict} {d.why}")
-                d = pol.decide("Bash", {"command": f"{jb} done {n} --said \"close the report job now please\""})
-                need(d.verdict == P.DENY and "aren't his words" in d.why, f"done on words that aren't his: {d.verdict} {d.why}")
-                d = pol.decide("Bash", {"command": f"{jb} done {n} --said \"{ok_words}\""})
-                need(d.verdict == P.ALLOW, f"done on his own words was refused: {d.why}")
+                for c in (f"{jb} done {n}", f"{jb} done {n} --said \"close the report job now please\"",
+                          f"{jb} done {n} --at 12:00 --said \"yes close job {n} as done, settled\"",  # a quick note of today: never a door
+                          f"{jb} done {n} --at 12:00 --said \"yes, close job {n} now, it is finished\"",  # another day's call
+                          f"{jb} done {n} --said \"{his}\"" if words_from != team else f"{jb} done {n} --said \"yes, hand the report on all open items to the team\""):
+                    d = pol.decide("Bash", {"command": c})
+                    need(d.verdict == P.DENY and ("his own words" in d.why or "his go" in d.why), f"done went through on words that aren't his from here: {c}: {d.verdict} {d.why}")
             pol = P.Policy(ws)
-            pol.agent, pol.words_from = "moneypenny", [str(call)]  # the text's words don't count on the call
-            d = pol.decide("Bash", {"command": f"{jb} done {n} --said \"{his}\""})
-            need(d.verdict == P.DENY and "this call or this chat" in d.why, f"the text's words opened it on a call: {d.verdict} {d.why}")
+            pol.agent, pol.words_from = "moneypenny", team
+            for words in (f"Yeah, no, keep job {n} open for now", f"Should job {n} close or stay open", "hello Moneypenny how are you doing today", f"job {n}"):
+                for at in ("", "--at 12:00 "):
+                    d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{words}\""})
+                    need(d.verdict == P.DENY and "his" in d.why, f"done went through on a line that isn't his go: {words!r}: {d.verdict} {d.why}")
+            for at in ("", "--at 12:00 "):
+                d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{his}\""})
+                need(d.verdict == P.ALLOW, f"done on his own go was refused: {d.why}")
             verdict, said = await self._f114_hook(pol, "Bash", {"command": f"{jb} done {n}"})
             need(verdict == "deny" and "his own words" in said, f"the refusal she's told doesn't say why: {said[:200]}")
         finally:
+            JB.ROADMAP = old_rm
             self._f114_unproof(was)
+        # The queue checks again, on the session's own words: a quick note, another day's call and a line that isn't his go stay refused.
+        for words, place in ((f"yes close job {n} as done, settled", team), (f"yes, close job {n} now, it is finished", [str(call)]),
+                             (f"Should job {n} close or stay open", team)):
+            r = jobs("done", str(n), "--said", words, ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(place)})
+            need(r.returncode != 0 and "Refused" in (r.stdout + r.stderr), f"the queue closed it on {words!r}: {r.stdout}{r.stderr[-200:]}")
         (ws / "HQ/reports").mkdir(parents=True, exist_ok=True)
         (ws / rel).write_text("# Report: all open items\n\nmade up for flow 480\n")
         jobs("mark", str(n), "running since 12:00")
@@ -30259,10 +30305,12 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 break
             await asyncio.sleep(0.5)
         need(told, "the report's place didn't reach her line")
-        return (f"Agent, Task and SendMessage refused on a call and in a text with HQ's helper and the team's report job named, a yes "
-                f"doesn't open them, and they're out of the session; the report: {label} written first, then job {n} (research, "
-                f"{rel} in its text, a small build refused); done refused without his words and on words not his from here, let "
-                f"through on his own from the text and from the call, the report's place in its done and on her line")
+        return (f"Agent, Task and SendMessage refused on a call and in a text with HQ's helper and the team's report job named, on the "
+                f"ledger, a yes doesn't open them, out of the session; {len(starts)} ways to start claude, codex or openclaw through the shell "
+                f"refused, also with a yes, reading about them free; the report: no row or a missing one refused, {label} written first, "
+                f"then job {n} (research, {rel} in its text, a small build refused); done, with --at or without, refused without his "
+                f"words, on a quick note, another day's call, another place and four lines that aren't his go, let through on his own "
+                f"go, by the policy and by the queue; the report's place in its done and on her line")
 
     async def flow478(self) -> str:
         """F141, no Claude: a switch still built in pieces gets its own settings boxes in Settings, as once it's shipped.

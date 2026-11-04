@@ -535,6 +535,72 @@ def job_names(n, text):
     return (f"job {n}", *( [m.group(0)] if m else [] ))
 
 
+# F145: closing or settling a team job on his words from a call or a text. His line must name the job (its number, its row, or at least two of
+# its own words; his line or her line just before it) and read as his go: a clear yes (sprint.yes_reading), or a plain closing word ("may
+# close", "close it", "mark it done") with nothing holding it back (a question, keep, stay, or, not, no …).
+_CLOSE_SAY = re.compile(r"(?<![\w'])(?:(?:may|can)\s+(?:now\s+)?(?:be\s+)?(?:close[ds]?|settled?|go)|(?:close|settle)\s+(?:it|that|this|job\s*#?\d+)"
+                        r"|(?:mark|tick)\s+(?:it|that|this|job\s*#?\d+)\s+(?:as\s+)?(?:done|off))(?![\w'])")
+_CLOSE_HOLD = re.compile(r"\?|(?<![\w'])(?:keep|stay|leave|or|whether|should|would|could|shall|maybe|perhaps|no|nope|not|don'?t|wait|later|hold|"
+                         r"first|if|unless|\w+n't)(?![\w'])")
+_KEEP_IT = re.compile(r"(?<![\w'])(?:keep|stay|leave|or|whether)(?![\w'])|\?")  # outweighs a yes word too
+_COMMON = {"about", "after", "again", "their", "there", "these", "those", "which", "while", "would", "could", "should", "other", "every",
+           "where", "being", "first", "thing", "things", "before", "under", "above", "write", "writes", "asks", "read", "reads", "with", "from",
+           "that", "this", "what", "when", "they", "them", "then", "than", "into", "onto", "only", "also", "just", "team", "row"}
+
+
+def _own_words(text):
+    body = (text or "").split(REPORT_TAIL)[0].split(" It went to the team without the Ready mark")[0]
+    return {w for w in re.findall(r"[a-z][a-z'-]{4,}", body.lower()) if w not in _COMMON}
+
+
+def names_job(n, text, line):
+    """F145: whether LINE names job N: 'job N' (or #N), its row's label, or two of the job's own words."""
+    low = " ".join(str(line or "").lower().replace("’", "'").split())
+    if re.search(rf"(?<![\w-])(?:job|number)\s*#?{int(n)}(?![\w-])|#{int(n)}(?![\w-])", low):
+        return True
+    if any(re.search(rf"(?<![\w-]){re.escape(x.lower())}(?![\w-])", low) for x in job_names(n, text)[1:]):
+        return True
+    return len(set(re.findall(r"[a-z][a-z'-]{4,}", low)) & _own_words(text)) >= 2
+
+
+def close_go(n, text, line, turn):
+    """F145: whether his LINE (with her TURN just before it) is his go to close or settle job N."""
+    import sprint as sp_
+    if not (names_job(n, text, line) or names_job(n, text, turn)):
+        return False
+    low = " ".join(str(line or "").lower().replace("’", "'").split())
+    if _KEEP_IT.search(low):
+        return False
+    if sp_.yes_reading(f"{line} job {int(n)}", turn, (f"job {int(n)}",)) == "yes":  # a clear yes; the naming is checked above
+        return True
+    return bool(_CLOSE_SAY.search(low)) and not _CLOSE_HOLD.search(low)
+
+
+def close_refused(n, words, places, ws=None):
+    """F145: why WORDS don't stand as his go to close or settle job N from this call or this text (PLACES: its transcript or thread), today; "".
+    The policy asks it before the command runs, and jobs.py done asks it again with the session's HQ_WORDS_FROM."""
+    if os.environ.get("HQ_IN_JOB"):
+        return "a job can't give itself his say-so"
+    if not (words or "").strip():
+        return "no words of his were given"
+    if len(re.findall(r"\w+", words)) < 3:
+        return "a quote under three words proves nothing: give his whole line"
+    text, jobs, _ = read()
+    j = next((x for x in jobs if x["n"] == int(n)), None)
+    if not j:
+        return f"there's no job {n} on the list"
+    import sprint as sp_
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+        return ""
+    hits = sp_.his_said_now(words, ws, places)
+    if not hits:
+        return "those aren't his words from this call or this chat, today"
+    if not any(close_go(j["n"], j["text"], h["line"], h["turn"]) for h in hits):
+        return (f"those are his words, but they aren't his go to close job {n}: his line has to say it may close (a yes, or close it) "
+                f"and name the job, by its number or its own words, or answer your question that names it")
+    return ""
+
+
 def sayso(n, words, by="", ticket=None, what=""):
     """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_yes), or his tap
     on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
@@ -870,7 +936,10 @@ def main(argv):
                 import estimate as est_
                 if not est_.kind_word_ok(kind):  # H215: a build's size in words too
                     sys.exit(f"--kind is one of: {est_.kind_words()}.")
-            if report:  # F145: a report is research
+            if report:  # F145: a report is research, for a row already on the planning
+                if not item or not re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()):
+                    sys.exit("A report goes for a row on the planning: write the row first (write-row), then add --report --item LABEL. Nothing added.")
+                open_row(text, item.strip().upper())  # exits with why when it isn't an open row
                 if kind not in (None, "research"):
                     sys.exit(f"A report is research, so --report goes with --kind research or no --kind, not {kind}. Nothing added.")
                 kind = "research"
@@ -1236,6 +1305,12 @@ def main(argv):
                 i = args.index("--said")
                 his = args[i + 1] if i + 1 < len(args) else ""
                 args = args[:i] + args[i + 2:]
+            import sprint as sp_
+            here = sp_.words_from_env() if cmd == "done" and his is not None else None  # F145: from a call or a text, only its own words
+            if here is not None and not was.startswith("done"):
+                no_go = close_refused(j["n"], his, here)
+                if no_go:
+                    sys.exit(f"Refused: {no_go}. The job stays open.")
             if cmd == "done" and not was.startswith("done"):
                 waiting = [x for x in j.get("notes") or [] if not x.get("read")]
                 if waiting:  # F101 (C23): a note he sent while it ran is read before it's over
@@ -1243,8 +1318,9 @@ def main(argv):
                              f"{j['n']} first. The job stays open.")
                 import proof
                 no = proof.refuses(j, text)
-                if no:
-                    import sprint as sp_
+                if no and here is not None:  # F145: checked above, on this call's or this text's own words, today
+                    proof.keep_say_so(j, his)
+                elif no:
                     where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}", names=job_names(j["n"], j["text"])) if his else (None, "")
                     if not where:
                         sys.exit(f"Refused: {no} {why.capitalize() + '. ' if why else ''}The job stays open.")

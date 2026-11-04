@@ -540,7 +540,7 @@ class Policy:
                 return Decision(ALLOW, "reading a plain web address (no need to ask)")  # H103
             return _ask("open that web address, which carries more than a plain page", "a web address with data in it (F99)")
         if tool in GENERAL_HELPERS:  # F145: never Claude's own helper here; the two right roads instead
-            return Decision(DENY, HELPER_ROADS, road=True)
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)  # F145: on the ledger, like the other doors
         return _ask(f"use {tool}", "anything else")
 
     def _calendar(self, name: str, inp: dict) -> Decision:
@@ -668,29 +668,22 @@ class Policy:
         if said is None or not said.strip():
             return Decision(DENY, f"a team job is closed from here only on his own words, and none were given: jobs.py done {n} {_SAYS}. "
                                   "Ask him, and use his answer", door=True)
-        why = self._done_refused(said)
+        why = self._done_refused(said, int(n))
         if why:
             return Decision(DENY, f"a team job is closed from here only on his own words, and {why}: jobs.py done {n} {_SAYS}. "
                                   "Ask him, and use his answer", door=True)
         return Decision(ALLOW, "closing a team job on his own words (the queue checks them again)")
 
-    def _done_refused(self, said: str) -> str:
-        """F145: why SAID doesn't stand as his words to close a job from this call or this text, today; ""."""
+    def _done_refused(self, said: str, n: int) -> str:
+        """F145: why SAID doesn't stand as his words to close job N from this call or this text, today; "". The one check, jobs.close_refused,
+        the same the queue runs again with the session's HQ_WORDS_FROM."""
         try:
             if str(HQ_ROUTINE) not in sys.path:
                 sys.path.insert(0, str(HQ_ROUTINE))
-            import hqpaths as _hp
-            import sprint
-            if os.environ.get("HQ_IN_JOB"):
-                return "a job can't give itself his say-so"
-            if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
-                return ""
-            hits = sprint.his_said_now(said, str(self.folder), list(self.words_from))
-            if not hits:
-                return "those aren't his words from this call or this chat, today"
-            if all(sprint.yes_reading(h["line"], h["turn"], ()) == "no" for h in hits):
-                return "those are his words, but they say no"
-            return ""
+            import jobs
+            return jobs.close_refused(n, said, list(self.words_from), str(self.folder))
+        except SystemExit as e:
+            return f"the queue couldn't be read ({e})"
         except Exception as e:
             return f"his words couldn't be read ({type(e).__name__})"
 
@@ -817,6 +810,8 @@ class Policy:
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _starts_a_claude(cmd, runs):  # F145: no general-purpose Claude through the shell either, also with a yes
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)
         if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
             return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
                                   "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
@@ -931,13 +926,15 @@ class Policy:
                 return Decision(ALLOW, "the queue for the computer")
             if sub == "now" and "--said" in args:  # F100: a build in his day hours, only with his own words
                 return Decision(ALLOW, "his say-so for a build in the day")
+            if sub == "done" and "--said" in args:  # F145: his words close or settle a team job, with --at or without, only through the door
+                return self._done(args)
             if sub == "done" and "--at" in args:  # F57: tick off a running job whose work is checked done, on his say-so
                 return Decision(ALLOW, "ticking off a running job at the time it really finished")
-            if sub == "done":  # F145: close or settle a team job on his own words from this call or this text, today
+            if sub == "done":  # F145: without his words, the door says why
                 return self._done(args)
             return Decision(DENY, f"{sub or 'that'} is the queue's own step, the computer's and the job's: from here the queue takes "
                                   "add, add-row, send-row, write-row, tell, list, stop, overrule, move, on, off, resume, pause, "
-                                  "now --said, done N --said \"HIS WORDS\" and done N --at HH:MM")
+                                  "mail-fast, mail-hourly, now --said, done N --said \"HIS WORDS\" and done N --at HH:MM")
         # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on
         # the roadmap, like the queue; promote and status are the routine's own.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "schedule.py"):
@@ -1457,6 +1454,32 @@ def _hide_quoted_dollars(cmd: str) -> str:
         out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
         i += 1
     return "".join(out)
+
+
+RUNS_A_CLAUDE = ("claude", "codex", "openclaw")  # F145: as cyclehook.RUNS: a general-purpose agent outside HQ's harness
+_STARTS = {"nohup", "setsid", "sudo", "doas", "caffeinate"}  # F145: what only starts the next program, past cyclehook's wrappers
+_CLAUDE_IN_CODE = re.compile(r"[\"'`](?:[^\"'`\s]*/)?(?:claude|codex|openclaw)(?:[\"'`\s]|$)")
+
+
+def _starts_a_claude(cmd: str, runs: str) -> bool:
+    """F145: whether a shell line would start claude, codex or openclaw: as its program, behind timeout, nohup, env and the like, inside what a
+    shell is handed (sh -c, eval, a heredoc), or named as a program in code handed to Python, node, perl or ruby (subprocess, os.system).
+    Reading or grepping for the word isn't starting it. HQ's own helper (routine/helper.py) starts its model itself, not from here."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import cyclehook
+        for piece in re.split(r"[;&|\n()`]+", runs):
+            words = cyclehook._program(piece)
+            while words and (os.path.basename(words[0]) in _STARTS or os.path.basename(words[0]) in cyclehook.WRAPPERS):
+                words = cyclehook._program(" ".join(words[1:]))
+                while words and words[0].startswith("-"):
+                    words = words[1:]
+            if words and os.path.basename(words[0]) in RUNS_A_CLAUDE:
+                return True
+        return bool(cyclehook._RUNS_CODE_TEXT.search(cmd) and _CLAUDE_IN_CODE.search(cmd))
+    except Exception:
+        return bool(re.search(r"(?:^|[\s;&|(`'\"/])(?:claude|codex|openclaw)\s+(?:-|exec\b)", cmd))
 
 
 def _what_runs(cmd: str) -> str:
