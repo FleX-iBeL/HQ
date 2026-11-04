@@ -331,6 +331,7 @@ class Decision:
     retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
     handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
     door: bool = False  # F114: a refused try at one of his doors (his switch, his yes, another agent's ledger): on the ledger, once
+    road: bool = False  # F145: refused, but `why` names the right road to take instead (said as that, not "don't try another way")
 
 
 # -- the lists -------------------------------------------------------------------
@@ -372,6 +373,19 @@ CALL_UNFRIENDLY = [
     "NotebookEdit", "Workflow", "CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger",
     "DesignSync",
 ]
+
+# F145 (4 November 2026, call at 11:59, Moneypenny), his words at 12:32: "Claude's general-purpose helper gets closed off on calls
+# and texts, so you can't take that side road anymore." Claude Code's own helpers run outside HQ's harness (no box, no usage line,
+# nothing on the status page, their asks not in his chat): refused, with the two right roads. Also left out of the session (brain.py).
+GENERAL_HELPERS = ["Agent", "Task", "SendMessage", "TeamCreate", "TeamDelete"]
+HELPER_ROADS = (
+    "Claude's own helper isn't used on a call or in a text (F145): it runs outside HQ, with no box, no usage line and nothing on "
+    "the status page. There are two right roads. A quick look goes to HQ's own helper, which only reads and is boxed: "
+    f"python3 \"{HQ_ROUTINE / 'helper.py'}\" start \"THE QUESTION\". Bigger work (a report, a review of many items, research) goes "
+    "to the team as a job, after his yes: first the row, python3 \"" + str(HQ_ROUTINE / 'jobs.py') + "\" write-row \"THE ASK, with his "
+    "words\", then python3 \"" + str(HQ_ROUTINE / 'jobs.py') + "\" add \"Read the LABEL row and write the report it asks for\" --item "
+    "LABEL --report --not-ready --said \"HIS YES\" --guess MINUTES; it's boxed, under his usage lines, on the status page, and its "
+    "report comes back to him on your line with where it is")
 
 # Read-only shell commands that may run without asking, as long as every path they touch
 # is inside the folder.
@@ -525,8 +539,8 @@ class Policy:
             if plain_address(url):
                 return Decision(ALLOW, "reading a plain web address (no need to ask)")  # H103
             return _ask("open that web address, which carries more than a plain page", "a web address with data in it (F99)")
-        if tool in ("Task", "Agent"):
-            return _ask("hand this to a helper to work on", "a helper")
+        if tool in GENERAL_HELPERS:  # F145: never Claude's own helper here; the two right roads instead
+            return Decision(DENY, HELPER_ROADS, road=True)
         return _ask(f"use {tool}", "anything else")
 
     def _calendar(self, name: str, inp: dict) -> Decision:
@@ -641,6 +655,42 @@ class Policy:
             aid, words = (args[2].lower() if len(args) > 2 else ""), (args[3] if len(args) > 3 else "")
             n = int(args[4]) if len(args) > 4 and args[4].isdigit() else None
             return cycles.his_yes_refused(aid, words, n, places=list(self.words_from), base=self.folder)
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
+    def _done(self, args: list[str]) -> Decision:
+        """F145: jobs.py done N --said "HIS WORDS" from a call or a text: his own line, today, on this call or in this text's thread,
+        not a no. jobs.py then checks the same words again (sprint.his_yes) before it closes a job without its record."""
+        said = args[args.index("--said") + 1] if "--said" in args and args.index("--said") + 1 < len(args) else None
+        n = args[2] if len(args) > 2 else ""
+        if not n.isdigit():
+            return Decision(DENY, "which job? jobs.py done N --said \"HIS WORDS\", with the job's number from jobs.py list")
+        if said is None or not said.strip():
+            return Decision(DENY, f"a team job is closed from here only on his own words, and none were given: jobs.py done {n} {_SAYS}. "
+                                  "Ask him, and use his answer", door=True)
+        why = self._done_refused(said)
+        if why:
+            return Decision(DENY, f"a team job is closed from here only on his own words, and {why}: jobs.py done {n} {_SAYS}. "
+                                  "Ask him, and use his answer", door=True)
+        return Decision(ALLOW, "closing a team job on his own words (the queue checks them again)")
+
+    def _done_refused(self, said: str) -> str:
+        """F145: why SAID doesn't stand as his words to close a job from this call or this text, today; ""."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import hqpaths as _hp
+            import sprint
+            if os.environ.get("HQ_IN_JOB"):
+                return "a job can't give itself his say-so"
+            if _hp.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+                return ""
+            hits = sprint.his_said_now(said, str(self.folder), list(self.words_from))
+            if not hits:
+                return "those aren't his words from this call or this chat, today"
+            if all(sprint.yes_reading(h["line"], h["turn"], ()) == "no" for h in hits):
+                return "those are his words, but they say no"
+            return ""
         except Exception as e:
             return f"his words couldn't be read ({type(e).__name__})"
 
@@ -831,7 +881,7 @@ class Policy:
                         step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
                         d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
                                                 f"are fine on their own: run them again without this step",
-                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door)
+                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door, road=d.road)
                     return d
         return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
 
@@ -883,7 +933,11 @@ class Policy:
                 return Decision(ALLOW, "his say-so for a build in the day")
             if sub == "done" and "--at" in args:  # F57: tick off a running job whose work is checked done, on his say-so
                 return Decision(ALLOW, "ticking off a running job at the time it really finished")
-            return Decision(DENY, "that part of the queue is only for the computer itself")
+            if sub == "done":  # F145: close or settle a team job on his own words from this call or this text, today
+                return self._done(args)
+            return Decision(DENY, f"{sub or 'that'} is the queue's own step, the computer's and the job's: from here the queue takes "
+                                  "add, add-row, send-row, write-row, tell, list, stop, overrule, move, on, off, resume, pause, "
+                                  "now --said, done N --said \"HIS WORDS\" and done N --at HH:MM")
         # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on
         # the roadmap, like the queue; promote and status are the routine's own.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "schedule.py"):

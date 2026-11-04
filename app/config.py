@@ -350,7 +350,15 @@ already has, running or waiting ("tell the team not to release, QA first", "tell
 his go: python3 "{HQ}/routine/jobs.py" tell <its number from jobs.py list> "<the note, in his words>". A running job \
 reads it after its current step, and always before it pushes or releases (a push waits until it has); a waiting one \
 reads it when it starts. Say "the team has it", never the command. A finished job takes no note: give the change as new \
-work. These planning and team commands (sprint.py, schedule.py, jobs.py, \
+work. A report for him (F145): work bigger than a quick look (a report, a review of many items, research) goes to the team, never to \
+Claude's own helper (the Agent and SendMessage tools are refused here): ask him first; on his yes, put it on the planning with jobs.py \
+write-row "<the ask, with his words>", then python3 "{HQ}/routine/jobs.py" add "Read the <label> row and write the report it asks for" \
+--item <label> --report --not-ready --said "<his yes, word for word>" --guess <minutes>. It's research, boxed, under his usage lines and \
+on the status page; it writes one file, HQ/reports/<date>-<label>.md in the workspace, and when it's done its place comes to him on \
+Moneypenny's line. Tell him the team has it and that the report comes as a text. Closing a team job (F145): when he says a job of the \
+team's may close or is settled ("job 499 may close as done without its test record"), that's his go: python3 "{HQ}/routine/jobs.py" done \
+<N> --said "<his words, word for word>"; it stands only on his own line from this call or this text, today, and a refusal says why in \
+plain words: say that to him. These planning and team commands (sprint.py, schedule.py, jobs.py, \
 usageline.py, reading a long output the call saved itself) run without a yes (H277), also several in one step, after a \
 cd into HQ or in a plain for loop over labels; so do it in one go and don't ask him to say yes for them. Anything \
 outside them still asks."""
@@ -860,10 +868,12 @@ RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the 
 HELPER_RULE = """- Looking never waits for his yes: reading the workspace, HQ and its logs, and looking at this computer run without asking, so check \
 what you need before you answer. Changing anything in HQ asks him first; building HQ is the team's. His vision, the map, the rules and every \
 CLAUDE.md only change after his yes; the shared files only through their script, and a refusal names it.
-- Taking it away (F106): you're here to decide with him; the work happens beside the call. For anything bigger than a quick look \
-(a long read, a question across many files, a proposal, an investigation), say in a few words that you'll take it away and start a helper: \
+- Taking it away (F106): you're here to decide with him; the work happens beside the call. For a quick look that's more than a \
+glance (a long read, a question across a few files), say in a few words that you'll take it away and start a helper: \
 python3 "{HQ}/routine/helper.py" start "<the question in one self-contained line>". It only reads and is boxed in minutes and turns; you \
-go on with him at once, and the answer comes back to you here, or as a text on your line if he's hung up. Never make him wait for a long read.
+go on with him at once, and the answer comes back to you here, or as a text on your line if he's hung up. Never make him wait for a long read. \
+Work bigger than a quick look (a report, a review of many items, research) isn't a helper's: it goes to the team as a report, after \
+his yes (the team rule, F145). Claude's own helper (the Agent and SendMessage tools) is never used here.
 - A check you couldn't run (a command refused, or waiting for his yes) is never answered around: say you couldn't check it.
 - Before you do any of these, read how it works here first, a quick look that needs no yes, and never guess a command from memory: \
 python3 "{HQ}/app/rules.py" TOPIC. The topics: {topics}. Your own handbook and how you work: python3 "{HQ}/app/rules.py" handbook {agent} \

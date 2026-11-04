@@ -29,6 +29,9 @@ usage (from the workspace):
                                                            planning row it names must carry the Ready mark (H272,
                                                            sprint.py ready), or --not-ready on his explicit say-so,
                                                            and the job then says it went without the mark
+  python3 "routine/jobs.py" add "TEXT" --item LABEL --report [--not-ready --said "HIS WORDS"] [--guess MINUTES]   F145: a report
+                                                           for him (kind research): the job writes one file, HQ/reports/<date>-LABEL.md
+                                                           in the workspace, and at done its path goes to him on Moneypenny's line
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
   python3 "routine/jobs.py" feedback "TEXT" [--from NAME] [--bug] [--when "YYYY-MM-DD HH:MM"] [--via agent]   H247: a row under Phase U · Feedback, no job
@@ -170,6 +173,58 @@ def item_of(rest):
         if m.group(1) == "item":
             return {"id": m.group(2), "label": m.group(3)}
     return None
+
+
+# F145 (4 November 2026, call at 11:59, Moneypenny), his words at 12:32: "When your work is bigger than a quick look, like that
+# report on all 68 items, you hand it to the team as a job. Then it has a time box, falls under my usage lines, shows on the status
+# page, and writes its report the normal way." A report job (add --report, kind research) writes one file in the workspace, under
+# REPORTS, named in its own text; at done the path goes to him on Moneypenny's line (qa.tell "report").
+REPORTS = "HQ/reports"
+REPORT_RE = re.compile(r"The report goes to (HQ/reports/[\w.-]+\.md)")
+REPORT_TAIL = " This is a report for him, not a build:"
+
+
+def report_rel(label, jobs=(), day=None):
+    """F145: where a new report goes, relative to the workspace: HQ/reports/<YYYY-MM-DD>-<label>.md, a number after it when that
+    name is taken, on disk or by a job on the list."""
+    day = day or time.strftime("%Y-%m-%d")
+    name = re.sub(r"[^\w.-]+", "-", label or "").strip("-.")[:60] or "report"
+    taken = {report_of(j) for j in jobs}
+    rel, k = f"{REPORTS}/{day}-{name}.md", 2
+    while rel in taken or os.path.exists(os.path.join(hqpaths.FOLDER, rel)):
+        rel, k = f"{REPORTS}/{day}-{name}-{k}.md", k + 1
+    return rel
+
+
+def report_of(j):
+    """F145: the report a job writes, from its own text, or None."""
+    m = REPORT_RE.search((j or {}).get("text") or "")
+    return m.group(1) if m else None
+
+
+def report_words(rel, label):
+    """F145: what a report job is told, after its question: the one file it writes and how it commits it."""
+    return (f"{REPORT_TAIL} read what it needs and change nothing in HQ or the workspace except the one report file. Write the report "
+            f"in the workspace as {rel}, plain and complete (what was asked, what you found, item by item where it's about items, and "
+            f"what you couldn't check), then commit only that file: python3 \"{os.path.join(hqpaths.HQ, 'routine', 'gitlock.py')}\" commit \"Report: {label or 'report'}\" "
+            f"{rel}. The report goes to {rel}.")
+
+
+def tell_report(j):
+    """F145: at done, the report's path goes to him on Moneypenny's line, or that it wasn't written. Returns what was said, or None."""
+    rel = report_of(j)
+    if not rel:
+        return None
+    what = one_line((j.get("text") or "").split(REPORT_TAIL)[0])[:200].rstrip(" .")
+    there = os.path.isfile(os.path.join(hqpaths.FOLDER, rel))
+    facts = (f"The report he asked for is ready, in the workspace at {rel}. What it was about: {what}." if there else
+             f"The report he asked for wasn't written: the team finished without a file at {rel}. What it was about: {what}.")
+    try:
+        import qa
+        qa.tell("report", facts, (j.get("item") or {}).get("id"))
+    except Exception as e:
+        print(f"(couldn't text the report's place: {e!r})", file=sys.stderr)
+    return f"Its report: {rel}." if there else f"No report was written at {rel}."
 
 
 def carry(j, item=None):
@@ -780,7 +835,8 @@ def main(argv):
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
             at_once = "--now" in args  # F100: a build in his day hours, only on his own say-so
-            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now")]
+            report = "--report" in args  # F145: a report for him, kind research, one file in the workspace
+            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now", "--report")]
             item = None  # F103: the item this job is for, as an argument: its id or its label
             for i, a in enumerate(words):
                 if a == "--item" or a.startswith("--item="):
@@ -814,10 +870,17 @@ def main(argv):
                 import estimate as est_
                 if not est_.kind_word_ok(kind):  # H215: a build's size in words too
                     sys.exit(f"--kind is one of: {est_.kind_words()}.")
+            if report:  # F145: a report is research
+                if kind not in (None, "research"):
+                    sys.exit(f"A report is research, so --report goes with --kind research or no --kind, not {kind}. Nothing added.")
+                kind = "research"
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
             said = sp_.gate(text, one_line(" ".join(words)), say_so, his)
+            if report:  # F145: where it writes, named in its own text, so done can tell him
+                lab = item if item and re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()) else ""
+                said = one_line(said) + report_words(report_rel(lab.strip().upper(), jobs), lab.strip().upper())
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
@@ -1205,6 +1268,8 @@ def main(argv):
                     routines.bad("qa", f"QA couldn't be queued for job {j['n']}: {e!r}", every=30 * 86400)  # F102
             write(text, jobs, on)
             print(show(j))
+            if cmd == "done" and not was.startswith("done") and report_of(j):  # F145: its report's place, to him on her line
+                print(tell_report(j))
             if qa_job:
                 estimate("on_add", qa_job["n"], qa_job["text"], "qa")
                 print(f"Job {qa_job['n']} is ready: QA of what job {j['n']} built (F56).")

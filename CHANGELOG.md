@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Big work from a call or a text goes to the team now. Ask Moneypenny for something bigger than a quick look, like a report on all your open items or research, and after your yes she puts it on the planning and hands it to the team: it has a time limit, stays under your usage lines and shows on the status page, and when it's done she texts you where the report is. Quick looks still happen beside the call. And when you tell her a team job may close, she closes it herself, on your own words from that call or text, and says plainly why when she can't (F145).
+
 ## 1.0.0 · 4 November 2026
 
 - Your data: A feature in pieces you already had on stays on: it's noted as turned on before HQ kept who turned it on. Going back a version undoes it.
