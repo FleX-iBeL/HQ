@@ -1602,6 +1602,17 @@ if __name__ == "__main__":
         print(json.dumps(m, ensure_ascii=False) if m else "quiet")
     elif cmd == "reply":
         print(reply() or "")
+    elif cmd == "carry":  # HQ puts her back to work on what he already said, without a new text from him
+        answer = _answer(CARRY_NOTE + " What he already answered in the chat stands: use it, never ask it again.", [])
+        add("agent", answer, "reply")
+        push(answer)
+        for _k in range(CARRY_MOST):
+            if unanswered() or not _promises(answer):
+                break
+            answer = _answer(CARRY_NOTE, [])
+            add("agent", answer, "reply")
+            push(answer)
+        print(answer)
     elif cmd == "reset":  # her chat starts fresh: the thread keeps every line, her view begins after this mark
         print(json.dumps(add("agent", "(Chat reset: she starts fresh from here.)", "reset", quiet=True), ensure_ascii=False))
     elif cmd == "reply-bg" and len(args) >= 2 and args[1] in ("team", "donna"):  # the backup handed her answer here
