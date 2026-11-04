@@ -507,7 +507,7 @@ def encrypt(payload: bytes, p256dh: str, auth: str, salt: bytes | None = None, e
 
 
 def decrypt(body: bytes, ua_private, auth: str) -> bytes:
-    """The phone's side, for the happy flow: what a browser does with a push message."""
+    """The phone's side, for the detailed flow: what a browser does with a push message."""
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM

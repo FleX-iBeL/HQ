@@ -930,7 +930,7 @@ def notes(old: str, new: str, saved: dict, changed: list[str], done: list[str], 
     if hit:
         w.append("- These changed files are what the user's own parts in local/ stand in for: " + ", ".join(hit)
                  + ". Check those parts still do the same.")
-    w.append("- Run the happy flows that fit this computer (`python3 app/happy_flows.py --help`), and one short call.")
+    w.append("- Run the detailed flows that fit this computer (`python3 app/happy_flows.py --help`), and one short call.")
     w += ["", "## Every file that changed", ""] + [f"- {f}" for f in changed[:300]]
     with open(path, "w") as f:
         f.write("\n".join(w) + "\n")

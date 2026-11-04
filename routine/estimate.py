@@ -829,7 +829,7 @@ def look_haiku(about):
     row = _rows().get(r.group(1) or r.group(2), "") if r else ""
     system = ("You size software jobs for an app (a voice call line, a job queue, a status page, a calendar, sync between "
               "two computers). Read the job and its roadmap row. Answer only one line of JSON: {\"parts\": <how many "
-              "separate parts of the app it touches>, \"flows\": <how many happy flows (tests) it names, runs or adds>, "
+              "separate parts of the app it touches>, \"flows\": <how many detailed flows (tests) it names, runs or adds>, "
               "\"restart\": <true if it restarts the call line>, \"work\": \"research\"|\"fix\"|\"build\"}")
     t0 = time.time()
     try:
@@ -1807,7 +1807,7 @@ def _look_input(text, kind=None):
 LOOK_SYSTEM = (
     "You guess how many minutes a job for HQ will take. HQ is an app in the current folder (app/ the call line, routine/ "
     "the queue and the routine, status/ the status page, install/ the installer); another Claude Code chat does the "
-    "job on its own: it reads the row, builds, runs the happy flows it names (app/happy_flows.py), commits and pushes. "
+    "job on its own: it reads the row, builds, runs the detailed flows it names (app/happy_flows.py) and the 17 happy flows (routine/happy.py), commits and pushes. "
     "Have a quick look at the code the job touches (a few Grep or Read calls at most; never the workspace/ folder), "
     "then answer with one line of JSON only: {\"minutes\": <whole minutes>, \"why\": \"<a few words>\"}. Use the "
     "finished jobs' real times to judge the scale: most take 3 to 30 minutes. When material to read is counted for you "

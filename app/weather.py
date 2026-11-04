@@ -361,7 +361,7 @@ def parse_rain(text: str) -> list[tuple[str, float]]:
     return out
 
 
-# -- what's worth saying (no network: the happy flow feeds it) -------------------------------------------
+# -- what's worth saying (no network: the detailed flow feeds it) -------------------------------------------
 
 WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "foggy", 48: "foggy",
        51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 61: "light rain", 63: "rain", 65: "heavy rain",
@@ -427,7 +427,7 @@ def decide(fc: dict, minutes: list[tuple[str, float]], now: datetime, told: list
     return None
 
 
-# -- H125: a watch against the forecast (no network: the happy flow feeds it) ------------------------------
+# -- H125: a watch against the forecast (no network: the detailed flow feeds it) ------------------------------
 
 def _window(fc: dict, now: datetime, until: datetime) -> list[dict]:
     """The forecast's hours from this hour up to UNTIL, as dicts."""
@@ -611,7 +611,7 @@ def check_watches(fc: dict, minutes: list[tuple[str, float]], loc: datetime, nam
     return out
 
 
-# -- H212: weather texts that fit his day (no network: the happy flow feeds it) --------------------------------
+# -- H212: weather texts that fit his day (no network: the detailed flow feeds it) --------------------------------
 
 SLEEP_WORDS = ("sleep", "slapen", "asleep", "bed", "bedtime", "night")  # a calendar block with this title is his night
 NIGHT = (23, 8)  # without a Sleep block around: asleep from 23:00 to 08:00 (Claude's choice)
@@ -1062,7 +1062,7 @@ def icon(code, day: bool = True) -> str:
 
 def build_view(fc: dict, minutes: list[tuple[str, float]], warns: list[dict], now: datetime, name: str = "",
                warn_source: str = "") -> dict:
-    """What the app shows, from the forecast, the radar and the warnings. No network: the happy flow feeds it."""
+    """What the app shows, from the forecast, the radar and the warnings. No network: the detailed flow feeds it."""
     cur = fc.get("current") or {}
     h = fc.get("hourly") or {}
     hours = []

@@ -1,6 +1,6 @@
-"""Which happy flows hold on which computer (one place, H169): the installer's test round and the nightly run read it.
+"""Which detailed flows hold on which computer (one place, H169): the installer's test round and the nightly run read it.
 
-H56.5: the quick happy flows (no Claude turns) that hold on a Linux server; the rest are written for the Mac (the
+H56.5: the quick detailed flows (no Claude turns) that hold on a Linux server; the rest are written for the Mac (the
 helper app, pmset, the Mac's own tools) and get their Linux side one by one. A new flow that holds on Linux goes in
 here. Standard library only: the installer imports it before anything is installed.
 """

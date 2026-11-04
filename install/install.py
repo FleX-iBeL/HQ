@@ -7,7 +7,7 @@ Two rounds, ticked off live on a checklist page:
      existing workspace is never touched), the Python environment, the voice, and every password and
      macOS permission once: the helper app's Documents access, Terminal windows, the watchdog, the
      lid-closed sleep switch. Those are the moments macOS or sudo asks; the user is told up front.
-  2. Test (the installer's happy flow): the same things again, and nothing may ask any more. A check
+  2. Test (the installer's detailed flow): the same things again, and nothing may ask any more. A check
      that would need a password or a click fails instead of waiting.
 
     python3 install/install.py              both rounds (asks Enter once, after the heads-up)
@@ -27,7 +27,7 @@ or Mac app. Nothing is installed with sudo: what's missing is named, with the li
 there the same way, usually with --yes --no-page (there's no browser on a server; the checklist is still on the
 status page, /install).
 
-For the happy flows (flow 43), in a throwaway copy: HQ_INSTALL_FAKE=1 simulates every step that touches
+For the detailed flows (flow 43), in a throwaway copy: HQ_INSTALL_FAKE=1 simulates every step that touches
 the computer outside HQ (Homebrew, downloads, launchctl, sudo, Terminal, servers) and runs the rest for
 real; HQ_INSTALL_FAIL=<step id> makes that step fail, to see the checklist stop there.
 """
@@ -106,7 +106,7 @@ UNIT = os.environ.get("HQ_UNIT", "hq")
 MAC_ONLY_PACKAGES = {"mlx", "mlx-metal", "mlx-whisper", "more-itertools", "networkx", "regex", "scipy",
                      "setuptools", "tiktoken", "torch"}
 LISTEN_MODULE = "mlx_whisper" if IS_MAC else "faster_whisper"
-# H56.5: the quick happy flows that hold on a Linux server today (the rest are written for the Mac). Since H169 in
+# H56.5: the quick detailed flows that hold on a Linux server today (the rest are written for the Mac). Since H169 in
 # one place, routine/flowsets.py, which the nightly run reads too.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "routine"))
 from flowsets import INSTALL_LEAVE_OUT, INSTALL_SECONDS_LINUX, INSTALL_SECONDS_MAC, LINUX_FLOWS  # noqa: E402
@@ -693,7 +693,7 @@ class Installer:
         raise Warn("for you and your Claude: connect Gmail and Google Calendar in claude.ai → Settings → "
                    "Connectors (the installer can't check this without using your plan)")
 
-    # -- test: the installer's happy flow; nothing may ask --
+    # -- test: the installer's detailed flow; nothing may ask --
 
     def t_workspace(self):
         if not os.path.isdir(os.path.realpath(WORKSPACE)):
@@ -792,9 +792,9 @@ class Installer:
         last = [l for l in (r.stdout + r.stderr).splitlines() if " passed " in l]
         if r.returncode != 0:
             failed = [l.strip() for l in r.stdout.splitlines() if "FAILED" in l][:3]
-            raise Fail("happy flows: " + (last[-1] if last else "failed") + (" · " + " · ".join(failed) if failed else ""),
+            raise Fail("detailed flows: " + (last[-1] if last else "failed") + (" · " + " · ".join(failed) if failed else ""),
                        "Each failed flow says why; the whole output is in scratch/install/install.log.")
-        return ("quick happy flows: " if IS_MAC else "the happy flows that hold on Linux: ") + \
+        return ("quick detailed flows: " if IS_MAC else "the detailed flows that hold on Linux: ") + \
             (last[-1].split(" · ")[0] if last else "pass")
 
     def steps(self) -> list:
@@ -834,7 +834,7 @@ class Installer:
             S("status_page", "The status page answers", "test", self.t_status),
             S("call_line", "The call line answers", "test", self.t_call),
             S("desktop", "The Mac app finds its files", "test", self.t_desktop, optional=True),
-            S("flows", "The quick happy flows pass", "test", self.t_flows),
+            S("flows", "The quick detailed flows pass", "test", self.t_flows),
         ]
         return test if self.args.test_only else setup + test
 

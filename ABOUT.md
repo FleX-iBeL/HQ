@@ -100,7 +100,11 @@ HQ knows its version and looks a few times a day whether a newer one is out. Whe
 
 ### The happy flows
 
-HQ's tests: over a hundred checks of the main things that must work when all goes well (the call starts, the greeting plays, a question gets an answer, cutting in stops the voice, the transcript is saved, the queue works, the status page reads the roadmap, the template stays blank...). They run before and after every change, on their own port, without touching the live call.
+The 17 things that make HQ usable, the ones its owner asked for: a call from the phone with its greeting, a spoken answer and the notes after hanging up; typing on a call; asking before anything that needs a yes; a dropped call that still leaves its notes; a text answered within a minute; a reminder on time; the to-do list; today's calendar; a new very important mail on the list; an idea on the planning; "now" started today; the team building a small change; closing a job in your own words; the agents' check-ins; work at night waiting at the usage line; the game's reminder and its tick; a fresh install from GitHub. They run for real, with the real model, on a throwaway copy, after every fix and every feature: a build isn't done until they pass, and one that couldn't be tried holds the release. `python3 routine/happy.py list` shows them.
+
+### The detailed flows
+
+Hundreds more checks, one or more for each feature (the call starts, cutting in stops the voice, the queue works, the status page reads the roadmap, the template stays blank...). Most use stand-ins, so they're quick; they run every night, on their own port, without touching the live call.
 
 ## What it runs on
 

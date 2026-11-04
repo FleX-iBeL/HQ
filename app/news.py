@@ -98,7 +98,7 @@ def on() -> bool:
 
 
 def _now() -> float:
-    t = os.environ.get("HQ_NEWS_NOW")  # the happy flows' own now
+    t = os.environ.get("HQ_NEWS_NOW")  # the detailed flows' own now
     return float(t) if t else time.time()
 
 

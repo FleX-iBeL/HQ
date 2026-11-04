@@ -179,9 +179,10 @@ def tried_words(ev: list[tuple[str, str, str]]) -> str:
                                  for i, (e, r, g) in enumerate(ev, 1))
 
 
+NOT_TRIED = re.compile(r"\bnot (?:yet )?(?:tried|covered)\b", re.I)  # H313: what holds QA and the release
 PASS_REFUSED = ("Refused: a pass names every done example of the row with its evidence (F71). For each one: "
                 "--example \"the row's example\" --ran \"what was really run for it\" --got \"what came out\". "
-                "An example that couldn't be tried is a fail, or said in the summary as not tried, with why. Nothing written.")
+                "An example that couldn't be tried is a fail, with why: a pass that says not tried holds (H313). Nothing written.")
 
 
 def job_label(text: str) -> str | None:
@@ -751,7 +752,7 @@ def proof_refuses(label: str, compared: str) -> str | None:
     if not rec:
         return f"{label} has no record of a green run (routine/proof.py run), so there's nothing to pass."
     if not rec.get("green"):
-        return f"the last run for {label} wasn't green: {'; '.join(rec.get('failed') or [])[:300]}."
+        return f"the last run for {label} wasn't green: {'; '.join((rec.get('failed') or []) + (rec.get('not_tried') or []))[:400]}."
     # F121: the record has to hold every commit of the row: one made before a newer commit of it doesn't stand for it
     newer = [c for c in proof.all_commits(label) if not _in_commit(c.split()[0], rec.get("head"))]
     if newer:
@@ -802,6 +803,11 @@ def main(argv: list[str]) -> int:
             summary = " ".join(" ".join(args[1:]).split()).rstrip(".")
             args = args[:1] + [(summary + ". " if summary else "") + tried_words(ev)]
     if cmd == "pass":
+        # H313, his words of 4 November 2026: a report line "not tried" or "not covered" holds QA and the release until it's run for real
+        held = NOT_TRIED.search(" ".join(args[1:]) + " " + compared)
+        if held:
+            print(f"Refused: the pass says \"{held.group(0)}\": that holds QA until it's run for real (H313). Run it, or fail it. Nothing written.")
+            return 2
         no = proof_refuses(label, compared)
         if no:
             print(f"Refused: {no} Nothing written.")

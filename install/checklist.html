@@ -81,7 +81,7 @@
           : now ? `Now: ${now.title}${now.asks ? ' · macOS or your password may ask now: allow it' : ''}` : 'Running…';
         document.getElementById('meta').textContent =
           `Run ${d.run}${d.finished ? ' · finished ' + d.finished.slice(11) : ''} · ${d.mode === 'test' ? 'test only' : 'setup and test'}`
-          + `${d.fake ? ' · simulated (happy flow)' : ''} · ${d.machine} · HQ: ${d.hq}`;
+          + `${d.fake ? ' · simulated (detailed flow)' : ''} · ${d.machine} · HQ: ${d.hq}`;
         const hu = document.getElementById('headsup');
         hu.hidden = d.mode === 'test'; hu.textContent = d.heads_up;
         for (const phase of ['setup', 'test']) {
