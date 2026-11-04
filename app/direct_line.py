@@ -1351,7 +1351,7 @@ def _answer(words: str, ids=()) -> str:
         return "".join(out)
 
     try:
-        answer = _clean(asyncio.run(asyncio.wait_for(go(), timeout=300)))
+        answer = _clean(asyncio.run(asyncio.wait_for(go(), timeout=900 if on_team_line() else 300)))  # her QA work takes longer than a reply
     except Exception as e:
         print(f"reply: {e!r}", file=sys.stderr)
         answer = "Sorry, I couldn't get to that just now. Try me again in a minute?"

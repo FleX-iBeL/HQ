@@ -651,8 +651,8 @@ def now_door_why(row):
     fp = S.ask_fp(row["line"])
     rounds = now_rounds(e)
     reviewed = e.get("ask") == fp and e.get("verdict") in ("pass", "flag")
-    if reviewed and (e.get("verdict") == "pass" or len(rounds) >= NOW_ROUNDS):
-        return None
+    if (reviewed and e.get("verdict") == "pass") or len(rounds) >= NOW_ROUNDS:
+        return None  # 4 November 2026: after the third round his now sends it, also with words she changed since (no fourth round exists)
     done = f"{len(rounds)} of {NOW_ROUNDS} rounds so far" + ("" if reviewed else ", and its words as they stand haven't been reviewed")
     return (f"Refused: his now means you get {row['label']} ready yourself first ({done}). Answer the review: review.py now {row['label']}, then answer "
             f"its findings in the row's words with review.py add or reword, and review.py now again. If it passes, mark it ready and send it with "
