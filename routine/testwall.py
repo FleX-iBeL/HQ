@@ -568,6 +568,12 @@ def wall_env(wall: str, roots: list[str]) -> dict:
     })
     for k in ("HQ_REAL_ROADMAP", "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", *CONNECTIONS, *hqpaths.PANE_VARS):  # F138: no pane's server inside
         env.pop(k, None)
+    # H162 (4 November 2026): a run started from a job (the weekly sweep) carried the job's mark inside, so every flow that plays him at
+    # a switch on its copies (71, the stop lines, the reserve, a build in his day hours) was refused as a job's own say-so, while the
+    # night's run, started by the routine, passed; and its number (flow 233's stand-in job looked for job 499). Behind the wall a say-so
+    # only reaches copies; a flow that tests a job's marks sets them itself.
+    for k in ("HQ_IN_JOB", "HQ_JOB", "HQ_JOB_AGENT", "HQ_ROUND", "HQ_HEADLESS"):
+        env.pop(k, None)
     return env
 
 

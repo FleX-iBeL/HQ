@@ -11596,17 +11596,6 @@ console.log(JSON.stringify(d.kids.map(k => k.tag ? ['a', k.href, k.textContent, 
                 "time, with a day pill between days; a web address in a text is a link to tap; in a thread over 200 a new text still shows")
 
     async def flow71(self) -> str:
-        """H162 (4 November 2026): a run started from a job carries the job's mark, so the switches here, on copies, and the call's
-        policy were refused as a job's own say-so; the flow is him at the switch, so it runs without the mark and puts it back after
-        (flow 404 sets it on purpose)."""
-        mark = os.environ.pop("HQ_IN_JOB", None)
-        try:
-            return await self._flow71()
-        finally:
-            if mark is not None:
-                os.environ["HQ_IN_JOB"] = mark
-
-    async def _flow71(self) -> str:
         """H87, H91, no Claude: the three stop lines (5-hour, weekly all models, weekly Fable) each move every minute,
         the share of their window gone by (never below 10% or 20%), up to 100% in the minute before the reset, or stay
         at a fixed number; each switched from the status page or a call. The lines on made-up readings (each its own
@@ -11614,7 +11603,6 @@ console.log(JSON.stringify(d.kids.map(k => k.tag ? ['a', k.href, k.textContent, 
         settings (moving when they aren't named; an old flat weekly limit still fixes both weekly lines), the switch
         script on a copy, the status server's switch on a copy, what a call may run, the call rules, the page and the
         template."""
-        own = dict(os.environ)  # without the job's mark: see flow71
         import subprocess as sp
         from policy import Policy, ALLOW, DENY
         node = shutil.which("node") or "/opt/homebrew/bin/node"
@@ -11764,7 +11752,7 @@ L = {"five": {"moving": False, "fixed": 55}, "weekly": {"moving": False, "fixed"
 p = U.Projection(U.reading(), L)
 print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now), "fitsOld": p.fits({"five": 20, "weekly": 2}, p.now)}))
 """, str(ROOT / "routine")], capture_output=True, text=True,
-                     env={**own, "HQ_ROADMAP": str(d73 / "roadmap.md"), "HQ_ESTIMATES": str(d73), "HQ_USAGE": str(d73 / "usage.json")})
+                     env={**os.environ, "HQ_ROADMAP": str(d73 / "roadmap.md"), "HQ_ESTIMATES": str(d73), "HQ_USAGE": str(d73 / "usage.json")})
         need(r73.returncode == 0, f"H173: the gate check didn't run: {r73.stderr[-600:]}")
         o73 = json.loads(r73.stdout)
         need(o73["c"]["five"] == 3 and o73["c"].get("tokens") == 900000 and o73["pct"] == 50 and o73["fits"] and not o73["fitsOld"],
@@ -11775,7 +11763,7 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         rmq = self.tmp / "h141-roadmap.md"
         rmq.write_text((ROOT / "template/HQ/roadmap.md").read_text())
         note = self.tmp / "h141-gate-note"
-        envq = {**own, "HQ_ROADMAP": str(rmq), "HQ_GATE_NOTE": str(note)}
+        envq = {**os.environ, "HQ_ROADMAP": str(rmq), "HQ_GATE_NOTE": str(note)}
         jq = lambda *a: sp.run(["python3", str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=envq)  # noqa: E731
         for i in (1, 2):
             jq("add", f"build thing {i}")
@@ -11800,7 +11788,7 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         need("**5-hour line: moving.**" in tt and "**Weekly line: moving; fixed at 90% when switched.**" in tt
              and "**Fable line: moving; fixed at 90% when switched.**" in tt, "the template doesn't start with all three lines moving (HQ's default)")
         script = str(ROOT / "routine/usageline.py")
-        env = {**own, "HQ_ROADMAP": str(copy)}
+        env = {**os.environ, "HQ_ROADMAP": str(copy)}
         ul = lambda *a, e=env: sp.run(["python3", script, *a], capture_output=True, text=True, env=e)  # noqa: E731
         o = ul()
         need(o.returncode == 0 and "moves" in o.stdout, f"reading the setting: {o.stdout}{o.stderr}")
@@ -11833,14 +11821,14 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         need(copy.read_text() == t, "a refused switch still changed the roadmap")
         bare = self.tmp / "h87-bare.md"
         bare.write_text("# x\n\n- **Usage limit: 70%.** y\n")
-        need(ul("fixed", e={**own, "HQ_ROADMAP": str(bare)}).returncode == 0 and
+        need(ul("fixed", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
              bare.read_text().count("**5-hour line: fixed.**") == 1, "a roadmap without the setting doesn't get its line")
-        need(ul("fable", "fixed", "80", e={**own, "HQ_ROADMAP": str(bare)}).returncode == 0 and
-             ul("weekly", "moving", e={**own, "HQ_ROADMAP": str(bare)}).returncode == 0, "a roadmap without the weekly lines can't switch them")
+        need(ul("fable", "fixed", "80", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0 and
+             ul("weekly", "moving", e={**os.environ, "HQ_ROADMAP": str(bare)}).returncode == 0, "a roadmap without the weekly lines can't switch them")
         bl = bare.read_text().split("\n")
         need([l.split(":")[0] for l in bl if " line:" in l] == ["- **5-hour line", "- **Weekly line", "- **Fable line"],
              f"the lines aren't added in their order under the usage limit: {bl}")
-        real = ul("moving", e={**own, "HQ_ROADMAP": os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))})
+        real = ul("moving", e={**os.environ, "HQ_ROADMAP": os.environ.get("HQ_REAL_ROADMAP", str(ROADMAP))})
         need(real.returncode != 0, "under a test, the switch changed the real roadmap")
 
         # The status server's switch, on a copy of the status page and the routine.
@@ -11852,7 +11840,7 @@ print(json.dumps({"c": c, "pct": p.pct("five", p.now), "fits": p.fits(c, p.now),
         road.write_text((ROOT / "template/HQ/roadmap.md").read_text())
         port = 4793
         proc = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"],
-                                env={**own, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(road)},
+                                env={**os.environ, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(road)},
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             base = f"http://127.0.0.1:{port}"
