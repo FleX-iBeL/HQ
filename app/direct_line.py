@@ -1204,6 +1204,19 @@ def _harvest(words: str) -> None:
 
 # -- texting back ------------------------------------------------------------------------------
 
+CARRY_MOST = 4  # her own next steps after one text of his, before she waits for him again
+CARRY_NOTE = ("(A note from HQ, not from him, never his words: your last text said you'd do a next step yourself. Do it now, "
+              "in this answer, and carry on with the steps after it, until the item is with the team or something truly "
+              "needs his decision. Then text him in a line or two what you did and where it stands.)")
+_PROMISE = re.compile(r"\b(I'll|I will|I'm going to|next I|then I|I can now|so I'll|let me)\b", re.I)
+
+
+def _promises(text: str) -> bool:
+    """Her text ends on a step she says she'll take herself, not on a question for him."""
+    tail = (text or "").strip().split("\n\n")[-1]
+    return bool(_PROMISE.search(text or "")) and "?" not in tail
+
+
 def reply() -> str | None:
     """Answer his newest texts as her, with the workspace and the call's limits. One reply at a time; texts that
     came in meanwhile are answered right after."""
@@ -1235,6 +1248,14 @@ def reply() -> str | None:
             push(answer)
             _harvest(answer)
             last = msg["text"]
+            for _k in range(CARRY_MOST if os.environ.get("HQ_DIRECT_TEAM") == "1" else 0):
+                if unanswered() or not _promises(answer):
+                    break
+                answer = _answer(CARRY_NOTE, [])  # 4 November 2026: she said she'd do the next step, so she does it now
+                msg = add("agent", answer, "reply")
+                push(answer)
+                _harvest(answer)
+                last = msg["text"]
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
