@@ -535,18 +535,40 @@ def job_names(n, text):
     return (f"job {n}", *( [m.group(0)] if m else [] ))
 
 
-# F145: closing or settling a team job on his words from a call or a text, strict (the second check of 4 November 2026). A go is one of two:
-# (1) his own line holds a closing word (close, done, finished, settle, mark it done, may close …) and the job's name ("job N", "#N" or its row's
-# label), with nothing holding it back; (2) his line is a bare yes (yes, ok, sure, go ahead …, nothing else) and her line just before it asks to
-# close that same job: a closing word next to its name. Never a yes alone, never the job's own words, never a yes to something else.
-_CLOSING = r"(?:clos(?:e|es|ed|ing)|done|finish(?:ed|es)?|complete[ds]?|settle[ds]?|settling|tick(?:ed)?\s+(?:it\s+|that\s+|this\s+)?off|wrap(?:ped)?\s+(?:it\s+)?up)"
-_CLOSE_WORD = re.compile(rf"(?<![\w'-]){_CLOSING}(?![\w'-])")
+# F145: closing or settling a team job on his words from a call or a text (the third check of 4 November 2026). Two gates, both must pass:
+# the words (close_go, here, no model) and a narrow second look at the same two lines (close_look, a small model, one turn), for every job
+# closed on his words from a call or a text, whatever its kind. The words: (1) his own line names the job ("job N", "job twelve", "number 12",
+# "#N" or its row's label) and holds a go form (close / settle / mark / tick + it or the job, may / can / can be + close or settle, done with
+# it or the job), with nothing holding it back; or (2) his line is a bare yes (a short run of yes words) to her last question, which asks to
+# close that job (by name, or by "it" with the sentence just before naming it). "done", "finished" or "complete" alone close nothing.
+_ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _in_words(n):
+    """F145: a number as he'd say it, as a pattern: 12 'twelve', 499 'four hundred (and) ninety(-)nine'."""
+    n = int(n)
+    if n < 20:
+        w = _ONES[n]
+    elif n < 100:
+        w = _TENS[n // 10] + ("" if n % 10 == 0 else " " + _ONES[n % 10])
+    elif n < 1000:
+        w = _ONES[n // 100] + " hundred" + ("" if n % 100 == 0 else " and " + _in_words(n % 100).replace("[\\s-]+", " "))
+    else:
+        return re.escape(str(n))
+    return w.replace(" and ", " (?:and )?").replace(" ", "[\\s-]+")
+
+
 _HOLD_FORMS = (r"keep|keeps|keeping|kept|stay|stays|staying|stayed|remain|remains|remaining|remained|open|opens|opened|reopen\w*|"
                r"redo|redoes|redid|redone|redoing|broken|break|breaks|more\s+work|not\s+yet|later|bin|trash|leave|leaving|"
-               r"or|whether|should|would|could|shall|maybe|perhaps|wait|hold|no|nope|not|don'?t|first|if|unless|\w+n't")
-_CLOSE_HOLD = re.compile(rf"\?|(?<![\w'-])(?:{_HOLD_FORMS})(?![\w'-])")
-_TURN_HOLD = re.compile(r"(?<![\w'-])(?:keep\w*|kept|stay\w*|remain\w*|open\w*|reopen\w*|redo\w*|redone|redid|broken|or|whether|not|later|bin)(?![\w'-])")
-_BARE_YES = re.compile(r"(?:yes|yeah|yep|yup|ok|okay|oke|sure|go ahead|go for it|do it|please do|yes please|ok please|ja)(?:\s+please)?")
+               r"or|whether|should|would|could|shall|maybe|perhaps|wait|hold|no|nope|not|don'?t|first|if|unless|\w+n't|"
+               r"when|whenever|once|until|till|tomorrow|tonight|will|almost|nearly|never|still|running|badly|wrong|tell\s+me|let\s+me\s+know")
+_CLOSE_HOLD = re.compile(rf"\?|(?<![\w'-])(?:{_HOLD_FORMS})(?![\w'-])|^(?:did|is|does|do|has|have|are|was|were|can|could|will|would|shall|should)(?![\w'-])")
+_TURN_HOLD = re.compile(r"(?<![\w'-])(?:keep\w*|kept|stay\w*|remain\w*|open\w*|reopen\w*|redo\w*|redone|redid|broken|or|whether|not|later|bin|"
+                        r"and|also|plus|then|tomorrow|when|once|until)(?![\w'-])")
+_BEFORE_HOLD = re.compile(r"(?<![\w'-])(?:still|running|not|broken|wrong|badly|almost|nearly|redo\w*|redone|later|tomorrow|will|\w+n't)(?![\w'-])")
+_YES_FIRM = {"yes", "yeah", "yep", "yup", "ok", "okay", "oke", "sure", "ja", "absolutely", "alright", "go", "do", "definitely", "please"}
+_YES_TOKENS = _YES_FIRM | {"ahead", "it", "that", "for", "right", "fine", "of", "course", "all"}
 
 
 def _low(line):
@@ -554,58 +576,110 @@ def _low(line):
 
 
 def _job_name(n, text):
-    """F145: how a line names job N: 'job N', '#N', or its row's label (never its other words)."""
+    """F145: how a line names job N: 'job N', 'job twelve', 'job number 12', 'number 12', '#N', or its row's label (never its other words)."""
     labels = [re.escape(x.lower()) for x in job_names(n, text)[1:]]
-    return rf"(?<![\w-])(?:job\s*#?{int(n)}|#{int(n)}{''.join('|' + x for x in labels)})(?![\w-])"
+    num = rf"(?:{int(n)}|{_in_words(n)})"
+    return rf"(?<![\w-])(?:(?:job\s+(?:number\s+|no\.?\s*|#\s*)?|number\s+|#\s*){num}{''.join('|' + x for x in labels)})(?![\w-])"
+
+
+def _go(name):
+    """F145: a go form for closing, with the job's name pattern as one of its objects."""
+    obj = rf"(?:it|this|that|this\s+one|{name})"
+    return re.compile(rf"(?<![\w'-])(?:(?:close|settle)\s+{obj}|(?:mark|tick)\s+{obj}|done\s+with\s+{obj}|(?:may|can|could)\s+(?:now\s+)?(?:be\s+)?(?:close[ds]?|settled?)|"
+                      rf"(?:may|can|could|shall|should)\s+(?:i|we|you|it|{name})\s+(?:now\s+)?(?:be\s+)?(?:close[ds]?|settled?))(?![\w'-])")
 
 
 def names_job(n, text, line):
-    """F145: whether LINE names job N: 'job N', '#N' or its row's label."""
+    """F145: whether LINE names job N."""
     return bool(re.search(_job_name(n, text), _low(line)))
 
 
 def bare_yes(line):
-    """F145: his line is a yes and nothing else (its punctuation aside)."""
-    return bool(_BARE_YES.fullmatch(" ".join(re.sub(r"[^\w' ]", " ", _low(line)).split())))
+    """F145: his line is a short run of yes words and nothing else ("yes", "yes, go ahead please", "yeah sure", "ok do it")."""
+    toks = re.sub(r"[^\w' ]", " ", _low(line)).split()
+    return 0 < len(toks) <= 6 and all(t in _YES_TOKENS for t in toks) and any(t in _YES_FIRM for t in toks)
 
 
 def close_go(n, text, line, turn):
-    """F145: whether his LINE (with her TURN just before it) is his go to close or settle job N."""
+    """F145, the first gate: whether his LINE (with her TURN just before it) reads as his go to close or settle job N."""
     low, tlow, name = _low(line), _low(turn), _job_name(n, text)
+    go = _go(name)
     if _CLOSE_HOLD.search(low):
         return False
-    if re.search(name, low) and _CLOSE_WORD.search(low):
+    if re.search(name, low) and go.search(low):
         return True
     if bare_yes(line):  # his yes to her own question, the last one in her line, to close this very job
-        asked = (re.findall(r"[^.!?]*\?", tlow) or [""])[-1]
-        return bool(re.search(name, asked) and _CLOSE_WORD.search(asked) and not _TURN_HOLD.search(asked))
+        sentences = re.findall(r"[^.!?]+[.!?]?", tlow)
+        qs = [i for i, x in enumerate(sentences) if x.strip().endswith("?")]
+        if not qs:
+            return False
+        asked = sentences[qs[-1]]
+        if _TURN_HOLD.search(asked) or not go.search(asked):
+            return False
+        if re.search(name, asked):
+            return True
+        before = sentences[qs[-1] - 1] if qs[-1] > 0 else ""  # "Job 12 is done. Shall I close it?"
+        return bool(re.search(r"(?<![\w'-])(?:it|this|that)(?![\w'-])", asked) and re.search(name, before) and not _BEFORE_HOLD.search(before))
     return False
 
 
-def close_refused(n, words, places, ws=None):
-    """F145: why WORDS don't stand as his go to close or settle job N from this call or this text (PLACES: its transcript or thread), today; "".
-    The policy asks it before the command runs, and jobs.py done asks it again with the session's HQ_WORDS_FROM."""
+CLOSE_LOOK = ("You check one thing, from the lines of a chat between a man and his assistant. Answer yes only when his line says, now, that "
+              "the job named may be closed or settled. Answer no for a question, a request to be told, a plan or a moment later on, a "
+              "condition (when, once, if), a complaint that it's wrong or unfinished, a yes to something else, or anything unclear. "
+              "Answer with one word: yes or no.")
+
+
+def close_look(n, what, line, turn):
+    """F145, the second gate: a small model's one-word look at his line and her line just before it: does he say job N may be closed now?
+    "" when it says yes, else why not. HQ_SAYSO_FAKE stands in for the model in a test, as for sprint.his_yes; a test never asks the model."""
+    fake = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
+    try:
+        if fake is None and hqpaths.under_test():
+            raise RuntimeError("a test without a stand-in")
+        if fake is None:
+            import mistakes
+            fake = mistakes.ask(CLOSE_LOOK, f"The job: job {int(n)}, {one_line(what)[:200]}\n\nThe assistant, just before:\n"
+                                            f"{turn or '(nothing)'}\n\nHim:\n{line}", what="close look")
+        answer = fake.strip().lower()
+    except Exception as e:
+        return f"the second look at his words failed ({type(e).__name__}), so they don't close it"
+    if answer.startswith("yes"):
+        return ""
+    if answer.startswith("no"):
+        return f"the second look at his words says they don't close job {n} now"
+    return f"the second look at his words failed (it said {answer[:40]!r}), so they don't close it"
+
+
+def close_hit(n, words, places, ws=None):
+    """F145, the first gate: (why, his line) for WORDS as his go to close or settle job N from this call or this text (PLACES: its transcript
+    or thread), today. why is "" when they stand; his line ({"line", "turn"}) is None when there's none to show (a test copy without lines)."""
     if os.environ.get("HQ_IN_JOB"):
-        return "a job can't give itself his say-so"
+        return "a job can't give itself his say-so", None
     if not (words or "").strip():
-        return "no words of his were given"
+        return "no words of his were given", None
     if len(re.findall(r"\w+", words)) < 3 and not bare_yes(words):
-        return "a quote under three words proves nothing: give his whole line"
+        return "a quote under three words proves nothing: give his whole line", None
     text, jobs, _ = read()
     j = next((x for x in jobs if x["n"] == int(n)), None)
     if not j:
-        return f"there's no job {n} on the list"
+        return f"there's no job {n} on the list", None
     import sprint as sp_
     if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
-        return ""
+        return "", None
     hits = sp_.his_said_now(words, ws, places)
     if not hits:
-        return "those aren't his words from this call or this chat, today"
-    if not any(close_go(j["n"], j["text"], h["line"], h["turn"]) for h in hits):
-        return (f"those are his words, but they aren't his go to close job {n}: his own line has to say it closes (close, done, settle, "
-                f"may close) and name it (job {n}, or its row), with nothing holding it back, or be a plain yes right after you asked to "
-                f"close job {n}")
-    return ""
+        return "those aren't his words from this call or this chat, today", None
+    ok = [h for h in hits if close_go(j["n"], j["text"], h["line"], h["turn"])]
+    if not ok:
+        return (f"those are his words, but they aren't his go to close job {n}: his own line has to say it closes now (close it, close "
+                f"job {n}, it may close, done with it) and name it (job {n}, or its row), with nothing holding it back, or be a plain yes "
+                f"right after you asked one thing: to close job {n}"), None
+    return "", {**ok[-1], "what": j["text"]}
+
+
+def close_refused(n, words, places, ws=None):
+    """F145: the first gate's why, or "" (the policy asks it before the command runs; jobs.py done runs both gates)."""
+    return close_hit(n, words, places, ws)[0]
 
 
 def sayso(n, words, by="", ticket=None, what=""):
@@ -1314,8 +1388,10 @@ def main(argv):
                 args = args[:i] + args[i + 2:]
             import sprint as sp_
             here = sp_.words_from_env() if cmd == "done" and his is not None else None  # F145: from a call or a text, only its own words
-            if here is not None and not was.startswith("done"):
-                no_go = close_refused(j["n"], his, here)
+            if here is not None and not was.startswith("done"):  # F145: both gates, the words and the second look, for every kind of job
+                no_go, hit = close_hit(j["n"], his, here)
+                if not no_go and hit:
+                    no_go = close_look(j["n"], hit["what"], hit["line"], hit["turn"])
                 if no_go:
                     sys.exit(f"Refused: {no_go}. The job stays open.")
             if cmd == "done" and not was.startswith("done"):
@@ -1325,7 +1401,9 @@ def main(argv):
                              f"{j['n']} first. The job stays open.")
                 import proof
                 no = proof.refuses(j, text)
-                if no:  # F145: the word check above may refuse, never stand alone for a build without its record: the second look too
+                if no and here is not None:  # F145: both gates above passed on this call's or this text's words, the second look among them
+                    proof.keep_say_so(j, his)
+                elif no:  # by hand: his words, read by the second look as before
                     where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}", names=job_names(j["n"], j["text"])) if his else (None, "")
                     if not where:
                         sys.exit(f"Refused: {no} {why.capitalize() + '. ' if why else ''}The job stays open.")

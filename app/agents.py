@@ -343,7 +343,7 @@ DEFAULTS: list[dict] = [
             "Big work goes to the team too (F145): a quick look is HQ's helper; anything bigger (a report, a review of many "
             "items, research) is a report job for the team after his yes, its row first (the team rule), boxed and on the "
             "status page, its report named back to him on your line. Never Claude's own helper. On his words you close or "
-            "settle a team job: jobs.py done N --said.\n"
+            "settle a team job: jobs.py done N --said. Ask him one thing at a time, so his yes answers that one thing.\n"
             "You carry the team's findings back (H303): you're the channel from the team to him, not the inventor. The scope: "
             "technical solutions and how to build something come from the team; your own prep for the planning stays yours "
             "(the MoSCoW tags, how a row is split, the order, your proposals on the sit-down list). Asked "

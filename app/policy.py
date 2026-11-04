@@ -1461,10 +1461,15 @@ _STARTS = {"nohup", "setsid", "sudo", "doas", "caffeinate"}  # F145: what only s
 # F145, the second check: programs that start a command they're handed, often in quotes or after their own arguments (a session, a lock file, a
 # host): with one of them in the line, any claude, codex or openclaw in it counts as started.
 _STARTERS = {"tmux", "screen", "script", "watch", "flock", "chrt", "taskset", "unbuffer", "busybox", "ssh", "osascript", "su", "runuser",
-             "systemd-run", "at", "batch", "parallel", "expect", "dtach", "abduco"}
+             "systemd-run", "at", "batch", "parallel", "expect", "dtach", "abduco",
+             "strace", "ltrace", "gdb", "perf", "rlwrap", "cpulimit", "xvfb-run", "firejail", "docker", "podman"}  # F145, the third check
+_STARTER_RUNS = re.compile(r"(?<![\w-])(?:(?:uv|pipx|poetry|pdm|hatch|rye)\s+run|python[\d.]*\s+(?:-\S+\s+)*-m\s+pty)(?![\w-])")
+# F145: a line that only reads: its first program is one of these, so a claude, codex or openclaw in it is a word it looks for, not a program
+_PLAIN_READS = {"grep", "egrep", "fgrep", "rg", "which", "ls", "cat", "pgrep", "ps", "tail", "head", "git"}
 _CLAUDE_WORD = re.compile(r"(?:^|[\s\"'`/;&|(=])(?:claude|codex|openclaw)(?=[\s\"'`;&|)]|$)")
 _PACKAGE_RUN = re.compile(r"(?<![\w-])(?:npx|bunx|pnpx|(?:pnpm|yarn|bun)\s+(?:dlx|x|exec)|npm\s+(?:exec|x)|deno\s+run)\b[^;&|\n]*"
                           r"(?:@anthropic-ai/claude-code|@openai/codex|(?<![\w@/-])(?:claude|codex|openclaw)(?![\w-]))")
+_CLAUDE_PACKAGE = re.compile(r"(?:@anthropic-ai/)?claude-code(?:@\S*)?$|@openai/codex(?:@\S*)?$")  # F145: the package, run by uv, pipx, poetry ...
 _CLAUDE_IN_CODE = re.compile(r"[\"'`](?:[^\"'`\s]*/)?(?:claude|codex|openclaw)(?:[\"'`\s]|$)")
 
 
@@ -1478,18 +1483,30 @@ def _starts_a_claude(cmd: str, runs: str) -> bool:
         if str(HQ_ROUTINE) not in sys.path:
             sys.path.insert(0, str(HQ_ROUTINE))
         import cyclehook
-        for piece in re.split(r"[;&|\n()`]+", runs):
-            words = cyclehook._program(piece)
+        def program(words):
             while words and (os.path.basename(words[0]) in _STARTS or os.path.basename(words[0]) in cyclehook.WRAPPERS):
                 words = cyclehook._program(" ".join(words[1:]))
                 while words and words[0].startswith("-"):
                     words = words[1:]
-            if words and os.path.basename(words[0]) in RUNS_A_CLAUDE:
+            return os.path.basename(words[0]) if words else ""
+
+        for piece in re.split(r"[;&|\n()`]+", runs):  # a bare claude, codex or openclaw anywhere in a piece that isn't a plain read
+            words = cyclehook._program(piece)
+            if any(os.path.basename(w) in RUNS_A_CLAUDE for w in words) and program(list(words)) not in _PLAIN_READS:
                 return True
-        for raw in re.split(r"[;&|\n]+", cmd):  # a starter's own line as written: what it's handed is often in quotes
-            first = [w.strip("\"'`(") for w in raw.split() if not re.match(r"[A-Za-z_]\w*=", w)][:4]
-            if any(os.path.basename(w) in _STARTERS for w in first) and _CLAUDE_WORD.search(raw):
-                return True
+        for raw in re.split(r"[;&|\n]+", cmd):  # a starter anywhere in its line as written: what it's handed is often in quotes
+            toks = [w.strip("\"'`(),") for w in re.findall(r"[^\s\"'`]+", raw) if not re.match(r"[A-Za-z_]\w*=", w)]
+            if not toks or program(cyclehook._program(" ".join(toks))) in _PLAIN_READS:
+                continue
+            last_start, read_since = None, False
+            for i, w in enumerate(toks):
+                name = os.path.basename(w)
+                if name in _STARTERS or _STARTER_RUNS.match(" ".join(toks[i:i + 3])):
+                    last_start, read_since = i, False
+                elif last_start is not None and name in _PLAIN_READS:
+                    read_since = True  # ssh host "pgrep -af claude": the starter is handed a plain read
+                elif (name in RUNS_A_CLAUDE or _CLAUDE_PACKAGE.match(w)) and last_start is not None and not read_since:
+                    return True
         if _PACKAGE_RUN.search(cmd):
             return True
         return bool(cyclehook._RUNS_CODE_TEXT.search(cmd) and _CLAUDE_IN_CODE.search(cmd))

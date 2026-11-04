@@ -30186,7 +30186,10 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                   "/usr/local/bin/claude -p x", "sudo -u openclaw claude -p x", "setsid nohup codex exec x",
                   "tmux new-session -d \"claude -p x\"", "screen -dmS a claude -p x", "flock /tmp/l claude -p x", "ssh host claude -p x",
                   "osascript -e \"do shell script \\\"claude -p x\\\"\"", "watch -n 60 codex exec x", "taskset -c 1 openclaw run",
-                  "npx @anthropic-ai/claude-code -p x", "bunx @anthropic-ai/claude-code", "pnpm dlx @anthropic-ai/claude-code -p x")
+                  "npx @anthropic-ai/claude-code -p x", "bunx @anthropic-ai/claude-code", "pnpm dlx @anthropic-ai/claude-code -p x",
+                  "strace -f claude -p x", "ltrace claude", "gdb --args claude -p x", "perf record -- claude -p x", "rlwrap claude", "cpulimit -l 50 -- codex exec x",
+                  "xvfb-run openclaw run", "firejail claude -p x", "docker run img claude -p x", "podman run img codex", "uv run claude -p x",
+                  "pipx run claude-code", "poetry run claude -p x", "python3 -m pty claude", "echo go && claude", "tmux new -d -s a -n b \"x\" \"claude -p y\"")
         for where in ("call", "text"):
             pol = self._f114_policy(ws, "moneypenny", state if where == "text" else None)
             for c in starts:
@@ -30195,9 +30198,15 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 pol.approved.add(("Bash", P._key({"command": c})))
                 need(pol.decide("Bash", {"command": c}).verdict == P.DENY, f"{where}: a yes opened {c}")
             for c in (f"grep -n claude {H}/app/policy.py", f"grep -rn 'codex' {H}/routine/cyclehook.py", f"python3 {H}/routine/helper.py start \"what does claude -p do in HQ\"",
-                      f"grep -n tmux {H}/routine/tick.py"):
+                      f"grep -n tmux {H}/routine/tick.py", "ps aux | grep claude", "pgrep -af claude", f"git -C {H} log --oneline --grep claude"):
                 d = pol.decide("Bash", {"command": c})
                 need(d.verdict == P.ALLOW, f"{where}: reading about it was refused: {c}: {d.why[:160]}")
+        # The word claude in a plain read changes nothing: an ssh to the server asks as any ssh does, a look on this computer passes as any look does.
+        pol = self._f114_policy(ws, "moneypenny")
+        for word in ("claude", "python"):
+            d = pol.decide("Bash", {"command": f"ssh openclaw-vps \"pgrep -af {word}\""})
+            need(d.verdict == P.ASK, f"ssh with a plain read of {word}: {d.verdict} {d.why[:120]}")
+            need(pol.decide("Bash", {"command": f"ps aux | grep {word}"}).verdict == P.ALLOW, f"ps aux | grep {word} isn't free")
         def jobs(*a, ok=True, extra=None):
             r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT))
             if ok:
@@ -30258,8 +30267,15 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                  ("Noted.", "I checked the calendar and the inbox, close it"), (f"Job {n} is still open. Shall I close it?", f"Yeah, no, keep job {n} open for now"),
                  ("Noted.", f"Should job {n} close or stay open"), ("All fine. Anything for the team?", "hello Moneypenny how are you doing today"),
                  (f"Job {n} is waiting on you.", f"job {n}"), (f"Job {n} is done. Shall I put the dentist in?", "sure"),
-                 (f"Shall I keep job {n} open or close it?", "ok")]
-        go = [("Noted.", his), ("Noted.", real), ("Noted.", f"close job {n}, it's done"), (f"Shall I close job {n} as done?", "yes"),
+                 (f"Shall I keep job {n} open or close it?", "yep"),
+                 # the third check's lines: no go, whatever the second look would say
+                 ("Noted.", f"Tell me when job {n} is done"), ("Noted.", f"Job {n} will be done tomorrow"), ("Noted.", f"Job {n} is almost done"),
+                 ("Noted.", f"Is job {n} done"), ("Noted.", f"Job {n} is done badly, the report is wrong"), ("Noted.", f"When job {n} is done, close it"),
+                 ("Noted.", f"Close the dentist event, job {n} is still running"), ("Noted.", f"job {n} is finished"),
+                 (f"Shall I put the dentist in on Thursday and close job {n}?", "yeah sure"), (f"Job {n} is still running. Shall I close it?", "alright")]
+        go = [("Noted.", his), ("Noted.", real), ("Noted.", f"close job {n}, it's done"), ("Noted.", f"done with job {n}, close it"),
+              ("Noted.", f"#{n} can close"), ("Noted.", f"close job {n} please"), ("Noted.", f"job {n}'s done, close it"), ("Noted.", f"job {n} can be closed"),
+              (f"Job {n} is done. Shall I close it?", "yes"), (f"Shall I close job {n} as done?", "ok do it"),
               ("Noted.", f"close job {b}, it's done")]
         t0 = time.time()
         thread = [x for pair in no_go + go for x in (("agent", pair[0]), ("me", pair[1]))]
@@ -30289,7 +30305,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 for at in ("", "--at 12:00 "):
                     d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{words}\""})
                     need(d.verdict == P.DENY and "his" in d.why, f"done went through on a line that isn't his go: {words!r}: {d.verdict} {d.why}")
-            for _, words in go[:4]:
+            for _, words in go[:-1]:
                 for at in ("", "--at 12:00 "):
                     d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{words}\""})
                     need(d.verdict == P.ALLOW, f"done on his own go was refused: {words!r}: {d.why}")
@@ -30303,12 +30319,15 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         # The queue checks again, on the session's own words: a quick note, another day's call and lines that aren't his go stay refused.
         for words, place in ((f"yes close job {n} as done, settled", team), (f"yes, close job {n} now, it is finished", [str(call)]),
                              (f"Should job {n} close or stay open", team), ("yes, go ahead please", team), (f"Yes, job {n} stays open", team),
-                             ("I checked the calendar and the inbox, close it", team)):
+                             ("I checked the calendar and the inbox, close it", team), (f"Tell me when job {n} is done", team),
+                             (f"Is job {n} done", team), (f"When job {n} is done, close it", team), (f"Close the dentist event, job {n} is still running", team)):
             r = jobs("done", str(n), "--said", words, ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(place)})
             need(r.returncode != 0 and "Refused" in (r.stdout + r.stderr), f"the queue closed it on {words!r}: {r.stdout}{r.stderr[-200:]}")
-        # A build without its record: his go passes the word check, and the second look at his words still decides.
+        # His go passes the words, and the second look still decides: a no there keeps any job open, the report as much as a build.
+        r = jobs("done", str(n), "--said", f"close job {n} please", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "no"})
+        need(r.returncode != 0 and "second look" in (r.stdout + r.stderr), f"the report job closed on the words alone: {r.stdout}{r.stderr[-300:]}")
         r = jobs("done", str(b), "--said", f"close job {b}, it's done", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "no"})
-        need(r.returncode != 0 and "record" in (r.stdout + r.stderr), f"a build closed past its record on the word check alone: {r.stdout}{r.stderr[-300:]}")
+        need(r.returncode != 0 and "second look" in (r.stdout + r.stderr), f"a build closed past its record on the word check alone: {r.stdout}{r.stderr[-300:]}")
         r = jobs("done", str(b), "--said", f"close job {b}, it's done", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "yes"})
         need(r.returncode == 0, f"a build wasn't closed on his go and the second look's yes: {r.stdout}{r.stderr[-300:]}")
         (ws / "HQ/reports").mkdir(parents=True, exist_ok=True)
@@ -30333,7 +30352,7 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                 f"refused, also with a yes, reading about them free; the report: no row or a missing one refused, {label} written first, "
                 f"then job {n} (research, {rel} in its text, a small build refused); done, with --at or without, refused without his "
                 f"words, on a quick note, another day's call, another place, another job and {len(no_go)} lines that aren't his go, let "
-                f"through on {len(go) - 1} that are, by the policy and by the queue; a build past its record still needs the second look; the "
+                f"through on {len(go) - 1} that are (two gates: the words, then the second look, whose no keeps it open), by the policy and by the queue; a build past its record still needs the second look; the "
                 f"report's place in its done and on her line")
 
     async def flow478(self) -> str:
