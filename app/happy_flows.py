@@ -15939,6 +15939,91 @@ print("OK")
         need("plan" in role.WRITES["usagecost"] and "HQ/usage-plan.json" in role.ONE_WRITER, "the backup doesn't hand the plan to the main")
         return "the tag, the switch, the estimate, the learning and the way back on a made-up history"
 
+    async def flow482(self) -> str:
+        """F146, no Claude: the build's messages come from Moneypenny, Donna keeps to secretary work, on every HQ. On a fresh HQ
+        (the template's workspace) and this one, with her on: HQ acting up (the look at the incidents) and its all-clear, news on
+        his feedback, and the heads-up before the call lines restart each land in her thread, none in Donna's; what of them
+        waited through the night comes from her in the morning, Donna's own part from Donna. Switched off (HQ_TEAM_LINE=0) or
+        not set up (no Moneypenny among the agents), all four come from Donna, the backup."""
+        import shutil
+        import subprocess as _sp
+        d = self.tmp / "F146"
+        d.mkdir(exist_ok=True)
+        fresh = d / "fresh"
+        if not fresh.exists():
+            shutil.copytree(ROOT / "template", fresh)
+        child = r'''
+import json, os, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import direct_line as D
+import feedback
+import agents as A
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+setup = sys.argv[2]
+if setup == "missing":
+    real = A.load
+    A.load = lambda folder: [a for a in real(folder) if a["id"] != "moneypenny"]
+    D._agents.load = A.load
+team = Path(os.environ["HQ_DIRECT_DIR"]).parent / "team-line"
+def hers():
+    return D._lines(team / "thread.jsonl")
+want = "team" if setup == "on" else "direct"
+need(D.team_on() == (setup == "on"), f"{setup}: her line is {D.team_on()}")
+sent = []
+inc = {"id": "call-1", "key": "call", "down": time.time() - 600, "why": "the call line went quiet"}
+D.watch(None, main=False, incidents_data=[], spawn=lambda w, f: sent.append((w, f)))  # the first look takes stock
+D.watch(None, main=False, incidents_data=[inc], spawn=lambda w, f: sent.append((w, f)))
+D.watch(None, main=False, incidents_data=[{**inc, "back": time.time()}], spawn=lambda w, f: sent.append((w, f)))
+need([w for w, f in sent] == ["down", "back"], f"{setup}: the look at the incidents: {sent}")
+for w, f in sent:
+    D.text(w, f)
+feedback._text_them("feedback-status", 'What they sent: "the bar". It is now: planned.')
+D.text("restart", "the call line restarts in a minute for the new release; texts are back within a minute")
+kinds = ["down", "back", "feedback-status", "restart"]
+for w in kinds:
+    need(D.line_for(w) == want, f"{setup}: {w} goes on the {D.line_for(w)} line")
+on_hers, on_donnas = [m["why"] for m in hers()], [m["why"] for m in D.thread()]
+if want == "team":
+    need(on_hers == kinds and not on_donnas, f"on: hers {on_hers}, Donna's {on_donnas}")
+    need(all(m["from"] == "agent" for m in hers()), "on: a line not from her")
+else:
+    need(on_donnas == kinds and not on_hers, f"{setup}: Donna's {on_donnas}, hers {on_hers}")
+# the night: what waited of hers comes from her in the morning, Donna's own from Donna
+os.environ["HQ_ASLEEP"] = "1"
+for w, f in (("down", "temp: the laptop is warm"), ("back", "temp: back"), ("feedback-status", "planned"), ("rain", "rain at 3")):
+    need(D.text(w, f).get("held"), f"{setup}: {w} wasn't held at night")
+need(not D.text("restart", "the call line restarts in a minute").get("held"), f"{setup}: the heads-up waited for the morning")
+os.environ["HQ_ASLEEP"] = "0"
+ms = dict(D.morning_summaries())
+if want == "team":
+    need(set(ms) == {"night-summary", "team-night-summary"} and "rain" in ms["night-summary"] and "temp" not in ms["night-summary"]
+         and "feedback-status" in ms["team-night-summary"], f"on: the morning: {ms}")
+    need(D.line_for("team-night-summary") == "team" and D.line_for("night-summary") == "direct", "on: the morning's lines")
+else:
+    need(set(ms) == {"night-summary"} and "temp" in ms["night-summary"], f"{setup}: the morning: {ms}")
+print("OK")
+'''
+        said = []
+        for setup, where in (("on", "fresh"), ("on", "this"), ("off", "fresh"), ("missing", "fresh")):
+            e = d / f"{setup}-{where}"
+            env = {**os.environ, "HQ_DIRECT_DIR": str(e / "line"), "HQ_DIRECT_LOCAL": str(e / "local.json"), "HQ_DIRECT_DRY": "1",
+                   "HQ_DIRECT_PLAIN": "1", "HQ_ASLEEP": "0", "HQ_ROLE_HERE": "1"}
+            for k in ("HQ_TEAM_LINE", "HQ_TEAM_LINE_DIR", "HQ_DIRECT_TEAM", "HQ_DIRECT_AGENT", "HQ_DIRECT_PUSH_DIR", "HQ_DIRECT"):
+                env.pop(k, None)
+            if where == "fresh":
+                env["HQ_WORKSPACE"] = str(fresh)
+            if setup == "off":
+                env["HQ_TEAM_LINE"] = "0"
+            r = _sp.run([sys.executable, "-c", child, str(ROOT), setup], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
+            need(r.stdout.strip().endswith("OK"), f"{setup}, {where} HQ: " + (r.stdout + r.stderr)[-900:])
+            said.append(f"{setup} ({where} HQ)")
+        m = (ROOT / "MAINTAINING.md").read_text()
+        need("direct_line.py text restart" in m and "direct_line.py text remind" not in m, "the restart steps still send the heads-up as Donna's reminder")
+        return "the four build messages from Moneypenny, Donna's only without her: " + ", ".join(said)
+
     async def flow481(self) -> str:
         """nowroad, no Claude: his now reaches the team today, the whole road on real rows of a throwaway planning. A row Moneypenny writes
         from a text holds its words once (the Model column empty), a second row for the same thing is refused naming the first, his text by its line and time is a source; on a row of the old shape, words twice, reword changes the ask only and
@@ -38735,6 +38820,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now of today starts it with the open points, an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
