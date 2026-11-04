@@ -890,6 +890,8 @@ class Policy:
             name = Path(args[0]).name
             sub = args[1] if len(args) > 1 else ""
             mine = self.hq_script(args[0], name) or self.hq_app_script(args[0], name)
+            if mine and name == "handover.py" and len(args) == 4 and sub == "edit" and args[2] == LOG_REL:
+                return Decision(ALLOW, "the coaching log, through its script, after the call")  # afternotes: F114 sends the log through handover.py, the after-call run refused it
             if not mine or not (name in AFTER_CALL_SCRIPTS or sub in AFTER_CALL_READS.get(name, ())):
                 return Decision(DENY, f"after a call only the log, the lists and the transcript are written, so {name} "
                                       f"{sub} waits: leave it as a follow-up in the log")

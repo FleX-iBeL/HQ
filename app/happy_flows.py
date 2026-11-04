@@ -18650,7 +18650,8 @@ print(json.dumps({'got': [c for c in ways for m in (True, False) if ask(c, m)[0]
         env.update({"HQ_FEATURES_PIECES": str(pieces), "HQ_UNDER_TEST": "1", "HQ_PROOF_ON": "1", "HQ_REVIEW": "1", "HQ_LOOK": "0", "HQ_NO_WALL": "1"})
         (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
         (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
-        (ws / "HQ/calls/2026-10-31-0900.md").write_text("# Call\n\n- 09:00:00 **HQ:** Shall I turn it on?\n- 09:00:10 **Me:** thank you very much for that, and yes go ahead with it\n")
+        day0900 = time.strftime("%Y-%m-%d") + "-0900"  # nowroad: a now stands on his words of today, so his call is today's
+        (ws / f"HQ/calls/{day0900}.md").write_text("# Call\n\n- 09:00:00 **HQ:** Shall I turn it on?\n- 09:00:10 **Me:** thank you very much for that, and yes go ahead with it\n")
         rm = ws / "HQ/roadmap.md"
         rm.write_text(rm.read_text().replace("| | Step | What you get | Model |\n|---|---|---|---|\n",
                                               "| | Step | What you get | Model |\n|---|---|---|---|\n| ⬜ | H9500 A half-built thing | His words. | | |\n| ⬜ | H9301 A flagged row | Something to build. | | |\n", 1))
@@ -18705,7 +18706,7 @@ print(sprint.his_yes('thank you very', 'turning on the made-up thing', ws=sys.ar
         r = await asyncio.to_thread(lambda: _sp.run([sys.executable, "-c", code, str(ROOT), str(ws)], capture_output=True, text=True, env=e, cwd=str(ROOT), timeout=120))
         need(r.returncode == 0, f"the look itself: {r.stdout[-300:]} {r.stderr[-400:]}")
         out = r.stdout
-        need("HQ/calls/2026-10-31-0900.md" in out.splitlines()[0] and "turning on the made-up thing" in out and "Shall I turn it on?" in out and "and yes go ahead with it" in out, f"what the look was given: {out}")
+        need(f"HQ/calls/{day0900}.md" in out.splitlines()[0] and "turning on the made-up thing" in out and "Shall I turn it on?" in out and "and yes go ahead with it" in out, f"what the look was given: {out}")
         need("aren't a yes" in out.splitlines()[-1], f"a stand-in outside a test: {out}")
         return "six doors: a no, garbage, a failed look and no stand-in refuse and say so, a yes goes; words that aren't his never get as far as the look"
 
@@ -19095,7 +19096,7 @@ print(json.dumps(out))
         # the newest place by time, not by kind; a yes on a thread answering her line there
         (ws / "HQ/team-line").mkdir(exist_ok=True)
         t = ws / "HQ/team-line/thread.jsonl"
-        old, new = 1700000000, time.mktime(time.strptime("2026-11-02 09:00:00", "%Y-%m-%d %H:%M:%S"))
+        old, new = 1700000000, time.time() - 60  # nowroad: the newest line is today's, a now stands on his words of today
         for at, want in ((old, "HQ/calls/2026-11-01-0900.md"), (new, "HQ/team-line")):
             t.write_text(json.dumps({"at": at - 5, "from": "agent", "text": "Shall I go on with the other thing?"}) + "\n" + json.dumps({"at": at, "from": "me", "text": "go ahead with it now"}) + "\n")
             got = ask([she("Which one?"), he("go ahead with it now")], ["go ahead with it now", job], fake="yes")[0]
@@ -19122,7 +19123,7 @@ print(seen[0])
         # at a door, with a bare yes and no claude
         job_py = lambda *a: _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=60)
         n = re.search(r"Job (\d+) is ready", job_py("add", "Build the made-up page", "--kind", "small").stdout).group(1)
-        (calls / "2026-11-01-0900.md").write_text("# Call\n\n" + she(f"It waits for the night. Start job {n} now?") + he("Yes"))
+        (calls / f"{time.strftime('%Y-%m-%d')}-0900.md").write_text("# Call\n\n" + she(f"It waits for the night. Start job {n} now?") + he("Yes"))  # nowroad: his now of today
         r = job_py("now", n, "--said", "Yes")
         need(r.returncode == 0, f"the door with a bare yes: {r.stdout} {r.stderr[-300:]}")
         return "a plain yes tied to the thing passes every time with no model, a bare one too; a no is refused whatever a look says; only the rest goes to the look; the newest place is by time, the look's context is named"

@@ -209,7 +209,7 @@ A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits"
 a row's words stand once). Words added to an open row, his quotes and its Sources too: python3 "@HQ@/routine/review.py" add LABEL "WORDS". \
 His now for a row ("give it to the team now", "run it immediately", today) means you get it ready yourself, right away, in this same \
 reply: the open row that has it (write-row refuses a second one), or a new row, with His words: "his words, quoted exactly" and Sources: \
-(a row, a rule, a dated call, a file, or his text by its line and time: his text on the team line, 4 November 2026 17:42) in it before the first round, then python3 "@HQ@/routine/review.py" now LABEL (a round: the review of its words as they \
+(a row, a rule, a dated call, a file, or his text by its line, its date and its clock time, as the fields check's refusal shows) in it before the first round, then python3 "@HQ@/routine/review.py" now LABEL (a round: the review of its words as they \
 stand; any change after it needs a round again); on a flag, answer each finding in the row's words (review.py add LABEL "..." or reword), then review.py now again, three rounds at \
 most. Passed: python3 "@HQ@/routine/sprint.py" ready LABEL, then python3 "@HQ@/routine/jobs.py" send-row LABEL --now --said "HIS WORDS OF \
 TODAY". Still flagged after the third: send-row LABEL --not-ready --now --said "HIS WORDS OF TODAY" sends it with the open points. The program \

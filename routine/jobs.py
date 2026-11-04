@@ -390,12 +390,12 @@ def same_open_row(text, said):
         cs = hqpaths.cells(r["line"])
         theirs = bare(cs[1].split(" ", 1)[1] if " " in cs[1] else cs[1]).split()[:14]
         k = min(len(mine), len(theirs))
-        if k < 4:
+        if k < 6:  # a short title says too little: "A row from a run" and "A row from a text" are two rows
             continue
         like = difflib.SequenceMatcher(None, mine[:k], theirs[:k]).ratio()
         if like >= 0.75 and nums(mine[:k]) == nums(theirs[:k]):
             return {"label": r["label"], "why": f"its title is nearly the same: {cs[1][:70]}"}
-        if like >= 0.5 and k >= 6 and len(cs) > 2 and cs[2].startswith(today):
+        if like >= 0.5 and len(cs) > 2 and cs[2].startswith(today):
             return {"label": r["label"], "why": f"it was written today and its title is much the same: {cs[1][:70]}"}
         ask = bare(sp_.ask_of(r["line"]))
         hit = next((x for x in quotes if x[:200] in ask), None)
