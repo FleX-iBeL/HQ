@@ -352,7 +352,7 @@ def her_turn(root, env):
     """H: her own model on his real text with his now, as in production; the job, if any, must carry her sealed tests."""
     th = root / "workspace" / "HQ" / "team-line" / "thread.jsonl"
     before_jobs = set(json.loads(py(root, env, "import jobs\nprint(json.dumps([j['n'] for j in jobs.read()[1]]))")))
-    words = ("On the status page, the done card says Nothing yet. when nothing's done today. I'd like it to say Nothing done yet today. "
+    words = ("On the status page's planning, a row without a rank says No rank yet. I'd like it to say Not ranked yet. "
              "Please give it to the team and let's run it immediately once it's ready.")
     nowroad.his_text(root, words)
     at = json.loads(th.read_text(encoding="utf8").splitlines()[-1])["at"]
