@@ -203,6 +203,20 @@ def _writes_on(name: str) -> "re.Pattern":
 
 
 _SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+# 4 November 2026: what Moneypenny's QA work needs without his yes. The logs of the night: every look into her test folder,
+# every which, find and python -c import asked him, so in a text she stopped and waited for him. A command passes here only
+# when nothing in it writes, sends or runs one of HQ's own scripts (those keep their own rules below).
+_LOOK_WRITES = re.compile(r">|<<|\b(?:rm|mv|cp|tee|truncate|dd|chmod|chown|ln|install|rsync|touch|mkdir|rmdir|kill|pkill|killall|"
+                          r"sudo|su|curl|wget|ssh|scp|nc|crontab|systemctl|launchctl|osascript|open|npm|pip|pip3|claude)\b|"
+                          r"\bsed\s+(?:-[a-zA-Z]*\s+)*-i|\bgit\s+(?!log\b|show\b|diff\b|status\b|grep\b|ls-files\b|rev-parse\b|blame\b)\w|"
+                          r"\bfind\b[^|;&]*\s-(?:delete|exec|execdir|ok|fprint\w*|fls)\b", re.I)
+_HQ_SCRIPT = re.compile(r"(?:^|[\s/])(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b")
+
+
+def _her_look(cmd: str, runs: str) -> bool:
+    if _LOOK_WRITES.search(cmd) or re.search(_CODE_WRITES, runs):
+        return False
+    return not _HQ_SCRIPT.search(cmd)
 _SHELL_WRITE_GUARDED = _writes_on(_GUARDED_NAME)
 # F114: the scripts that stand on his own words or his yes, and what would run them past the policy's own reading of the line.
 _HIS_NAMES = ("cycles.py", "usageline.py", "feedback.py")
@@ -597,6 +611,9 @@ class Policy:
             return _ask(f"change {Path(path).name}, outside your workspace", "a file outside the folder")
         rel = self.rel(path)
         top = rel.parts[0] if rel.parts else ""
+        if self.team_texts and tuple(rel.parts[:2]) == ("HQ", "qa-tests") and len(rel.parts) >= 4:
+            # 4 November 2026: real QA makes her write her own tests; asking his yes for each edit left him in the middle
+            return Decision(ALLOW, "her own QA tests for an item (the program checks and seals them)")
         if top in self.protected:
             return Decision(DENY, f"the {top} folder is never changed")
         if re.match(r"^my notes .*\.md$", rel.name, re.I):
@@ -832,6 +849,8 @@ class Policy:
         m = _NAMES_SCRIPT.search(cmd)
         if m and not self._script_shape_ok(re.sub(r"(?<=\s)2>(?:/dev/null|&1)(?=\s|$)", " ", cmd)):  # F114: only these exact two, nothing after them
             return _wrapped(m.group(1))
+        if self.team_texts and _her_look(cmd, runs):  # 4 November 2026: real QA, her looks and her test runs
+            return Decision(ALLOW, "a look of hers, or a run of her own QA tests: nothing written")
         cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
         # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
         loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
