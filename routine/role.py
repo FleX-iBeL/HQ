@@ -86,7 +86,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place 
           "review": {"clear", "reword", "add", "sitdown", "no", "keep", "now"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
           "set_status": {"set"},  # F101: the status block from a call on the backup
           "agenda": {"changed"},  # F58: the mark that something wrote in the calendar (the main reads it again)
-          "direct_line": {"put"},  # F58: a line of a text thread (Donna's, the team line, the coaching line)
+          "direct_line": {"put", "reply-bg"},  # F58: a line of a text thread (Donna's, the team line, the coaching line); her answer runs on the main (4 November 2026)
           "notes": {"put", "clear-id", "restore-id"},  # F102: his quick notes, like the text lines
           "about_self": {"add"},  # F102: what an agent says about herself, written by the main
           "usagecost": {"plan"},  # F107: the plan in use, written only by the main

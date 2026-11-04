@@ -1194,6 +1194,17 @@ def _harvest(words: str) -> None:
 def reply() -> str | None:
     """Answer his newest texts as her, with the workspace and the call's limits. One reply at a time; texts that
     came in meanwhile are answered right after."""
+    if _backup() and os.environ.get("HQ_DIRECT_COACHING") != "1":
+        # 4 November 2026: on the backup she can't reach the main, where the planning, the team and her QA tests live,
+        # so her answer runs on the main; only when the main can't be reached does the backup answer, as before.
+        line = "team" if os.environ.get("HQ_DIRECT_TEAM") == "1" else "donna"
+        try:
+            import role
+            code, _out, _err, how = role.hand("direct_line", ["reply-bg", line], timeout=20, keep=False)
+            if how == "main" and code == 0:
+                return None
+        except Exception:
+            pass
     lock = open(folder() / ".reply.lock", "a")  # H152
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1554,6 +1565,16 @@ if __name__ == "__main__":
         print(json.dumps(m, ensure_ascii=False) if m else "quiet")
     elif cmd == "reply":
         print(reply() or "")
+    elif cmd == "reply-bg" and len(args) >= 2 and args[1] in ("team", "donna"):  # the backup handed her answer here
+        env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_HERE"}
+        if args[1] == "team" and team_on():
+            env = team_env(env)
+        py = str(VENV_PY) if VENV_PY.exists() else sys.executable
+        log = ROOT / "scratch" / "direct-line.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([py, str(Path(__file__).resolve()), "reply"], cwd=str(ROOT), env=env,
+                         stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+        print("started")
     elif cmd == "subscribe":
         body = json.loads(sys.stdin.read() or "{}")
         print(json.dumps({"ok": True, "phones": subscribe(body.get("subscription") or {}, body.get("device") or "")}))
