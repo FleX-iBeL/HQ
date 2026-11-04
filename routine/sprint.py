@@ -817,7 +817,7 @@ NOW_ABOUT = ("giving {names} to the team now, to be built today, not waiting for
 
 # nowroad: his now, read by the program when it's plain, so one small look's mood can't turn it down (the look said no to "Please give it to
 # the team and lets run it immediately once it's ready" one time in four on 4 November). Plain is: a line of his from today, in the place this
-# text or call came in, with one sentence holding a now word and a go to the team or the build and nothing holding that sentence back, and the row's own His words quote that very
+# text or call came in, with one sentence holding a now word and a go to the team or the build and nothing holding that sentence back, and the row quotes that very
 # line, so a now about another thing never opens this row. Anything else goes to the look as before.
 _NOW_WORD = re.compile(r"(?<![\w'])(?:now|right now|immediately|right away|straight away|asap|today|this afternoon|this morning)(?![\w'])")
 _NOW_GO = re.compile(r"(?<![\w'])(?:give it to the team|to the team|run it|build it|start it|start building|send it|get it built|"
@@ -837,9 +837,9 @@ def now_reading(said, labels, ws=None):
     line = _bare(hit["line"])
     for label in labels:
         row = next((r for r in open_rows() if r["label"] == label), None)
-        his = field_texts(row["line"])["his_words"] if row else ""
-        quotes = [m.group(1) for marks in QUOTE_MARKS for m in marks.finditer(his)]
-        if not any(_bare(q) and _bare(q) in line for q in quotes):
+        ask = ask_of(row["line"]) if row else ""  # his words quoted anywhere in the row (a quote in a row is only ever his)
+        quotes = [m.group(1) for marks in QUOTE_MARKS for m in marks.finditer(ask)]
+        if not any(len(_bare(q).split()) >= HIS_QUOTE_WORDS and _bare(q) in line for q in quotes):
             return None
     return hit["where"]
 

@@ -979,13 +979,16 @@ def main(argv):
             import sprint as sp_  # H272: only a row marked ready goes to the team from the page
             row = next((r for r in sp_.open_rows(text) if r["label"] == label), None)
             why = sp_.not_ready_why(row) if row else None
+            if why and "--now" in args and "--said" in args and "--not-ready" not in args:  # nowroad: his now is his say-so; the gate reads his words
+                args, keep = args + ["--not-ready"], keep + ["--not-ready"]
             if why and "--not-ready" not in args:  # nowroad: his say-so goes on to add's gate, which checks his words
                 sys.exit(f"{why}. Only rows marked ready go to the team; mark it ready first, or on his explicit say-so: "
                          f"send-row {label} --not-ready --said \"his words\" (with --now for today, from his words of today).")
             import estimate as est_
             title = one_line(title).replace("·", "-").rstrip(".")
             cmd = "add"
-            args = [f"{label} on the HQ roadmap, sent to the team from the status page: {title}. Read the {label} row "
+            how_ = "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call" if os.environ.get("HQ_WORDS_FROM") else "from the status page"  # nowroad: where it came from
+            args = [f"{label} on the HQ roadmap, sent to the team {how_}: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
                     f"write the result in the {label} row.", "--item", label, "--kind", est_.kind_of(line), *keep]
         if cmd == "add":

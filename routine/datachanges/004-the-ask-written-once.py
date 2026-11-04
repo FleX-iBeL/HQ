@@ -56,23 +56,27 @@ def do(folder):
         kept = {}
         sp = Path(folder) / "HQ" / "sprint.json"  # this folder's own, never another's (datachange.py try runs this on a copy)
         d = json.loads(sp.read_text(encoding="utf8")) if sp.exists() else {}
-        marks = d.get("ready") or {}
+        marks = json.loads(json.dumps(d.get("ready") or {}))  # a copy: only a mark that really changes rewrites the file
+        moved = False
         for i, line in _rows(text):
             cs, spans = hqpaths.cells(line), hqpaths.cell_spans(line)
-            if len(cs) < 4 or len(spans) != len(cs) or len(cs[3]) < 20 or not cs[2].endswith(cs[3]) or any(cs[4:]):
+            if len(cs) < 4 or len(spans) != len(cs) or len(cs[3]) < 20 or not cs[2].endswith(cs[3]):  # the team's notes in a cell after it stay
                 continue
             label = cs[1].split(" ", 1)[0]
             m = marks.get(label)
             if isinstance(m, dict) and not m.get("ask") and S.mark_holds(m, line):
                 m["ask"] = S.ask_fp(line)
+                moved = True
             a, b = spans[3]
             lines[i] = line[:a] + line[b:]
             kept[label] = {"was": line, "row": lines[i]}
         if not kept:
             return
-        if marks:
+        if moved:
+            was = sp.read_text(encoding="utf8")
             d["ready"] = marks
             _write(str(sp), json.dumps(d, ensure_ascii=False, indent=1))
+            kept["__sprint__"] = {"was": was, "row": sp.read_text(encoding="utf8")}  # the undo puts the file back as it was, if it's still this
         p = Path(folder) / KEPT
         old = json.loads(p.read_text(encoding="utf8")) if p.exists() else {}
         old.update(kept)
@@ -97,4 +101,7 @@ def undo(folder):
             if k and line == k["row"]:  # only a row as this left it: one changed since is his
                 lines[i] = k["was"]
         _write(str(road), "\n".join(lines))
+        sp, k = Path(folder) / "HQ" / "sprint.json", kept.get("__sprint__")
+        if k and sp.exists() and sp.read_text(encoding="utf8") == k["row"]:
+            _write(str(sp), k["was"])
     p.unlink()
