@@ -1458,13 +1458,22 @@ def _hide_quoted_dollars(cmd: str) -> str:
 
 RUNS_A_CLAUDE = ("claude", "codex", "openclaw")  # F145: as cyclehook.RUNS: a general-purpose agent outside HQ's harness
 _STARTS = {"nohup", "setsid", "sudo", "doas", "caffeinate"}  # F145: what only starts the next program, past cyclehook's wrappers
+# F145, the second check: programs that start a command they're handed, often in quotes or after their own arguments (a session, a lock file, a
+# host): with one of them in the line, any claude, codex or openclaw in it counts as started.
+_STARTERS = {"tmux", "screen", "script", "watch", "flock", "chrt", "taskset", "unbuffer", "busybox", "ssh", "osascript", "su", "runuser",
+             "systemd-run", "at", "batch", "parallel", "expect", "dtach", "abduco"}
+_CLAUDE_WORD = re.compile(r"(?:^|[\s\"'`/;&|(=])(?:claude|codex|openclaw)(?=[\s\"'`;&|)]|$)")
+_PACKAGE_RUN = re.compile(r"(?<![\w-])(?:npx|bunx|pnpx|(?:pnpm|yarn|bun)\s+(?:dlx|x|exec)|npm\s+(?:exec|x)|deno\s+run)\b[^;&|\n]*"
+                          r"(?:@anthropic-ai/claude-code|@openai/codex|(?<![\w@/-])(?:claude|codex|openclaw)(?![\w-]))")
 _CLAUDE_IN_CODE = re.compile(r"[\"'`](?:[^\"'`\s]*/)?(?:claude|codex|openclaw)(?:[\"'`\s]|$)")
 
 
 def _starts_a_claude(cmd: str, runs: str) -> bool:
     """F145: whether a shell line would start claude, codex or openclaw: as its program, behind timeout, nohup, env and the like, inside what a
     shell is handed (sh -c, eval, a heredoc), or named as a program in code handed to Python, node, perl or ruby (subprocess, os.system).
-    Reading or grepping for the word isn't starting it. HQ's own helper (routine/helper.py) starts its model itself, not from here."""
+    Reading or grepping for the word isn't starting it. HQ's own helper (routine/helper.py) starts its model itself, not from here.
+    A known limit of reading the words: a name built up inside code ("cl" + "aude") or a script written first and run after isn't caught here
+    (the script's write and its run ask on their own)."""
     try:
         if str(HQ_ROUTINE) not in sys.path:
             sys.path.insert(0, str(HQ_ROUTINE))
@@ -1477,6 +1486,12 @@ def _starts_a_claude(cmd: str, runs: str) -> bool:
                     words = words[1:]
             if words and os.path.basename(words[0]) in RUNS_A_CLAUDE:
                 return True
+        for raw in re.split(r"[;&|\n]+", cmd):  # a starter's own line as written: what it's handed is often in quotes
+            first = [w.strip("\"'`(") for w in raw.split() if not re.match(r"[A-Za-z_]\w*=", w)][:4]
+            if any(os.path.basename(w) in _STARTERS for w in first) and _CLAUDE_WORD.search(raw):
+                return True
+        if _PACKAGE_RUN.search(cmd):
+            return True
         return bool(cyclehook._RUNS_CODE_TEXT.search(cmd) and _CLAUDE_IN_CODE.search(cmd))
     except Exception:
         return bool(re.search(r"(?:^|[\s;&|(`'\"/])(?:claude|codex|openclaw)\s+(?:-|exec\b)", cmd))

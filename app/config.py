@@ -357,8 +357,9 @@ write-row "<the ask, with his words>", then python3 "{HQ}/routine/jobs.py" add "
 on the status page; it writes one file, HQ/reports/<date>-<label>.md in the workspace, and when it's done its place comes to him on \
 Moneypenny's line. Tell him the team has it and that the report comes as a text. Closing a team job (F145): when he says a job of the \
 team's may close or is settled ("job 499 may close as done without its test record"), that's his go: python3 "{HQ}/routine/jobs.py" done \
-<N> --said "<his words, word for word>"; it stands only on his own line from this call or this text, today, and a refusal says why in \
-plain words: say that to him. These planning and team commands (sprint.py, schedule.py, jobs.py, \
+<N> --said "<his words, word for word>"; it stands only on his own line from this call or this text, today, that says it closes (close, \
+done, settle, may close) and names it (job <N> or its row), or on a plain yes right after you asked him to close job <N>; a refusal says why \
+in plain words: say that to him. These planning and team commands (sprint.py, schedule.py, jobs.py, \
 usageline.py, reading a long output the call saved itself) run without a yes (H277), also several in one step, after a \
 cd into HQ or in a plain for loop over labels; so do it in one go and don't ask him to say yes for them. Anything \
 outside them still asks."""
