@@ -1129,6 +1129,16 @@ def main(argv):
             j = find(jobs, int(args[0]))
             if not (j["state"] == "ready" or j["state"].startswith("held")):
                 sys.exit(f"Job {j['n']} is {j['state']}; only a waiting job can go now.")
+            if "without the Ready mark" in j["text"] and not ticket:  # nowroad: an unready row's job goes in the day only after her rounds
+                import qa as qa_
+                import review as rv_
+                import sprint as sp_
+                lab = qa_.job_label(j["text"])
+                r_ = next((x for x in sp_.open_rows(text) if x["label"] == lab), None)
+                if r_ and sp_.ready_of([r_]).get(lab) != "ready":
+                    no_ = rv_.now_door_why(r_)
+                    if no_:
+                        sys.exit(no_)
             s = sayso(j["n"], his, by, ticket, j["text"])
             if not s:
                 sys.exit("Refused: a build in his day hours goes only on his own say-so: --said with a line he said or typed, or his tap "

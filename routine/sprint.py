@@ -875,6 +875,15 @@ def gate(text, job_text_, say_so=False, said=None, now=False):
     if now:  # nowroad: his now, said today, is the say-so for the whole road: he decided, getting it ready is ours
         if not his_said_now(said or "", places=words_from_env()):
             sys.exit("Refused: now takes his own words from today, as he said or typed them on this call or in this text. Nothing added.")
+        try:
+            import review
+            door = [w for w in (review.now_door_why(r) for r in rows if r["label"] in names) if w]
+        except SystemExit:
+            raise
+        except Exception as ex:
+            door = [f"Refused: the review's state couldn't be read ({ex!r})"]
+        if door:  # nowroad: the program holds her to it: his now sends an unready row only after its rounds
+            sys.exit(" ".join(door) + " Nothing added.")
         where = now_reading(said, names)
         where, no = (where, "") if where else his_yes(said, NOW_ABOUT.format(names=", ".join(names)), names=names)
     else:

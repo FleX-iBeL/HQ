@@ -15945,7 +15945,8 @@ print("OK")
         the other cells stay byte for byte, and data change 004 clears the copy and its undo puts it back. Her words and his quote go in with
         review.py add, which a text may run. A re-review only asks whether the earlier points are settled by a sentence that stands in the row
         and whether a changed sentence brings a hole of its own: a point about words that didn't change doesn't count, a passed row whose words
-        before aren't kept gets a first review. His now: send-row without the Ready mark is refused without his words and says how; with an old
+        before aren't kept gets a first review. Her rounds: review.py now reviews the words as they stand, one round per wording, three at
+        most, and his now refuses an unready row until three rounds ran on its words as they stand. His now: send-row without the Ready mark is refused without his words and says how; with an old
         line of his it's refused; with his line of today, which the row's His words quote, it goes without a look (the look stands in as no)
         and carries the review's open points; a now the row doesn't quote goes to the look and its no holds. The routine's real minute starts
         the job in his day hours. A policy with no agent never writes a ledger, and under test the real ledger is never written."""
@@ -16033,7 +16034,24 @@ print("OK")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", "Give it to the team and run it now please.")
         need(r.returncode != 0 and "today" in (r.stdout + r.stderr), f"an old now of his: {r.stdout} {r.stderr}")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+        need(r.returncode != 0 and "0 of 3 rounds" in (r.stdout + r.stderr), f"his now went before her rounds: {r.stdout} {r.stderr}")
+        need(jobs("send-row", label, "--now", "--said", now_words).returncode != 0, "a now without --not-ready went before her rounds")
+        for k in (1, 2, 3):  # her rounds: a review of the words as they stand, each after a change of hers
+            r = script("review.py", "now", label)
+            need(r.returncode == 0 and f"Round {k} of 3" in r.stdout and "which card" in r.stdout, f"round {k}: {r.stdout} {r.stderr}")
+            again = script("review.py", "now", label)
+            need(again.returncode != 0 and "haven't changed" in (again.stdout + again.stderr), f"a round on the same words counted: {again.stdout}")
+            if k < 3:
+                r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+                need(r.returncode != 0 and f"{k} of 3 rounds" in (r.stdout + r.stderr), f"his now went after {k} rounds: {r.stdout} {r.stderr}")
+                need(script("review.py", "add", label, f"Her answer {k}: the team names the card it picks.").returncode == 0, f"her answer {k}")
+        r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
         need(r.returncode == 0, f"his now of today: {r.stdout} {r.stderr}")
+        sent = r
+        need(script("review.py", "add", label, "Her answer 3: the team names the card it picks.").returncode == 0, "her answer 3")
+        r = script("review.py", "now", label)
+        need(r.returncode != 0 and "3 rounds have run" in (r.stdout + r.stderr), f"a fourth round: {r.stdout}")
+        r = sent
         n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
         line = next(l for l in rm.read_text().split("\n") if l.startswith(f"- Job {n} "))
         need("⟪sayso" in line and "The review's open points" in line and "which card" in line, f"the job doesn't carry his now and the open points: {line}")
