@@ -210,7 +210,8 @@ _LOOK_WRITES = re.compile(r">|<<|\b(?:rm|mv|cp|tee|truncate|dd|chmod|chown|ln|in
                           r"sudo|su|curl|wget|ssh|scp|nc|crontab|systemctl|launchctl|osascript|open|npm|pip|pip3|claude)\b|"
                           r"\bsed\s+(?:-[a-zA-Z]*\s+)*-i|\bgit\s+(?!log\b|show\b|diff\b|status\b|grep\b|ls-files\b|rev-parse\b|blame\b)\w|"
                           r"\bfind\b[^|;&]*\s-(?:delete|exec|execdir|ok|fprint\w*|fls)\b", re.I)
-_HQ_SCRIPT = re.compile(r"(?:^|[\s/])(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b")
+_HQ_SCRIPT = re.compile(r"\b(?:python[\d.]*|node|bash|sh|zsh)\s+(?:-\S+\s+)*[\"']?\S*(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b"
+                        r"|(?:^|[;&|]\s*)\.?/?\S*(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b")  # run, not read
 
 
 def _her_look(cmd: str, runs: str) -> bool:
