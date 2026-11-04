@@ -337,7 +337,14 @@ def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
 def _not_tried() -> list[str]:
     """H313: the happy flows not run for real here, each one holding the record. A test's stand-in for the flows (HQ_PROOF_RUNNER) tests
     the proof's own workings, not the app, so it has none."""
-    return [] if os.environ.get("HQ_PROOF_RUNNER") else happy.not_tried()
+    if os.environ.get("HQ_PROOF_RUNNER"):
+        return []
+    return [w for w in happy.not_tried() if not re.match(rf"happy flow (?:{'|'.join(map(str, LATER))}) not tried", w)]
+
+
+# 4 November 2026, his words: "we can do the 3 untried flows later once we have actually built those parts. keep them as an
+# item for the planning for now" (H316). Until H316 makes them runnable they don't hold a build; everything else still does.
+LATER = (9, 12, 14)
 
 
 def skipped_flows(out: str) -> list[int]:
