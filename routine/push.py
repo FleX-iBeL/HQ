@@ -54,7 +54,7 @@ REWRITTEN = {
 # F67 (job 435): the laptop's one-time start, from the workspace folder next to HQ. Its own push.py is the
 # one from before, which only fast-forwards, so its pull is refused and the new one never arrives that way; this takes
 # the new push.py from GitHub's dev next to the old one and runs its pull. Written the same in the build notes ("The
-# laptop's one-time start after the rewrite (F67)"); happy flow 183 runs it on a stand-in that starts from the old one.
+# laptop's one-time start after the rewrite (F67)"); detailed flow 183 runs it on a stand-in that starts from the old one.
 BOOTSTRAP = ("git -C ../HQ checkout dev && git -C ../HQ fetch origin dev && "
              "git -C ../HQ show origin/dev:routine/push.py > ../HQ/routine/push_f67.py && "
              "python3 ../HQ/routine/push_f67.py --pull; rm -f ../HQ/routine/push_f67.py")

@@ -1,5 +1,7 @@
-"""The happy flows: the main things a call must do when all goes well (phase G of the roadmap).
-Run them before and after every update; they print a short pass/fail table at the end.
+"""The detailed flows (called the happy flows until H313): HQ's checks, one or more per feature, most with stand-ins (phase G).
+H313 (4 November 2026): only the 17 of routine/happy.py are the happy flows; they run for real as the build's gate, and these run at
+night. This file keeps its old name for now (another branch was editing it the same day); its flows 601 to 608 are the 17's own steps.
+They print a short pass/fail table at the end.
 
     .venv/bin/python app/happy_flows.py                # all ten flows
     .venv/bin/python app/happy_flows.py --quick        # only the flows without Claude turns (1, 8, 9, 10, 15, 16, 18, 19, 20, 21, 23, 25, 26, 27, 28, 29, 30, 31, 33, 34)
@@ -4552,7 +4554,7 @@ window.addEventListener('load', () => setTimeout(() => {
         need(">M</text>" in agents.picture_svg(m) and "#ca8a04" in agents.picture_svg(m), "her placeholder isn't a yellow M")
         # H256: her craft, the definition of ready and done, is in her persona on every call with her, and nobody else's.
         pm = agents.persona(m, "Alex")
-        for w in ("definition of ready", "what done means", "concrete examples", "new happy flows", "out of scope",
+        for w in ("definition of ready", "what done means", "concrete examples", "new detailed flows", "the 17 happy flows", "not tried", "out of scope",
                   "call line restarts", "split into pieces", "privacy check", "definition of done", "old flows",
                   "tutorial and the changelog", "you first, in QA", "sprint planning"):
             need(w in pm, f"her persona misses {w!r} of the definition of ready and done")
@@ -21173,7 +21175,7 @@ print(json.dumps(out))
             need(passed == "1 flow of 1 extension passes", f"the nightly's flow once the extension's flows pass: {passed}")
             need(not FLOWS[472][1] and str(472) not in __import__("flowsets").MAC_ONLY.split(","), "the nightly set doesn't run the extensions' flows")
             doc = (ROOT / "EXTENSIONS.md").read_text()
-            need("**flows**" in doc and "happy flow 472" in doc and "extensions.py flows" in doc and "throwaway copy of HQ" in doc
+            need("**flows**" in doc and "detailed flow 472" in doc and "extensions.py flows" in doc and "throwaway copy of HQ" in doc
                  and "process group of its own" in doc and "What isn't stopped" in doc,
                  "EXTENSIONS.md doesn't say how an extension's flows work")
         finally:
@@ -22172,7 +22174,9 @@ print(r["weekly"]["pct"])
         need(a["green"] and b["green"] and a["shared"] == b["shared"] and a["shared"], f"not both green from one run: {a} {b}")
         need(a["head"] == b["head"] == listed, f"a record doesn't stand for the commit: {a['head']} {listed}")
         need(a["named"] == [901] and b["named"] == [902], f"each row's own flows: {a['named']} {b['named']}")
-        need(a["ran"] == 3 and a["passed"] == 3, f"the quick set and the row's flow: {a['ran']} {a['passed']}")
+        import happy as _hp  # H313: the shared set is the 17 happy flows' own flows now, the quick set is the night's
+        shared_n = len(_hp.gate_flows())
+        need(a["ran"] == shared_n + 1 and a["passed"] == shared_n + 1, f"the happy flows and the row's flow: {a['ran']} {a['passed']}")
         need(any("F9701" in c for c in a["commits"]) and not any("F9702" in c for c in a["commits"]), f"the row's commits: {a['commits']}")
         need(sorted(a["rows"]) == ["F9701", "F9702"], f"the run's rows: {a['rows']}")
         need("F9703" in r.stdout and "no record" in r.stdout, f"the row without commits isn't named: {r.stdout}")
@@ -22227,7 +22231,7 @@ print(r["weekly"]["pct"])
         time.sleep(1.1)
         r = proof("run-rows", "F9705")
         e5 = latest("F9705")
-        need(r.returncode == 0 and e5.get("named") == [905, 906] and e5.get("skipped") == [906] and e5.get("ran") == 3 and e5.get("green"),
+        need(r.returncode == 0 and e5.get("named") == [905, 906] and e5.get("skipped") == [906] and e5.get("ran") == shared_n + 1 and e5.get("green"),
              f"a skipped named flow: {e5} {r.stdout}")
         (st / "skip").write_text("")
         # a job still needs its own record
@@ -28280,7 +28284,8 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         pt("jobs.py", "mark", n, "running since 10:00")
         pt("proof.py", "run", n)
         first = (seen.read_text().splitlines() or [""])[0] if seen.exists() else ""
-        check("--only 4" in first and "--quick" in first, f"the proof ran a Claude flow a row only mentions: {first}")
+        # H313 (4 November 2026): a pass with stand-ins isn't a pass, so a flow the row names runs for real now, Claude flows too
+        check("--only 4" in first and "--quick" not in first, f"the proof ran the row's own flows with stand-ins: {first}")
         # the chain itself
         sys.path.insert(0, str(ROOT / "routine"))
         import hqpaths
@@ -39096,6 +39101,311 @@ FLOW_LIMIT = 360
 FLOW_LIMITS = {44: 1200, 472: 1800, 294: 420, 295: 14500, 300: 600, 301: 900, 302: 600, 303: 600, 371: 600, 373: 600}  # F115: 371 and 373 run two Syncthings each; 472: every extension's own flows, two minutes each at most
 
 
+# == H313: the happy flows' own steps (4 November 2026) ================================================================
+# His word: only the 17 of routine/happy.py are the happy flows; everything above is the detailed flows. These are the
+# steps the 17 needed that no detailed flow drove for real: each goes through the REAL model (marked True, so the test
+# wall lets it reach Claude), on the wall's copy and on made-up files, never his phone, mail or calendar. Kept in one
+# block so a merge with another branch's flows stays easy. routine/happy.py says which of the 17 runs which of these.
+
+class _HappyEnv:
+    """Settings for one happy step, put back after: its own text line, notes, calendar, to-do list, games; the open line on
+    a throwaway file (never a real session of his to resume); acting as the main, so nothing is handed to another HQ."""
+
+    def __init__(self, tmp: Path, name: str, **more):
+        self.d = tmp / f"happy-{name}"
+        (self.d / "line").mkdir(parents=True, exist_ok=True)
+        self.env = {"HQ_DIRECT_DIR": str(self.d / "line"), "HQ_AGENT_NOTES": str(self.d / "notes-donna.md"),
+                    "HQ_CALENDAR_FILE": str(self.d / "calendar.json"), "HQ_ROLE_HERE": "1", "HQ_INITIATIVE": "0",
+                    "HQ_TODO_UNDO": str(self.d / "todo-undo.json"), "HQ_GAMES_UNDO": str(self.d / "games-undo.json"),
+                    **{k: str(v) for k, v in more.items()}}
+
+    def __enter__(self):
+        self.was = {k: os.environ.get(k) for k in [*self.env, "HQ_DIRECT_DRY", "HQ_DIRECT_PLAIN", "HQ_COACHING_DRY"]}
+        for k in ("HQ_DIRECT_DRY", "HQ_DIRECT_PLAIN"):
+            os.environ.pop(k, None)
+        os.environ.update(self.env)
+        import lines as _lines
+        self.lines_file = _lines.FILE
+        _lines.FILE = self.d / "lines.json"
+        return self.d
+
+    def __exit__(self, *exc):
+        import lines as _lines
+        _lines.FILE = self.lines_file
+        for k, v in self.was.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        return False
+
+
+HAPPY_NOT_WRITTEN = ("HAPPY-PLAIN-FALLBACK", "Sorry, something went wrong on my side")  # the plain line, or brain's error line
+
+
+def _happy_by_model(text: str) -> bool:
+    return bool(text) and not any(text.startswith(x) for x in HAPPY_NOT_WRITTEN)
+
+
+def _happy_model_wrote(fn):
+    """Run FN with direct_line's plain line swapped for a marker: a text that comes back as the marker wasn't written by the model."""
+    import direct_line as _dl
+    plain = _dl.plain
+    _dl.plain = lambda why, facts: "HAPPY-PLAIN-FALLBACK"
+    try:
+        return fn()
+    finally:
+        _dl.plain = plain
+
+
+async def _happy_call(self, drop: bool) -> str:
+    """A real call on the copy with the after-call work ON (not dry): a spoken answer, then hang-up (or a drop), and the call's
+    notes are in coaching/log.md, in his words."""
+    import call as _cm
+    base = _cm.Call
+
+    class OnCall(base):
+        def __init__(self, *a, **k):
+            k.update(wrap_up="on", test_mode=False)
+            super().__init__(*a, **k)
+
+    log = config.FOLDER / "coaching" / "log.md"
+    before = log.read_text(encoding="utf8") if log.exists() else ""
+    word = "mango juice" if drop else "jasmine tea"  # words Whisper hears right ("lapis blue" came out "Lappy's Blue")
+    with _HappyEnv(self.tmp, "drop" if drop else "call"):
+        live = Live()
+        _cm.Call = OnCall
+        try:
+            await live.open(self.tmp)
+        finally:
+            _cm.Call = base
+        try:
+            need(live.ready, "the call could not be opened")
+            r = await live.ask(f"Hey there, quick test of the line. Please note for me that my favourite is {word}. "
+                               "Just say you've got it, in one short sentence.", "his question")
+            need(r["first_audio"] is not None and r["reply"].strip(), f"no spoken answer: {r['reply']!r}")
+            await live.stop_pipeline()
+            if drop:  # F59: the network let go, he never pressed the button
+                live.call.end.connection("failed")
+                live.call.end.closed()
+                need(live.call.end.is_drop(), "the call isn't marked as a drop")
+            live.wrapped_up = True
+            t = time.perf_counter()
+            await live.call.finish()
+            secs = time.perf_counter() - t
+        finally:
+            await live.close()
+            self.turns += live.turns_used
+    after = log.read_text(encoding="utf8") if log.exists() else ""
+    new = after.replace(before, "", 1) if before and before in after else after
+    say(f"   after-call work {secs:.0f} s: {(live.call.wrap_up_reply or '').strip()[:200]!r}")
+    need(after != before, "the call's notes weren't written: coaching/log.md is unchanged")
+    need(word in new.lower(), f"the notes don't have his words ({word!r}): {new[:300]!r}")
+    need(re.search(r"^## \d{4}-\d{2}-\d{2} .*call", new, re.M), f"no dated call section in the notes: {new[:300]!r}")
+    if drop:
+        need("drop" in new.lower(), f"the notes don't say the call dropped: {new[:300]!r}")
+    path = live.call.transcript.path
+    need(path.exists() and "Ended" in path.read_text(encoding="utf8"), "no transcript was kept")
+    return f"spoken answer after {r['first_audio']:.1f} s, notes written in {secs:.0f} s" + (", as a drop" if drop else "")
+
+
+async def _happy_flow601(self) -> str:
+    """Happy flow 1's hang-up: a real call, after-call work on, his words land in the notes."""
+    return await _happy_call(self, drop=False)
+
+
+async def _happy_flow602(self) -> str:
+    """Happy flow 4: a call that drops still leaves its notes, saying it dropped."""
+    return await _happy_call(self, drop=True)
+
+
+async def _happy_text(self, name: str, words: str, **more) -> tuple[str, float, Path]:
+    import direct_line as _dl
+    with _HappyEnv(self.tmp, name, **more) as d:
+        _dl.add("me", words)
+        t = time.perf_counter()
+        answer = await asyncio.to_thread(_dl.reply)
+        secs = time.perf_counter() - t
+        self.turns += 1
+        mine = [m for m in _dl.thread() if m.get("from") == "agent"]
+    say(f"   she answered in {secs:.0f} s: {answer!r}")
+    need(answer and mine and mine[-1]["text"] == answer, f"no answer in the thread: {answer!r}")
+    need(not answer.startswith("Sorry, I couldn't get to that"), "her answer is the fallback: the model wasn't reached")
+    need(not answer.startswith("Got it: "), "her answer is the dry stand-in")
+    return answer, secs, d
+
+
+async def _happy_flow603(self) -> str:
+    """Happy flow 5: a text to Donna is answered within a minute, by the real model."""
+    answer, secs, _ = await _happy_text(self, "text", "Hi! What's the capital of Portugal? Just the city, nothing else.")
+    need("lisbon" in answer.lower(), f"the answer is wrong: {answer!r}")
+    need(secs < 60, f"the answer took {secs:.0f} s, over a minute")
+    return f"answered in {secs:.0f} s"
+
+
+async def _happy_flow604(self) -> str:
+    """Happy flow 7: "put this on my to-do list" lands on the right list, in his words (a made-up list from the template)."""
+    d0 = self.tmp / "happy-todo"
+    d0.mkdir(parents=True, exist_ok=True)
+    todo = d0 / "challenges.md"
+    shutil.copy(ROOT / "template" / "challenges.md", todo)
+    before = todo.read_text(encoding="utf8")
+    item = "repaint the blue garden bench"
+    answer, secs, _ = await _happy_text(self, "todo", f"Put this on my to-do list, important not urgent: {item}", HQ_TODO=todo)
+    after = todo.read_text(encoding="utf8")
+    need(after != before, f"the to-do list is unchanged; she said {answer!r}")
+    import todo as _td
+    hit = [(l["num"], l["name"]) for l in _td.parse(after)["lists"] for it in l["items"] if item in it["title"].lower()]
+    need(hit, f"his words ({item!r}) aren't on any list: {after[-500:]!r}")
+    num, where = hit[0]
+    need(str(num) == "1", f"it landed on the wrong list: {num}. {where}")
+    return f"on {where!r} in his words, answered in {secs:.0f} s"
+
+
+async def _happy_flow605(self) -> str:
+    """Happy flow 8: "what's on my calendar today" on a call is right, from HQ's calendar copy, seeded with a made-up appointment.
+    Google itself isn't read: that's his real calendar."""
+    cal = config.FOLDER / "HQ" / "calendar.json"
+    cal.parent.mkdir(parents=True, exist_ok=True)
+    keep = cal.read_text(encoding="utf8") if cal.exists() else None
+    today = datetime.now().strftime("%Y-%m-%d")
+    cal.write_text(json.dumps({"looked": time.time(), "events": [
+        {"id": "happy-1", "title": "Lunch with Zorbalina", "start": f"{today}T23:15:00", "end": f"{today}T23:45:00",
+         "all_day": False, "where": "", "notes": "", "calendar": "Mine", "free": False, "type": "DEFAULT", "link": "",
+         "gid": "happy-1", "cal": "primary", "others": False}]}), encoding="utf8")
+    try:
+        import agenda
+        os.environ.pop("HQ_CALENDAR_FILE", None)
+        shown = [e["title"] for e in agenda.read().get("events") or []]
+        need("Lunch with Zorbalina" in shown, f"HQ's calendar copy doesn't show today's appointment: {shown}")
+        live = await self.get_live()
+        r = await live.ask("What's on my calendar today? Look only in HQ's own copy of my calendar, the file "
+                           "HQ/calendar.json in my folder, not Google. One short sentence.", "today's calendar")
+        need("zorbalina" in r["reply"].lower(), f"the answer doesn't name today's appointment: {r['reply']!r}")
+        need(r["first_audio"] is not None, "no sound came out")
+        return f"named today's appointment, first sound {r['first_audio']:.1f} s"
+    finally:
+        if keep is None:
+            cal.unlink(missing_ok=True)
+        else:
+            cal.write_text(keep, encoding="utf8")
+
+
+async def _happy_flow606(self) -> str:
+    """Happy flow 6: a reminder arrives on time, with its text, written by the real model (the routine's minute: pings.watch)."""
+    import pings
+    import direct_line as _dl
+    with _HappyEnv(self.tmp, "remind"):
+        due = datetime.now().replace(second=0, microsecond=0)
+        pings.remind(due, "take the blue folder to the post office", by="a test")
+        sent: list[dict] = []
+        t = time.perf_counter()
+        out = await asyncio.to_thread(_happy_model_wrote, lambda: pings.watch(spawn=lambda why, facts: sent.append(_dl.text(why, facts))))
+        secs = time.perf_counter() - t
+        again = await asyncio.to_thread(pings.watch, None, lambda *a: None, True)
+        self.turns += 1
+    say(f"   due {out} · her text {[m.get('text') for m in sent]!r}")
+    need(out and out[0][0] == "remind" and "blue folder" in out[0][1], f"the reminder wasn't due at its time: {out}")
+    need(sent and sent[0].get("text"), "no text was written")
+    text_ = sent[0]["text"]
+    need(_happy_by_model(text_), f"the model didn't write the text: {text_!r}")
+    need("folder" in text_.lower() or "post office" in text_.lower(), f"the text doesn't say what to do: {text_!r}")
+    need(not again, f"the reminder came twice: {again}")
+    return f"due at its minute, her text in {secs:.0f} s: {text_[:80]!r}"
+
+
+async def _happy_flow607(self) -> str:
+    """Happy flow 16: a six-week game's evening text at 8 when today's tick isn't in, written by the real model; the tick works
+    and the text stops. A made-up game on its own file."""
+    import games as gm
+    import pings
+    import weather as wx
+    import direct_line as _dl
+    today = datetime.now().date()
+    with _HappyEnv(self.tmp, "game", HQ_GAMES=self.tmp / "happy-game" / "games.json", HQ_GAMES_TODAY=today.isoformat()):
+        start = (today - timedelta(days=today.weekday())).isoformat()  # this week's Monday: day 1 to 7 of the six weeks
+        gm.new({"name": "Skipping rope every day", "start": start, "weeks": 6, "win": {"track": "did", "share": 0.9},
+                "tracks": [{"id": "did", "kind": "tick", "label": "Skipped (at least one round)"}], "rules": "Any length counts.",
+                "best": "playful", "remind": {"track": "did", "at": "20:00"}}, by="a test")
+        at8 = datetime.combine(today, datetime.min.time()).replace(hour=20, minute=1)
+        need(gm.texts_due(at8.replace(hour=19, minute=59)) == [], "the evening text came before 8")
+        was = (wx.outings_now, pings._asleep)
+        wx.outings_now = lambda t=None, evs=None: (at8, [])
+        pings._asleep = lambda t: False
+        try:
+            due = pings._game_due({"games_sent": []}, time.time(), [])
+        finally:
+            wx.outings_now, pings._asleep = was
+        need(len(due) == 1 and due[0][0] == "game" and "Skipping rope" in due[0][1], f"no evening text at 8: {due}")
+        t = time.perf_counter()
+        msg = await asyncio.to_thread(_happy_model_wrote, lambda: _dl.text(*due[0]))
+        secs = time.perf_counter() - t
+        self.turns += 1
+        say(f"   her text: {msg.get('text')!r}")
+        need(_happy_by_model(msg.get("text") or ""), f"the model didn't write the text: {msg}")
+        gm.tick(by="a test")
+        need(gm.texts_due(at8) == [], "the evening text is still due after the tick")
+        g = json.loads((self.tmp / "happy-game" / "games.json").read_text(encoding="utf8"))["games"][0]
+        need((g.get("days") or {}).get(today.isoformat(), {}).get("did"), f"the tick isn't kept: {g.get('days')}")
+    return f"text at 8 in {secs:.0f} s: {msg['text'][:80]!r}; the tick kept, the text stops"
+
+
+async def _happy_flow608(self) -> str:
+    """Happy flow 17, the part that can be driven here: HQ cloned fresh from GitHub starts, and its call page loads. The installer's
+    own steps (the Python environment, the models) aren't run: the clone borrows this copy's."""
+    d = self.tmp / "happy-fresh"
+    shutil.rmtree(d, ignore_errors=True)
+    t = time.perf_counter()
+    r = run(["git", "clone", "-q", "--depth", "1", os.environ.get("HQ_HAPPY_GITHUB", "https://github.com/FleX-iBeL/HQ.git"), str(d)],
+            timeout=300)
+    need(r.returncode == 0 and (d / "app" / "bot.py").exists(), f"the clone from GitHub failed: {r.stderr[-300:]}")
+    version = (d / "VERSION").read_text().strip() if (d / "VERSION").exists() else "?"
+    for name in (".venv", "models"):
+        (d / name).symlink_to(ROOT / name)
+    ws = d / "workspace"
+    shutil.copytree(d / "template", ws)
+    port = _free_port()
+    env = {**os.environ, "HQ_PORT": str(port), "HQ_NO_PHONE": "1", "HQ_WRAP_UP": "dry", "HQ_WORKSPACE": str(ws),
+           "HQ_CALLS": str(d / "calls"), "HQ_LOG": str(d / "server.log"), "HQ_PID_FILE": str(d / "server.pid")}
+    for k in ("HQ_FOLDER", "HQ_CALENDAR_FILE", "HQ_DIRECT_DIR", "HQ_TODO"):
+        env.pop(k, None)
+    start = d / "app" / ("start-linux.sh" if sys.platform.startswith("linux") else "start.sh")
+    stop = d / "app" / ("stop-linux.sh" if sys.platform.startswith("linux") else "stop.sh")
+    try:
+        r = run([str(start)], env=env, timeout=180)
+        code, body = 0, b""
+        for _ in range(60):
+            try:
+                code, body, _ = http_get("/", base=f"http://127.0.0.1:{port}", timeout=5)
+                if code == 200:
+                    break
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+        log = (d / "server.log").read_text(errors="replace")[-400:] if (d / "server.log").exists() else ""
+        need(code == 200 and b"<title>HQ</title>" in body, f"the fresh clone's call page didn't load ({code}): {r.stdout[-200:]} {log}")
+    finally:
+        run([str(stop)], env=env, timeout=120)
+    return f"GitHub's HQ {version} cloned and started, call page up, in {time.perf_counter() - t:.0f} s"
+
+
+for _n in range(601, 609):
+    setattr(Run, f"flow{_n}", globals()[f"_happy_flow{_n}"])
+
+FLOWS.update({
+    601: ("Happy: a real call's notes land after hanging up (after-call work on, on the copy)", True, "flow601"),
+    602: ("Happy: a dropped call still leaves its notes, saying it dropped", True, "flow602"),
+    603: ("Happy: a text to Donna is answered within a minute, by the real model", True, "flow603"),
+    604: ("Happy: a text puts an item on the right to-do list, in his words", True, "flow604"),
+    605: ("Happy: what's on my calendar today, from HQ's calendar copy, on a call", True, "flow605"),
+    606: ("Happy: a reminder arrives on time with its text, written by the real model", True, "flow606"),
+    607: ("Happy: the game's text at 8 without a tick, the tick works", True, "flow607"),
+    608: ("Happy: HQ cloned fresh from GitHub starts and its call page loads", False, "flow608"),
+})
+FLOW_LIMITS.update({601: 600, 602: 600, 608: 600})
+# == end of H313's block ==============================================================================================
+
+
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
@@ -39175,7 +39485,7 @@ async def main(args) -> bool:
         print(f"No such flow: {bad}. The flows are 1 to {len(FLOWS)}.")
         return False
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"== HQ happy flows · {stamp} · flows {chosen}" + (" · quick (no Claude turns)" if args.quick else ""))
+    print(f"== HQ detailed flows · {stamp} · flows {chosen}" + (" · quick (no Claude turns)" if args.quick else ""))
     # F17: everything the flows start knows it's a test, and which roadmap and HQ memory are the real ones,
     # so jobs.py, schedule.py, set-status.py and role.py refuse them (a flow works on its own copies only).
     os.environ["HQ_UNDER_TEST"] = "1"
@@ -39257,7 +39567,7 @@ async def main(args) -> bool:
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="HQ happy flows (phase G)")
+    p = argparse.ArgumentParser(description="HQ's detailed flows (the 17 happy flows: routine/happy.py)")
     p.add_argument("--only", default="", help="comma-separated flow numbers, e.g. 3,5")
     p.add_argument("--skip", default="", help="comma-separated flow numbers to leave out")
     p.add_argument("--quick", action="store_true", help="skip the flows that use Claude turns (2-7)")

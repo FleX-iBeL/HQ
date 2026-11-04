@@ -438,13 +438,17 @@ def _model(prog, argv, env):
     return None
 
 
-def _ran(c):
+def _ran(c, env=None):
     w = _walls[-1]
     how = _read(w["wall"], "flow-model", "stopped")
     with open(os.path.join(w["wall"], "model-calls.log"), "a", encoding="utf8") as f:
         f.write(f"{'real' if how == 'real' else 'stopped'}\t{_read(w['wall'], 'flow')}\t{c[-100:]} (by its own path)\n")
     if how != "real":
         raise PermissionError(13, "the test wall: no real model in a flow that isn't marked as using Claude", c)
+    # H313: a real claude reached by its own path (the agent SDK's own copy, as Donna's texts use) goes on as the stand-in lets one
+    # go: without the wall's empty settings folder, where it has no login ("Not logged in"), so a flow marked real really is real
+    if isinstance(env, dict) and env.get("CLAUDE_CONFIG_DIR") == os.path.join(w["wall"], "claude-config"):
+        env.pop("CLAUDE_CONFIG_DIR", None)
 
 
 _WRITING = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
@@ -481,7 +485,7 @@ def _hook(event, args):
         argv = [cmd] if isinstance(cmd, (str, bytes)) else list(cmd or [])
         c = _model(prog if prog is not None else (argv[0] if argv else None), argv, env)
         if c:
-            _ran(c)
+            _ran(c, env)
 '''
 
 SITECUSTOMIZE = '''# F111: the hook, for a Python that isn't the copy's own (python3 on the path); then the sitecustomize this one stands in front of,

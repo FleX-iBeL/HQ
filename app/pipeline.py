@@ -112,7 +112,7 @@ class WholeTurn:
         self._pieces = 0
         self._task: asyncio.Future | None = None
         self._task_for = 0  # how many pieces the running pass hears
-        self.last: dict = {}  # the last turn, for logs and the happy flow: pieces, secs, waited, used, text
+        self.last: dict = {}  # the last turn, for logs and the detailed flow: pieces, secs, waited, used, text
 
     def add(self, pcm: bytes) -> None:
         if self.on:

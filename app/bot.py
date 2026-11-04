@@ -1120,7 +1120,7 @@ if __name__ == "__main__":
     import workflows as _wf
 
     def _wf_folder() -> Path:
-        return Path(os.environ.get("HQ_WORKFLOWS_FOLDER") or config.FOLDER)  # the happy flows' own copy
+        return Path(os.environ.get("HQ_WORKFLOWS_FOLDER") or config.FOLDER)  # the detailed flows' own copy
 
     @app.get("/api/workflows", include_in_schema=False)
     async def workflows_read():
@@ -1153,7 +1153,7 @@ if __name__ == "__main__":
     import features as _feat
 
     def _feat_folder() -> Path:
-        return Path(os.environ.get("HQ_FEATURES_FOLDER") or config.FOLDER)  # the happy flows' own copy
+        return Path(os.environ.get("HQ_FEATURES_FOLDER") or config.FOLDER)  # the detailed flows' own copy
 
     @app.get("/api/features", include_in_schema=False)
     async def features_read():

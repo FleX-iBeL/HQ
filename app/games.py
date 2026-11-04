@@ -88,7 +88,7 @@ def _undo_file() -> Path:
 
 
 def _today() -> date:
-    t = os.environ.get("HQ_GAMES_TODAY")  # the happy flows' own today
+    t = os.environ.get("HQ_GAMES_TODAY")  # the detailed flows' own today
     return date.fromisoformat(t) if t else date.today()
 
 
