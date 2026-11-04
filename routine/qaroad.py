@@ -307,6 +307,8 @@ def run(root: Path, workspace: str, with_her: bool) -> int:
     py(root, env, "import jobs, time\nwith jobs.locked():\n t, js, on = jobs.read()\n j = next(x for x in js if x['n'] == int(sys.argv[1]))\n"
                   " j['state'] = 'running since ' + time.strftime('%H:%M')\n jobs.write(t, js, on)", str(job))
     runner = stand_in_17(root)
+    ok, code, out = her(root, env, "routine/qatests.py", "check", A)
+    check(6, code != 0 and "with the team" in out, f"no new seal of {A}'s tests while the team builds it: exit {code}: {out[-180:]!r}")
 
     # ---- 7: the end, for real: not built is red, and his words on done don't skip it ----
     code, out, rec = proof(root, env, job, runner)

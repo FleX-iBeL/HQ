@@ -238,6 +238,11 @@ def check(label: str) -> tuple[bool, str]:
     if not fp:
         return False, (f"Refused: {label} has no QA tests of hers: HQ/qa-tests/{label}/test.py and tests.json "
                        f"(python3 routine/qatests.py new {label} starts them).")
+    _, js, _ = q.read()
+    j = q.with_team(js, label)
+    if j and (state(label).get("sealed") or {}).get("fp"):  # the team builds to them: no new seal while it does, by anyone
+        return False, (f"Refused: {label} is with the team (job {j['n']}, {j['state']}): its QA tests stay as they were sealed while it builds. "
+                       "A change to them waits until the job is done or stopped.")
     t, why = read_list(d)
     if t is None:
         return False, f"Refused: {label}'s QA tests: {why}."
@@ -350,7 +355,8 @@ def verdict(a, sents) -> tuple[bool, list[str]] | None:
     fs = [re.sub(r"\s+", " ", str(f)).strip()[:400] for f in a.get("findings") or [] if str(f).strip()]
     for s, x in zip(sents, got):
         if x.get("checked") is not True:
-            h = f"his sentence \"{s[:80]}\" isn't checked by its tests: {re.sub(r'\s+', ' ', str(x.get('why') or 'no reason given'))[:240]}"
+            why = re.sub(r"\s+", " ", str(x.get("why") or "no reason given"))[:240]  # no backslash inside an f-string: 3.9 reads these too
+            h = f"his sentence \"{s[:80]}\" isn't checked by its tests: {why}"
             if not any(S._bare(s)[:30] in S._bare(f) for f in fs):
                 fs.append(h)
     ok = a["pass"] and not fs
