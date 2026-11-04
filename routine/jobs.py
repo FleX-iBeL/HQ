@@ -403,12 +403,14 @@ def roadmap_row(text, said, bug=False, by="", item=None):
     if len(title) > 80:
         title = title[:80].rsplit(" ", 1)[0] + "…"
     label = f"{letter}{n}"
+    # nowroad (4 November 2026): the ask is written once, in What you get. The Model column stays empty, for the model that builds it;
+    # until now it held the same words again, so every edit of his words met them twice (data change 004 clears the old copies).
     if by:  # F105: a row written by a call or an agent's run says so: it isn't his typing on the page, and its fields end where it ends
-        lines.insert(at + 1, f"| ⬜ | {label} {title} | {time.strftime('%-d %B %Y')} ({by}, {time.strftime('%H:%M')}): {said} | {said} | |")
+        lines.insert(at + 1, f"| ⬜ | {label} {title} | {time.strftime('%-d %B %Y')} ({by}, {time.strftime('%H:%M')}): {said} | |")
     else:
         when = time.strftime("%-d %B %Y") + f" (status page, {time.strftime('%H:%M')})"
         lines.insert(at + 1, f"| ⬜ | {label} {title} | {when}, typed: \"{said}\" [Added on the status page, no call; "
-                             f"the title is the first sentence.] | {said} | |")
+                             f"the title is the first sentence.] | |")
     import trail
     trail.written(label, said, by=by, item=item)  # F103: the id is given here, when the item is written
     return text[:head] + "\n".join(lines) + text[end:], label
@@ -445,7 +447,7 @@ def feedback_row(text, said, by, bug=False, when=None, via=""):
     label = f"U{n}"
     kind = "A bug" if bug else "Feedback"
     lines.insert(table[-1] + 1, f"| ⬜ | {label} {title} | {kind} from {who}, {when}, {how}: "
-                                f"\"{said}\" [The title is the first sentence.] | {said} | |")
+                                f"\"{said}\" [The title is the first sentence.] | |")
     return text[:head] + "\n".join(lines) + text[end:], label
 
 
@@ -682,7 +684,7 @@ def close_refused(n, words, places, ws=None):
     return close_hit(n, words, places, ws)[0]
 
 
-def sayso(n, words, by="", ticket=None, what=""):
+def sayso(n, words, by="", ticket=None, what="", checked=False):
     """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_yes), or his tap
     on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
     if os.environ.get("HQ_IN_JOB"):
@@ -693,7 +695,14 @@ def sayso(n, words, by="", ticket=None, what=""):
         who, words = "the status page", "tapped now on the status page"
     else:
         import sprint as sp_
-        where, no = sp_.his_yes(words, f"starting this build now, in his day hours, instead of waiting for the night: {what[:300]}", names=job_names(n, what)) if words else (None, "")
+        if words and not sp_.his_said_now(words, places=sp_.words_from_env()):  # nowroad: a build in the day goes on his words of today
+            print("(now takes his words from today, as he said or typed them on this call or in this text)", file=sys.stderr)
+            return None
+        plain = sp_.now_reading(words, [x for x in job_names(n, what) if not x.startswith("job ")]) if words and not checked else None
+        if checked or plain:  # nowroad: the gate already read these words as his now for this row, or the program reads them plainly
+            where, no = plain or "his words of today", ""
+        else:
+            where, no = sp_.his_yes(words, f"starting this build now, in his day hours, instead of waiting for the night: {what[:300]}", names=job_names(n, what)) if words else (None, "")
         if not where:
             if no:
                 print(f"({no})", file=sys.stderr)
@@ -962,7 +971,7 @@ def main(argv):
             label = (args[0] if args else "").strip().upper()
             if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", label):
                 sys.exit("Which roadmap item? Give its number, like H182.")
-            keep = [a for i, a in enumerate(args) if a in ("--now", "--said") or (i and args[i - 1] == "--said")]  # F100
+            keep = [a for i, a in enumerate(args) if a in ("--now", "--said", "--not-ready") or (i and args[i - 1] == "--said")]  # F100; nowroad: --not-ready
             title, line = open_row(text, label)
             j = with_team(jobs, label)
             if j:
@@ -970,12 +979,16 @@ def main(argv):
             import sprint as sp_  # H272: only a row marked ready goes to the team from the page
             row = next((r for r in sp_.open_rows(text) if r["label"] == label), None)
             why = sp_.not_ready_why(row) if row else None
-            if why:
-                sys.exit(f"{why}. Only rows marked ready go to the team; mark it ready first.")
+            if why and "--now" in args and "--said" in args and "--not-ready" not in args:  # nowroad: his now is his say-so; the gate reads his words
+                args, keep = args + ["--not-ready"], keep + ["--not-ready"]
+            if why and "--not-ready" not in args:  # nowroad: his say-so goes on to add's gate, which checks his words
+                sys.exit(f"{why}. Only rows marked ready go to the team; mark it ready first, or on his explicit say-so: "
+                         f"send-row {label} --not-ready --said \"his words\" (with --now for today, from his words of today).")
             import estimate as est_
             title = one_line(title).replace("·", "-").rstrip(".")
             cmd = "add"
-            args = [f"{label} on the HQ roadmap, sent to the team from the status page: {title}. Read the {label} row "
+            how_ = "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call" if os.environ.get("HQ_WORDS_FROM") else "from the status page"  # nowroad: where it came from
+            args = [f"{label} on the HQ roadmap, sent to the team {how_}: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
                     f"write the result in the {label} row.", "--item", label, "--kind", est_.kind_of(line), *keep]
         if cmd == "add":
@@ -1027,7 +1040,8 @@ def main(argv):
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
-            said = sp_.gate(text, one_line(" ".join(words)), say_so, his)
+            said = sp_.gate(text, one_line(" ".join(words)), say_so, his, now=at_once)
+            now_checked = at_once and say_so and said != one_line(" ".join(words))  # nowroad: the gate read his now, once is enough
             if report:  # F145: where it writes, named in its own text, so done can tell him
                 lab = item if item and re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()) else ""
                 said = one_line(said) + report_words(report_rel(lab.strip().upper(), jobs), lab.strip().upper())
@@ -1036,7 +1050,7 @@ def main(argv):
                  "text": one_line(said).replace("·", "-")}
             carry(j, item)
             if at_once:
-                j["sayso"] = sayso(n, his, what=j["text"])
+                j["sayso"] = sayso(n, his, what=j["text"], checked=now_checked)
                 if not j["sayso"]:
                     sys.exit("Refused: now takes his own words, --now --said \"HIS WORDS\", a line he said or typed, and a job can't give it to itself.")
             jobs.append(j)

@@ -15939,6 +15939,119 @@ print("OK")
         need("plan" in role.WRITES["usagecost"] and "HQ/usage-plan.json" in role.ONE_WRITER, "the backup doesn't hand the plan to the main")
         return "the tag, the switch, the estimate, the learning and the way back on a made-up history"
 
+    async def flow481(self) -> str:
+        """nowroad, no Claude: his now reaches the team today, the whole road on real rows of a throwaway planning. A row Moneypenny writes
+        from a text holds its words once (the Model column empty); on a row of the old shape, words twice, reword changes the ask only and
+        the other cells stay byte for byte, and data change 004 clears the copy and its undo puts it back. Her words and his quote go in with
+        review.py add, which a text may run. A re-review only asks whether the earlier points are settled by a sentence that stands in the row
+        and whether a changed sentence brings a hole of its own: a point about words that didn't change doesn't count, a passed row whose words
+        before aren't kept gets a first review. His now: send-row without the Ready mark is refused without his words and says how; with an old
+        line of his it's refused; with his line of today, which the row's His words quote, it goes without a look (the look stands in as no)
+        and carries the review's open points; a now the row doesn't quote goes to the look and its no holds. The routine's real minute starts
+        the job in his day hours. A policy with no agent never writes a ledger, and under test the real ledger is never written."""
+        import importlib.util as _iu
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
+        ws, env, d = self._wall_env("now", hour=14)
+        env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "no", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_DIRECT_AGENT": "moneypenny"})
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        th = ws / "HQ/team-line"
+        th.mkdir(parents=True, exist_ok=True)
+        now_words = "Please give it to the team and lets run it immediately once it's ready."
+        his = "Hey MP, the made-up page should say Nothing planned yet, not Nothing planned. " + now_words
+        (th / "thread.jsonl").write_text(json.dumps({"at": time.time() - 3 * 86400, "from": "me", "text": "Give it to the team and run it now please."}) + "\n"
+                                         + json.dumps({"at": time.time(), "from": "me", "text": his}) + "\n")
+        env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+        rm = ws / "HQ/roadmap.md"
+
+        def script(name, *a, **k):
+            return _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env={**env, **k}, cwd=str(ws))
+
+        def py(code, **k):
+            r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, %r)\n" % str(ROOT / "routine") + code], capture_output=True,
+                        text=True, env={**env, **k}, cwd=str(ws))
+            need(r.returncode == 0, f"{code[:80]}: {r.stderr[-800:]}")
+            return r.stdout.strip()
+
+        def row(label):
+            return next(l for l in rm.read_text().split("\n") if re.match(rf"^\| [^|]* \| {label} ", l))
+
+        # 1. the row, its words once
+        r = jobs("write-row", "The made-up page says Nothing planned yet. What's wrong: it says Nothing planned. What right looks like: Nothing planned yet. "
+                              "How to check: the empty card. HOLE: which card.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+        need(r.returncode == 0, r.stderr)
+        label = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        cs = hqpaths.cells(row(label))
+        need(cs[3] == "" and cs[2].count("HOLE: which card") == 1 and "(in a text," in cs[2], f"the row's words don't stand once: {cs}")
+        # 2. an old-shape row: reword inside the ask, then data change 004 and its undo
+        r = jobs("write-row", "Old shape row. Out of scope: none at all.", "--bug")
+        old = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        line = row(old)
+        twice = line.replace(" | |", " | Old shape row. Out of scope: none at all. | |", 1)
+        rm.write_text(rm.read_text().replace(line, twice, 1))
+        r = script("review.py", "reword", old, json.dumps({"edits": [{"old": "Out of scope: none at all.", "new": "Out of scope: the rest | of it."}]}))
+        need(r.returncode == 0, f"reword on words that stand twice in the row: {r.stdout} {r.stderr}")
+        after = row(old)
+        need(hqpaths.cells(after)[2].endswith("Out of scope: the rest \\| of it.") and hqpaths.cells(after)[3] == "Old shape row. Out of scope: none at all."
+             and after.endswith(" | Old shape row. Out of scope: none at all. | |"), f"reword reached outside the ask: {after}")
+        r = script("review.py", "reword", old, json.dumps({"edits": [{"old": "Old shape row. Out of scope: none at all.", "new": "x"}]}))
+        need(r.returncode != 0 and row(old) == after, f"reword changed the Model column: {r.stdout}")
+        rm.write_text(rm.read_text().replace(after, twice, 1))
+        spec = str(ROOT / "routine/datachanges/004-the-ask-written-once.py")
+        dc = ("import importlib.util as u, pathlib\ns = u.spec_from_file_location('dc004', %r); m = u.module_from_spec(s); s.loader.exec_module(m)\n" % spec)
+        py(dc + "m.do(pathlib.Path(%r))" % str(ws))
+        cleared = row(old)
+        need(hqpaths.cells(cleared)[3] == "" and hqpaths.cells(cleared)[2] == hqpaths.cells(twice)[2] and hqpaths.cells(row(label))[3] == "",
+             f"the data change didn't clear the copy only: {cleared}")
+        py(dc + "m.undo(pathlib.Path(%r))" % str(ws))
+        need(row(old) == twice, f"the undo didn't put it back: {row(old)}")
+        # 3. his words and Sources go in with add, a text may run it
+        r = script("review.py", "add", label, f'His words: "{his}" Sources: HQ/team-line/thread.jsonl.', HQ_SAYSO_FAKE="yes")
+        need(r.returncode == 0, f"add: {r.stdout} {r.stderr}")
+        pol = py("sys.path.insert(0, %r)\nimport policy\np = policy.Policy(%r); p.agent = 'moneypenny'; p.unattended = True\n"
+                 "print(p.decide('Bash', {'command': 'python3 %s add %s \"words\"'}).verdict)" % (str(ROOT / "app"), str(ws), ROOT / "routine/review.py", label))
+        need(pol == "allow", f"a text can't run review.py add: {pol}")
+        # 4. the review: a first review flags it (the stand-in), the re-review's rules
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+        st = json.loads(py("import review\nprint(json.dumps(review.states()[%r]))" % label))
+        need(st["state"] == "flagged" and st["findings"] == ["which card"], f"the first review: {st}")
+        rules = json.loads(py(
+            "import review\n"
+            "p = review.prior_of({'verdict': 'flag', 'findings': ['which card'], 'text': 'A one. B two.'}, 'A one. B two. C three.')\n"
+            "ok = review.again_verdict({'earlier': [{'settled_by': 'C three.'}], 'new': [{'hole': 'about A', 'in': 'A one.'}]}, 'A one. B two. C three.', p)\n"
+            "still = review.again_verdict({'earlier': [{'settled_by': None}], 'new': []}, 'A one. B two. C three.', p)\n"
+            "made_up = review.again_verdict({'earlier': [{'settled_by': 'Z not there.'}], 'new': [{'hole': 'about C', 'in': 'C three.'}]}, 'A one. B two. C three.', p)\n"
+            "first = review.prior_of({'verdict': 'pass', 'findings': []}, 'A one.')\n"
+            "print(json.dumps({'changed': p['changed'], 'ok': ok, 'still': still, 'made_up': made_up, 'first': first}))"))
+        need(rules["changed"] == ["C three."] and rules["ok"] == [True, []] and rules["still"] == [False, ["which card"]]
+             and rules["made_up"] == [False, ["which card", "about C"]] and rules["first"] is None, f"the re-review's rules: {rules}")
+        # 5. his now
+        r = jobs("send-row", label)
+        need(r.returncode != 0 and "--not-ready --said" in (r.stdout + r.stderr), f"send-row without the mark: {r.stdout} {r.stderr}")
+        r = jobs("send-row", label, "--not-ready", "--now", "--said", "Give it to the team and run it now please.")
+        need(r.returncode != 0 and "today" in (r.stdout + r.stderr), f"an old now of his: {r.stdout} {r.stderr}")
+        r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+        need(r.returncode == 0, f"his now of today: {r.stdout} {r.stderr}")
+        n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
+        line = next(l for l in rm.read_text().split("\n") if l.startswith(f"- Job {n} "))
+        need("⟪sayso" in line and "The review's open points" in line and "which card" in line, f"the job doesn't carry his now and the open points: {line}")
+        res = minute()
+        need(state(n).startswith("running"), f"his now didn't start it in the day: {state(n)} {res['log'][-3:]}")
+        # a now the row doesn't quote goes to the look, and its no holds
+        r = jobs("write-row", "Another made-up row. What's wrong: x. What right looks like: y. How to check: z.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+        other = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        r = jobs("send-row", other, "--not-ready", "--now", "--said", now_words)
+        need(r.returncode != 0, f"a now for another row went without the look: {r.stdout}")
+        # 6. the ledger: no agent, no line; under test the real one is never written
+        before = (ws / "HQ/mistakes.jsonl").read_text() if (ws / "HQ/mistakes.jsonl").exists() else ""
+        py("sys.path.insert(0, %r)\nimport policy\np = policy.Policy(%r)\np.decide('Bash', {'command': 'poetry run claude -p x'})" % (str(ROOT / "app"), str(ws)))
+        need(((ws / "HQ/mistakes.jsonl").read_text() if (ws / "HQ/mistakes.jsonl").exists() else "") == before, "a policy with no agent wrote the ledger")
+        real = py("import mistakes\nprint(mistakes.add('refused', 'unknown', 'a test', base=%r) is None)" % str(ws), HQ_REAL_ROADMAP=str(rm))
+        need(real == "True", "a test wrote the real ledger")
+        return "the row's words stand once, reword stays in the ask, 004 and its undo; add from a text; the re-review settles; his now of today starts it with the open points; no test line on his ledger"
+
     def _wall_env(self, name: str, hour: int = 23) -> tuple:
         """A throwaway workspace with the wall on (the other flows run with it off), its own usage reading, a pinned hour,
         and a driver for the routine's real minute with the windows, the mail and the pairing stood in."""
@@ -16358,7 +16471,7 @@ print("ON" if review.on() else "OFF")
         jobs, minute, state, new = self._wall_tools(env, d, ws)
         self._wall_usage(env)
         (ws / "HQ/direct-line").mkdir(exist_ok=True)
-        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Build that one now please, I want it today"}) + "\n")
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": time.time(), "from": "me", "text": "Build that one now please, I want it today"}) + "\n")  # nowroad: a now stands on his words of today
         # a row, marked ready the way a call would, sent to the team in the day
         rm = ws / "HQ/roadmap.md"
         r = jobs("add", "Build the thing on the made-up page")
@@ -17606,7 +17719,7 @@ print("OK")
         ws, env, d = self._wall_env("sayso", hour=14)
         env.update({"HQ_PROOF_ON": "1", "HQ_SAYSO_FAKE": "yes"})
         (ws / "HQ/direct-line").mkdir(exist_ok=True)
-        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": 1, "from": "me", "text": "Build that one now please, I want it today"}) + "\n")
+        (ws / "HQ/direct-line/thread.jsonl").write_text(json.dumps({"at": time.time(), "from": "me", "text": "Build that one now please, I want it today"}) + "\n")  # nowroad: a now stands on his words of today
         jobs, minute, state, new = self._wall_tools(env, d, ws)
         self._wall_usage(env)
         n = new("Build the thing on the made-up page")
@@ -38598,6 +38711,7 @@ FLOWS = {
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
+    481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now of today starts it with the open points, an old or unquoted now refused, no test line on his ledger", False, "flow481"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
