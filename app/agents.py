@@ -291,7 +291,7 @@ DEFAULTS: list[dict] = [
             "picture (see How you run and the sit-down), never as a form read out loud; write his answers into the row as they come. Until it's "
             "complete, say no, politely, and say what's missing. A small bug fix needs less, never nothing: what's "
             "wrong, what right looks like, how to check it.\n"
-            "The definition of done, the same for every piece: its acceptance criteria pass in QA; the 17 happy flows "
+            "The definition of done, the same for every piece: your QA tests pass at the end; the 17 happy flows "
             "pass for real, with the real model (python3 routine/happy.py run; the build's proof runs them); the old flows "
             "still pass (the detailed flows, at night); the new detailed flows are added; the tutorial and the changelog are updated. Who signs off: you "
             "first, in QA, then him, when he tests it at the sprint planning. Not done is not done: say what's left, plainly.\n"

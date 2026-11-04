@@ -382,7 +382,13 @@ def _run(n: int) -> int:
     try:
         wt = _copy(head)
         with open(logpath, "w", encoding="utf8") as log:
-            if named:
+            import qatests  # real QA: her sealed tests on the built copy, first; red, and the rest isn't run
+            if qatests.gate_on() and label:
+                rec["qa_tests"] = qatests.end_run(label, wt)
+                log.write(f"== her QA tests for {label}: {json.dumps(rec['qa_tests'], ensure_ascii=False)}\n")
+                if not rec["qa_tests"].get("green"):
+                    rec["failed"].append(f"her QA tests: {rec['qa_tests'].get('why') or 'not green'}")
+            if named and not rec["failed"]:
                 # F105: a flow with Claude turns needs a live voice and usage; a row that only mentions one doesn't turn the record red
                 code, out = _flows(wt, ["--only", ",".join(map(str, named))], log)  # H313: for real, no --quick
                 p, r_ = nightly.summary(out)
@@ -395,13 +401,16 @@ def _run(n: int) -> int:
                 rec["ran"] += r_
                 rec["passed"] += p
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}"])
-        rec["green"] = not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
+        rec["green"] = (not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
+                        and ("qa_tests" not in rec or bool(rec["qa_tests"].get("green"))))
     finally:
         wall.proof_end(n)
         if wt:
             _uncopy(wt)
     _save(rec)
+    qt = rec.get("qa_tests")
     print(f"Job {n}: {rec['passed']} of {rec['ran']} passed on a copy of {head[:7]}"
+          + (f", her QA tests {qt.get('passed', 0)} of {qt.get('ran', 0)}" if qt else "")
           + (f", named flows {named}" if named else "") + (f", skipped {rec['skipped']}" if rec["skipped"] else "")
           + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'] + rec['not_tried'])[:900]}"))
     return 0 if rec["green"] else 1

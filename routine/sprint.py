@@ -397,6 +397,9 @@ def missing_points(row):
 def not_ready_why(row, state=None):
     """Why a row isn't ready, in a few plain words, or None when it is: "H257 isn't ready: no out of scope, no size"."""
     state = ready_of([row]).get(row["label"]) if state is None else state
+    qw = _qa_why(row)  # real QA: her tests hold a mark that's there too (changed since, or never checked)
+    if qw:
+        return qw
     if state == "ready":
         return None
     why = _review_why(row)  # F77: a flag, or a review that hasn't passed the new words yet
@@ -426,6 +429,16 @@ def _review_why(row):
         return None
 
 
+def _qa_why(row, now=False):
+    """Real QA (4 November 2026): why her QA tests keep the row from the Ready mark, or from the team on his now (routine/qatests.py), or
+    None. The program's guard, not a prompt's: when it can't be read it says so, it never opens."""
+    try:
+        import qatests
+    except Exception as ex:
+        return f"{row['label']} isn't ready: its QA tests couldn't be read ({ex!r})"
+    return qatests.why_not(row, now=now)
+
+
 def set_ready(label, on=True):
     """Row LABEL's Ready mark on (on its words as they are now) or off. Returns True for on. Exits with why: on F77,
     also when the review flagged the row, or hasn't passed its new or changed words yet."""
@@ -435,6 +448,9 @@ def set_ready(label, on=True):
     if not row:
         sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no Ready mark.")
     if on:
+        qw = _qa_why(row)  # real QA: first, and no say-so skips it
+        if qw:
+            sys.exit(qw + ". (Her QA tests hold the Ready mark: nobody's say-so skips them.)")
         why = _review_why(row)
         if why:
             sys.exit(why + ". (On his explicit say-so a call can still give it to the team with --not-ready --said \"his words\".)")
@@ -856,7 +872,23 @@ def review_notes(labels):
             + ".") if bits else ""
 
 
-def gate(text, job_text_, say_so=False, said=None, now=False):
+def gate(text, job_text_, say_so=False, said=None, now=False, build=True):
+    """Real QA (4 November 2026) in front of H272's gate: every open row a build names needs her QA tests, sealed by the program's two hard
+    checks (every sentence of his covered, every test failing on the code as it is) and passed by their own review, or on his now after
+    their three rounds. No say-so and no now skips the hard checks. The job's words then name her tests as its target."""
+    rows = named_open_rows(text, job_text_) if build else []
+    if rows:
+        qws = [w for w in (_qa_why(r, now=now) for r in rows) if w]
+        if qws:
+            sys.exit("Refused: " + "; ".join(qws) + ". Her QA tests go first, and nobody's say-so or now skips their hard checks. Nothing added.")
+    out = _gate(text, job_text_, say_so, said, now)
+    if rows:
+        import qatests
+        out = out.rstrip() + qatests.job_words([r["label"] for r in rows])
+    return out
+
+
+def _gate(text, job_text_, say_so=False, said=None, now=False):
     """H272, for a call adding work for the team (jobs.py add, schedule.py add): the open rows it names must be ready.
     Returns the job's words to use (with a line that it went without the mark, on the say-so); exits with why when a
     row isn't ready and there's no say-so. F99: the say-so is a quote found in his own lines (--said), kept with the

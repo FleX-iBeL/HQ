@@ -1074,7 +1074,7 @@ def main(argv):
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
-            said = sp_.gate(text, one_line(" ".join(words)), say_so, his, now=at_once)
+            said = sp_.gate(text, one_line(" ".join(words)), say_so, his, now=at_once, build=not report)  # realqa: a report builds nothing
             now_checked = at_once and say_so and said != one_line(" ".join(words))  # nowroad: the gate read his now, once is enough
             if report:  # F145: where it writes, named in its own text, so done can tell him
                 lab = item if item and re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()) else ""
@@ -1439,6 +1439,11 @@ def main(argv):
                     at_epoch -= 86400
                 now = f"{int(m_at.group(1)):02d}:{m_at.group(2)}"
                 args = args[:i] + args[i + 2:]
+            if cmd == "done" and not was.startswith("done"):  # real QA: her tests, run at the end, green; no words of anyone's skip it
+                import qatests
+                qno = qatests.done_refuses(j)
+                if qno:
+                    sys.exit(f"Refused: {qno} His words don't skip her QA tests. The job stays open.")
             his = None  # F101: done without a record only on his own words
             if cmd == "done" and "--said" in args:
                 i = args.index("--said")
