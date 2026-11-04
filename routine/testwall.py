@@ -576,6 +576,53 @@ def _under(p: str, root: str) -> bool:
     return p == root or p.startswith(root + os.sep)
 
 
+# F144 (4 November 2026): the run's flows in a systemd scope of their own, first in line for the kernel's OOM killer. Jobs 494, 496
+# and 498 ran the quick set from their own tmux pane; the runner grew to about 3 GB next to another full run on a 7.7 GB server
+# without swap, the kernel's OOM killer killed a process in the pane's scope (tmux-spawn-*.scope), and systemd's OOMPolicy=stop then
+# stopped that whole scope: the job's runner, its claude and the pane, so the job heard signal 1. In a scope of its own, an OOM
+# kill ends only the test run, which says so (a red line), and the job goes on.
+OOM_FIRST = 500  # the run's oom_score_adj: under memory pressure a test run goes before a job, a call or the routine
+_SCOPES = {}
+
+
+def _oom_first() -> None:
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write(str(OOM_FIRST))
+    except OSError:
+        pass
+
+
+def scopes_here() -> bool:
+    """Whether this computer gives a run a systemd scope of its own (Linux with a user manager), tried once."""
+    if "ok" not in _SCOPES:
+        ok = bool(sys.platform.startswith("linux") and shutil.which("systemd-run") and os.environ.get("XDG_RUNTIME_DIR"))
+        if ok:
+            try:
+                ok = subprocess.run(["systemd-run", "--user", "--scope", "--quiet", "--collect", "true"], capture_output=True, timeout=30).returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                ok = False
+        _SCOPES["ok"] = ok
+    return _SCOPES["ok"]
+
+
+def contained(cmd: list[str], name: str, cap: str | None = None) -> list[str]:
+    """F144: `cmd` in a transient scope of its own (the same pid: systemd-run execs it), stopped whole when the OOM killer takes a
+    process of it; `cap` (or HQ_WALL_MEMORY_MAX) is a MemoryMax for it. Where there are no scopes, `cmd` as it is."""
+    cap = cap or os.environ.get("HQ_WALL_MEMORY_MAX")
+    if not scopes_here():
+        return list(cmd)
+    return ["systemd-run", "--user", "--scope", "--quiet", "--collect", f"--unit={name}-{int(time.time())}", "-p", "OOMPolicy=stop",
+            *(["-p", f"MemoryMax={cap}"] if cap else []), *cmd]
+
+
+def contained_popen(cmd: list[str], name: str, cap: str | None = None, **kw) -> subprocess.Popen:
+    """F144: a Popen of `cmd` in its own scope, first for the OOM killer."""
+    if sys.platform.startswith("linux"):
+        kw.setdefault("preexec_fn", _oom_first)
+    return subprocess.Popen(contained(cmd, name, cap), **kw)
+
+
 def tmux_dir(wall: str) -> str:
     """The run's own tmux socket: a short path, a socket's name has a limit a nested copy's folder goes past."""
     return os.path.join("/tmp", "hq-" + os.path.basename(wall))
@@ -761,7 +808,8 @@ def run(argv: list[str], root, keep: bool = False) -> int:
         env = wall_env(wall, [real_hq, real_ws, hqpaths.SUPPORT])
         inner = os.path.join(wall, "hq", "app", "happy_flows.py")
         py = os.path.join(wall, "hq", ".venv", "bin", "python")
-        p = subprocess.Popen([py if os.path.exists(py) else sys.executable, inner, *argv], cwd=os.path.join(wall, "hq"), env=env)
+        p = contained_popen([py if os.path.exists(py) else sys.executable, inner, *argv], f"hq-testrun-{os.getpid()}",
+                            cwd=os.path.join(wall, "hq"), env=env)  # F144: an OOM kill ends this run, never the job it runs in
 
         def told(sig, _):
             try:
@@ -786,7 +834,8 @@ def run(argv: list[str], root, keep: bool = False) -> int:
                 last = open(os.path.join(wall, "flow"), encoding="utf8").read().strip()
             except OSError:
                 last = ""
-            reds.append(f"the run stopped before its result (exit {code})" + (f", in flow {last}" if last else ""))
+            reds.append(f"the run stopped before its result (exit {code})" + (f", in flow {last}" if last else "")
+                        + ("; it was killed (SIGKILL), most likely out of memory" if code == -signal.SIGKILL else ""))
     finally:
         stop_tmux(wall)
     reds += [f"a flow tried to write a real record: {t.get('path')}" + (f", in flow {t['flow']}" if t.get("flow") else "") for t in tried]

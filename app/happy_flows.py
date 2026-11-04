@@ -28325,6 +28325,60 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         return ("a pane's server survives a test run's cleanup; a closed window brings its job back once, item carried; "
                 "the driver says each say-so and an end once")
 
+    async def flow479(self) -> str:
+        """F144, no Claude: a test run started from a job's pane runs in a systemd scope of its own, first in line for the OOM killer,
+        so running out of memory ends the test run and never the job. A stand-in pane: a scope with a small memory limit and systemd's
+        OOMPolicy=stop, as tmux gives each pane. A memory hog run straight from it takes the whole pane down (what ended jobs 494,
+        496 and 498 with signal 1); run through the wall's own launcher it's killed in its own scope, the pane lives and hears exit -9,
+        and the hog's oom_score_adj puts it first. The wall's run starts its flows that way, and says a killed run was likely out of memory."""
+        import inspect
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        import hqpaths
+        import testwall
+        bad = []
+        def check(ok, what):
+            if not ok:
+                bad.append(what)
+        src = inspect.getsource(testwall.run)
+        check("contained_popen(" in src and "out of memory" in src, "the wall's run doesn't start its flows in a scope of their own")
+        if not (hqpaths.IS_LINUX and testwall.scopes_here()):
+            if bad:
+                raise Failed("; ".join(bad))
+            return "no systemd scopes on this computer; the wall starts its flows as before"
+        cmd = testwall.contained(["true"], "hqf144x", cap="64M")
+        check(cmd[:3] == ["systemd-run", "--user", "--scope"] and "OOMPolicy=stop" in cmd and "MemoryMax=64M" in cmd and cmd[-1] == "true",
+              f"the launcher's scope: {cmd}")
+        d = self.tmp / "f144"
+        d.mkdir(exist_ok=True)
+        hog = d / "hog.py"
+        hog.write_text("import os, time\nprint(open('/proc/self/oom_score_adj').read().strip(), flush=True)\nkeep = []\n"
+                       "for _ in range(40):\n    keep.append(bytearray(10 * 1024 * 1024))\n    time.sleep(0.02)\nprint('hog done', flush=True)\n")
+        pane = d / "pane.py"
+        pane.write_text("import json, subprocess, sys\n"
+                        f"sys.path.insert(0, {str(ROOT / 'routine')!r})\nimport testwall\n"
+                        f"hog, out = {str(hog)!r}, sys.argv[2]\n"
+                        "if sys.argv[1] == 'old':\n    r = subprocess.run([sys.executable, hog], capture_output=True, text=True); code, said = r.returncode, r.stdout\n"
+                        "else:\n    p = testwall.contained_popen([sys.executable, hog], 'hqf144-hog', cap='80M', stdout=subprocess.PIPE, text=True)\n"
+                        "    said = p.communicate()[0]; code = p.returncode\n"
+                        "json.dump({'code': code, 'said': said}, open(out, 'w'))\n")
+        got = {}
+        for mode in ("old", "new"):
+            out = d / f"{mode}.json"
+            unit = f"hqf144-pane-{mode}-{os.getpid()}-{int(time.time())}"
+            r = await asyncio.to_thread(_sp.run, ["systemd-run", "--user", "--scope", "--quiet", "--collect", f"--unit={unit}", "-p", "MemoryMax=150M",
+                                                  "-p", "OOMPolicy=stop", sys.executable, str(pane), mode, str(out)], capture_output=True, text=True, timeout=120)
+            got[mode] = {"pane_exit": r.returncode, **(json.loads(out.read_text()) if out.exists() else {"pane": "gone"})}
+        old, new = got["old"], got["new"]
+        check(new.get("code") == -9 and "hog done" not in new.get("said", ""), f"the hog wasn't ended in its own scope: {new}")
+        check(new.get("pane") != "gone" and new.get("pane_exit") == 0, f"an OOM kill in a test run took the pane with it: {new}")
+        check(new.get("said", "").split("\n")[0].strip() == str(testwall.OOM_FIRST), f"the test run isn't first for the OOM killer: {new.get('said', '')[:40]}")
+        shown = old.get("pane") == "gone"  # the old way: the pane's scope is stopped whole, as jobs 494, 496 and 498 were
+        if bad:
+            raise Failed("; ".join(bad))
+        return ("a test run out of memory ends in its own scope, the pane goes on (exit -9), first for the OOM killer"
+                + ("; run straight from the pane, the same hog took the whole pane" if shown else f"; the old way didn't reproduce here: {old}"))
+
     async def flow295(self) -> str:
         """F105, the real run, by hand, a few points of the week: --only 295 with HQ_CHAIN_WORKSPACE naming the workspace to copy. One small
         request on a copy with the real model and the routine's real tick every minute; the clock and his two yeses are the driver's, said as it goes."""
@@ -38319,6 +38373,7 @@ FLOWS = {
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
+    479: ("F144: a test run from a job's pane runs in a systemd scope of its own, first for the OOM killer: out of memory ends the test run, never the job", False, "flow479"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),
     391: ("F114, the second check: a yes fits a held change only by its own words: common words like call and lunch open nothing, a question naming two opens neither", False, "flow391"),
     392: ("F114, the second check: his yes to her stop line question fixes that line at that number and nothing else", False, "flow392"),
