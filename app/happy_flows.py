@@ -18282,7 +18282,8 @@ print(json.dumps(release.on_the_record(old, 'v9.9.9', '9.9.9')))
         # a text and an incident about it, given the id
         r = _sp.run([sys.executable, str(ROOT / "app/direct_line.py"), "text", "down", "the made-up part went quiet", "--item", item], capture_output=True, text=True, env=env)
         need(r.returncode == 0, f"the text: {r.stderr[-300:]}")
-        last = json.loads((ws / "HQ/direct-line/thread.jsonl").read_text().splitlines()[-1])
+        need(not (ws / "HQ/direct-line/thread.jsonl").exists(), "the down text came from Donna, with Moneypenny on (F146)")
+        last = json.loads((ws / "HQ/team-line/thread.jsonl").read_text().splitlines()[-1])  # F146: a build message, on her line
         need(last.get("item") == item, f"the text doesn't carry the id: {last}")
         code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import incidents; incidents.down('jobs', 'a made-up stop', item=sys.argv[2])"
         r = _sp.run([sys.executable, "-c", code, str(ROOT), item], capture_output=True, text=True, env=env)
@@ -21632,7 +21633,7 @@ print(json.dumps(out))
         titles = " | ".join(t for _, t in heads).lower()
         for word in ("two computers", "restart", "release", "usage", "doors", "status page", "test wall", "privacy", "checkpoint", "never"):
             need(word in titles, f"no section about {word}: {titles}")
-        for word in ("kept-from-both", "handover", "Donna's warning first", "update.py restart-all", "release.py main", "update.py back",
+        for word in ("kept-from-both", "handover", "The warning first", "text restart", "update.py restart-all",  # F146: the heads-up is a build message "release.py main", "update.py back",
                      "update.py forward", "reserve", "this call or this chat, today", "incident", "Never send mail", "exact pid",
                      "Never write the live workspace by hand", "private files", "checkpoint-N", "privacy.py --history", "Moneypenny delegates",
                      "carries the team's findings back", "backend.py off NAME", "routine/misses.py", "extensions.py flows", "One whole run at a time",
@@ -21816,7 +21817,8 @@ print(pol.decide('Bash', {'command': 'python3 "' + str(P._APP) + '/rules.py" tod
 
     async def flow230(self) -> str:
         """F108, no Claude: three writers at the same instant, the way flow 196 does it (two "down" texts in plain words and his own
-        text, each its own process, three rounds), 20 runs on Donna's line and 20 on the team line: all 9 lines land every
+        text, each its own process, three rounds), 20 runs on Donna's line (as the backup, Moneypenny's line off: F146) and 20 on
+        the team line: all 9 lines land every
         time. Two "down" texts can be word for word the same in the same millisecond; the line's own id keeps them two. A
         hand-over sent again stays once, a line from before keeps the old key, the backup's own lines and the page's merge
         tell two such lines apart too."""
@@ -21833,6 +21835,8 @@ print(pol.decide('Bash', {'command': 'python3 "' + str(P._APP) + '/rules.py" tod
                 e = dict(env, HQ_DIRECT_DIR=str(line))
                 if name == "team":  # direct_line.team_env, with no list of agents to read
                     e.update({"HQ_DIRECT_AGENT": "moneypenny", "HQ_DIRECT_TEAM": "1", "HQ_DIRECT_PUSH_DIR": str(t / "direct-line")})
+                else:  # F146: a down text is Moneypenny's; Donna sends it as the backup, with her line switched off
+                    e["HQ_TEAM_LINE"] = "0"
                 said = []
                 for i in (1, 2, 3):
                     ps = [_sp.Popen([sys.executable, tool, "text", "down", f"the server went quiet, round {i}"], env=e, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True),
