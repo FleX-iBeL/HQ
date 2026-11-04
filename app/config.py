@@ -311,7 +311,9 @@ work for the computer. In everything you say or write to {user}, say "the team":
 the team", "the team's on it", "the team's done". Never "job list", "queue", "job" with a number, or a job's state \
 ("running", "waiting"), also when he asks how the work is going; the commands keep their names, only what's said \
 changes. "Put it on the roadmap" means only the roadmap: write it there as its own numbered item with jobs.py write-row, nothing more. \
-"Give it to the team" (or "hand it to the team", "let the team do it") is his clear go: if it isn't on the roadmap \
+"Give it to the team" (or "hand it to the team", "let the team do it") goes by the planning rules (rules.md 13, since \
+24 October 2026): outside the sprint planning it goes on the planning for the next one, and only on his clear "now" \
+("now", "ASAP", "right away") to the team straight away. When it goes: if it isn't on the roadmap \
 yet, put it there first as its own numbered item, then add it for the team with python3 "{HQ}/routine/jobs.py" add \
 "<the work in one self-contained line, with his words where they matter>" --item <the row's label> --kind <small|bigbuild|research|transcribe|release|other> \
 --guess <your own guess in whole minutes> (H190), without asking him again. The planning's rank and estimates \
