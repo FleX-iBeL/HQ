@@ -331,6 +331,7 @@ class Decision:
     retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
     handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
     door: bool = False  # F114: a refused try at one of his doors (his switch, his yes, another agent's ledger): on the ledger, once
+    road: bool = False  # F145: refused, but `why` names the right road to take instead (said as that, not "don't try another way")
 
 
 # -- the lists -------------------------------------------------------------------
@@ -372,6 +373,19 @@ CALL_UNFRIENDLY = [
     "NotebookEdit", "Workflow", "CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger",
     "DesignSync",
 ]
+
+# F145 (4 November 2026, call at 11:59, Moneypenny), his words at 12:32: "Claude's general-purpose helper gets closed off on calls
+# and texts, so you can't take that side road anymore." Claude Code's own helpers run outside HQ's harness (no box, no usage line,
+# nothing on the status page, their asks not in his chat): refused, with the two right roads. Also left out of the session (brain.py).
+GENERAL_HELPERS = ["Agent", "Task", "SendMessage", "TeamCreate", "TeamDelete"]
+HELPER_ROADS = (
+    "Claude's own helper isn't used on a call or in a text (F145): it runs outside HQ, with no box, no usage line and nothing on "
+    "the status page. There are two right roads. A quick look goes to HQ's own helper, which only reads and is boxed: "
+    f"python3 \"{HQ_ROUTINE / 'helper.py'}\" start \"THE QUESTION\". Bigger work (a report, a review of many items, research) goes "
+    "to the team as a job, after his yes: first the row, python3 \"" + str(HQ_ROUTINE / 'jobs.py') + "\" write-row \"THE ASK, with his "
+    "words\", then python3 \"" + str(HQ_ROUTINE / 'jobs.py') + "\" add \"Read the LABEL row and write the report it asks for\" --item "
+    "LABEL --report --not-ready --said \"HIS YES\" --guess MINUTES; it's boxed, under his usage lines, on the status page, and its "
+    "report comes back to him on your line with where it is")
 
 # Read-only shell commands that may run without asking, as long as every path they touch
 # is inside the folder.
@@ -525,8 +539,8 @@ class Policy:
             if plain_address(url):
                 return Decision(ALLOW, "reading a plain web address (no need to ask)")  # H103
             return _ask("open that web address, which carries more than a plain page", "a web address with data in it (F99)")
-        if tool in ("Task", "Agent"):
-            return _ask("hand this to a helper to work on", "a helper")
+        if tool in GENERAL_HELPERS:  # F145: never Claude's own helper here; the two right roads instead
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)  # F145: on the ledger, like the other doors
         return _ask(f"use {tool}", "anything else")
 
     def _calendar(self, name: str, inp: dict) -> Decision:
@@ -641,6 +655,35 @@ class Policy:
             aid, words = (args[2].lower() if len(args) > 2 else ""), (args[3] if len(args) > 3 else "")
             n = int(args[4]) if len(args) > 4 and args[4].isdigit() else None
             return cycles.his_yes_refused(aid, words, n, places=list(self.words_from), base=self.folder)
+        except Exception as e:
+            return f"his words couldn't be read ({type(e).__name__})"
+
+    def _done(self, args: list[str]) -> Decision:
+        """F145: jobs.py done N --said "HIS WORDS" from a call or a text: his own line, today, on this call or in this text's thread,
+        not a no. jobs.py then checks the same words again (sprint.his_yes) before it closes a job without its record."""
+        said = args[args.index("--said") + 1] if "--said" in args and args.index("--said") + 1 < len(args) else None
+        n = args[2] if len(args) > 2 else ""
+        if not n.isdigit():
+            return Decision(DENY, "which job? jobs.py done N --said \"HIS WORDS\", with the job's number from jobs.py list")
+        if said is None or not said.strip():
+            return Decision(DENY, f"a team job is closed from here only on his own words, and none were given: jobs.py done {n} {_SAYS}. "
+                                  "Ask him, and use his answer", door=True)
+        why = self._done_refused(said, int(n))
+        if why:
+            return Decision(DENY, f"a team job is closed from here only on his own words, and {why}: jobs.py done {n} {_SAYS}. "
+                                  "Ask him, and use his answer", door=True)
+        return Decision(ALLOW, "closing a team job on his own words (the queue checks them again)")
+
+    def _done_refused(self, said: str, n: int) -> str:
+        """F145: why SAID doesn't stand as his words to close job N from this call or this text, today; "". The one check, jobs.close_refused,
+        the same the queue runs again with the session's HQ_WORDS_FROM."""
+        try:
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import jobs
+            return jobs.close_refused(n, said, list(self.words_from), str(self.folder))
+        except SystemExit as e:
+            return f"the queue couldn't be read ({e})"
         except Exception as e:
             return f"his words couldn't be read ({type(e).__name__})"
 
@@ -767,6 +810,8 @@ class Policy:
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _starts_a_claude(cmd, runs):  # F145: no general-purpose Claude through the shell either, also with a yes
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)
         if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
             return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
                                   "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
@@ -831,7 +876,7 @@ class Policy:
                         step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
                         d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
                                                 f"are fine on their own: run them again without this step",
-                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door)
+                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door, road=d.road)
                     return d
         return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
 
@@ -881,9 +926,15 @@ class Policy:
                 return Decision(ALLOW, "the queue for the computer")
             if sub == "now" and "--said" in args:  # F100: a build in his day hours, only with his own words
                 return Decision(ALLOW, "his say-so for a build in the day")
+            if sub == "done" and "--said" in args:  # F145: his words close or settle a team job, with --at or without, only through the door
+                return self._done(args)
             if sub == "done" and "--at" in args:  # F57: tick off a running job whose work is checked done, on his say-so
                 return Decision(ALLOW, "ticking off a running job at the time it really finished")
-            return Decision(DENY, "that part of the queue is only for the computer itself")
+            if sub == "done":  # F145: without his words, the door says why
+                return self._done(args)
+            return Decision(DENY, f"{sub or 'that'} is the queue's own step, the computer's and the job's: from here the queue takes "
+                                  "add, add-row, send-row, write-row, tell, list, stop, overrule, move, on, off, resume, pause, "
+                                  "mail-fast, mail-hourly, now --said, done N --said \"HIS WORDS\" and done N --at HH:MM")
         # H43: the scheduler. Adding, listing, moving and cancelling planned items only writes the schedule on
         # the roadmap, like the queue; promote and status are the routine's own.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "schedule.py"):
@@ -1403,6 +1454,64 @@ def _hide_quoted_dollars(cmd: str) -> str:
         out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
         i += 1
     return "".join(out)
+
+
+RUNS_A_CLAUDE = ("claude", "codex", "openclaw")  # F145: as cyclehook.RUNS: a general-purpose agent outside HQ's harness
+_STARTS = {"nohup", "setsid", "sudo", "doas", "caffeinate"}  # F145: what only starts the next program, past cyclehook's wrappers
+# F145, the second check: programs that start a command they're handed, often in quotes or after their own arguments (a session, a lock file, a
+# host): with one of them in the line, any claude, codex or openclaw in it counts as started.
+_STARTERS = {"tmux", "screen", "script", "watch", "flock", "chrt", "taskset", "unbuffer", "busybox", "ssh", "osascript", "su", "runuser",
+             "systemd-run", "at", "batch", "parallel", "expect", "dtach", "abduco",
+             "strace", "ltrace", "gdb", "perf", "rlwrap", "cpulimit", "xvfb-run", "firejail", "docker", "podman"}  # F145, the third check
+_STARTER_RUNS = re.compile(r"(?<![\w-])(?:(?:uv|pipx|poetry|pdm|hatch|rye)\s+run|python[\d.]*\s+(?:-\S+\s+)*-m\s+pty)(?![\w-])")
+# F145: a line that only reads: its first program is one of these, so a claude, codex or openclaw in it is a word it looks for, not a program
+_PLAIN_READS = {"grep", "egrep", "fgrep", "rg", "which", "ls", "cat", "pgrep", "ps", "tail", "head", "git"}
+_CLAUDE_WORD = re.compile(r"(?:^|[\s\"'`/;&|(=])(?:claude|codex|openclaw)(?=[\s\"'`;&|)]|$)")
+_PACKAGE_RUN = re.compile(r"(?<![\w-])(?:npx|bunx|pnpx|(?:pnpm|yarn|bun)\s+(?:dlx|x|exec)|npm\s+(?:exec|x)|deno\s+run)\b[^;&|\n]*"
+                          r"(?:@anthropic-ai/claude-code|@openai/codex|(?<![\w@/-])(?:claude|codex|openclaw)(?![\w-]))")
+_CLAUDE_PACKAGE = re.compile(r"(?:@anthropic-ai/)?claude-code(?:@\S*)?$|@openai/codex(?:@\S*)?$")  # F145: the package, run by uv, pipx, poetry ...
+_CLAUDE_IN_CODE = re.compile(r"[\"'`](?:[^\"'`\s]*/)?(?:claude|codex|openclaw)(?:[\"'`\s]|$)")
+
+
+def _starts_a_claude(cmd: str, runs: str) -> bool:
+    """F145: whether a shell line would start claude, codex or openclaw: as its program, behind timeout, nohup, env and the like, inside what a
+    shell is handed (sh -c, eval, a heredoc), or named as a program in code handed to Python, node, perl or ruby (subprocess, os.system).
+    Reading or grepping for the word isn't starting it. HQ's own helper (routine/helper.py) starts its model itself, not from here.
+    A known limit of reading the words: a name built up inside code ("cl" + "aude") or a script written first and run after isn't caught here
+    (the script's write and its run ask on their own)."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import cyclehook
+        def program(words):
+            while words and (os.path.basename(words[0]) in _STARTS or os.path.basename(words[0]) in cyclehook.WRAPPERS):
+                words = cyclehook._program(" ".join(words[1:]))
+                while words and words[0].startswith("-"):
+                    words = words[1:]
+            return os.path.basename(words[0]) if words else ""
+
+        for piece in re.split(r"[;&|\n()`]+", runs):  # a bare claude, codex or openclaw anywhere in a piece that isn't a plain read
+            words = cyclehook._program(piece)
+            if any(os.path.basename(w) in RUNS_A_CLAUDE for w in words) and program(list(words)) not in _PLAIN_READS:
+                return True
+        for raw in re.split(r"[;&|\n]+", cmd):  # a starter anywhere in its line as written: what it's handed is often in quotes
+            toks = [w.strip("\"'`(),") for w in re.findall(r"[^\s\"'`]+", raw) if not re.match(r"[A-Za-z_]\w*=", w)]
+            if not toks or program(cyclehook._program(" ".join(toks))) in _PLAIN_READS:
+                continue
+            last_start, read_since = None, False
+            for i, w in enumerate(toks):
+                name = os.path.basename(w)
+                if name in _STARTERS or _STARTER_RUNS.match(" ".join(toks[i:i + 3])):
+                    last_start, read_since = i, False
+                elif last_start is not None and name in _PLAIN_READS:
+                    read_since = True  # ssh host "pgrep -af claude": the starter is handed a plain read
+                elif (name in RUNS_A_CLAUDE or _CLAUDE_PACKAGE.match(w)) and last_start is not None and not read_since:
+                    return True
+        if _PACKAGE_RUN.search(cmd):
+            return True
+        return bool(cyclehook._RUNS_CODE_TEXT.search(cmd) and _CLAUDE_IN_CODE.search(cmd))
+    except Exception:
+        return bool(re.search(r"(?:^|[\s;&|(`'\"/])(?:claude|codex|openclaw)\s+(?:-|exec\b)", cmd))
 
 
 def _what_runs(cmd: str) -> str:

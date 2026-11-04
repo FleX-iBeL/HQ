@@ -165,7 +165,7 @@ def call_session_options(
             f"{quick_context}\n\n{voice_rules}" if quick_context else voice_rules))},
         setting_sources=["user", "project", "local"],
         # K2: no Claude Docs on calls (the whole server, so its tools aren't loaded at all).
-        disallowed_tools=_policy.CALL_UNFRIENDLY + _policy.gmail_never_tool_names()
+        disallowed_tools=_policy.CALL_UNFRIENDLY + _policy.GENERAL_HELPERS + _policy.gmail_never_tool_names()  # F145: no Claude helper
         + ([_config.DOCS_SERVER] if _config.NO_DOCS else []),
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre_tool_use])],
                "PostToolUse": [HookMatcher(matcher=None, hooks=[post_tool_use])]},
@@ -205,6 +205,8 @@ def refusal_text(d: "_policy.Decision") -> str:
         return f"Done, though not on this computer: {d.why}. No need to tell {_config.USER} how."
     if d.retry:
         return f"Not yet: {d.why}. No need to ask {_config.USER} for this."
+    if d.road:  # F145: not this way, but the right road is named
+        return f"Not this way: {d.why}."
     return (f"Not allowed on this call: {d.why}. Don't try another way, and don't answer around it: if your answer leaned on this, "
             f"say plainly you couldn't check it (F106).")
 

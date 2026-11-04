@@ -19913,7 +19913,7 @@ print(json.dumps(out))
         r = py(code, str(ws))
         need(r.returncode == 0, f"the doors: {r.stderr[-400:]}")
         o = json.loads(r.stdout.strip().splitlines()[-1])
-        need(o["start"] == "allow" and o["run"] == "deny" and o["after"] == "deny" and o["task"] == "ask" and o["tools"] == "Read,Glob,Grep,WebSearch" and o["mail"], f"the doors: {o}")
+        need(o["start"] == "allow" and o["run"] == "deny" and o["after"] == "deny" and o["task"] == "deny" and o["tools"] == "Read,Glob,Grep,WebSearch" and o["mail"], f"the doors: {o}")
         # on the call: the call's own watcher, with a stand-in for the voice
         call = """
 import asyncio, json, sys, types
@@ -30139,6 +30139,222 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         need("done N --at HH:MM" in config.VOICE_RULES, "the call rules don't say how to tick off a job")
         return "the nudge names the done mark; a never-ending wait loop stops counting after 15 minutes, output keeps a shell alive; every job's text ends with the done mark; done --at ticks off at the real time"
 
+    async def flow480(self) -> str:
+        """F145, no Claude: Moneypenny's big work goes to the team, and she settles a team job on his words. On a call and in a text,
+        Claude's own helpers (Agent, Task, SendMessage) are refused through the session's own hook with the two right roads named
+        (HQ's helper for a quick look, a report job for the team), on the ledger, and left out of the session; so is a general-purpose
+        Claude through the shell (claude, codex, openclaw, behind timeout, nohup, env, sh -c or in Python's subprocess), also with a yes,
+        while reading about it stays free; a report asked on a call ends as a research job on a copy's queue, only for a row already open
+        on the planning, its report's place in its text; its done names the report's place, on her line too; jobs.py done N --said (with
+        --at or without) passes the policy and the queue only on his own line from this call or this text, today, that names the job and
+        reads as his go, and a refusal says why."""
+        import subprocess as _sp
+        import policy as P
+        import brain
+        import jobs as JB
+        ws, env = self._f114_env("f145")
+        env.update({"HQ_SAYSO_FAKE": "yes", "HQ_DIRECT_DIR": str(ws / "HQ/direct-line")})
+        day = time.strftime("%Y-%m-%d")
+        (ws / "HQ/calls").mkdir(parents=True, exist_ok=True)
+        call = ws / self._f114_call()
+        call.write_text("# Call today, 00:00\n\nStarted 00:00:00 · agent Moneypenny · brain opus\n\n"
+                        "- 00:00:05 **HQ:** A report on all 68 open items is bigger than a quick look. Shall I hand it to the team?\n"
+                        "- 00:00:20 **Me:** yes, hand the report on all open items to the team\n")
+        (ws / "HQ/team-line").mkdir(parents=True, exist_ok=True)
+        state = self.tmp / "f145-state.json"
+        # 1. Claude's own helpers: refused on a call and in a text, with the two roads, on the ledger; and not in the session at all.
+        for where in ("call", "text"):
+            for tool, inp in (("Agent", {"description": "a report", "prompt": "write a report on all 68 items", "subagent_type": "general-purpose"}),
+                              ("Task", {"prompt": "x"}), ("SendMessage", {"to": "helper-1", "message": "save the report"})):
+                pol = self._f114_policy(ws, "moneypenny", state if where == "text" else None)
+                verdict, said = await self._f114_hook(pol, tool, inp)
+                need(verdict == "deny" and said.startswith("Not this way") and "helper.py" in said and "start" in said
+                     and "write-row" in said and "--report" in said, f"{where}: {tool} wasn't refused with the two roads: {verdict} {said[:300]}")
+                d = pol.log[-1][2]
+                need(d.door, f"{where}: refusing {tool} isn't a door, so it isn't on the ledger")
+                pol.approved.add((tool, P._key(inp)))  # a yes doesn't open it either
+                need(pol.decide(tool, inp).verdict == P.DENY, f"{where}: a yes opened {tool}")
+        opts = brain.call_session_options(model="opus", folder=ws, voice_rules="(F145 flow)", policy=self._f114_policy(ws, "moneypenny"))
+        need({"Agent", "Task", "SendMessage"} <= set(opts.disallowed_tools), f"Claude's helpers are still in the session: {opts.disallowed_tools}")
+        import config as C
+        need("--report" in C.TEAM_RULE and "done" in C.TEAM_RULE and "Agent" in C.HELPER_RULE, "the call rules don't say the two roads")
+        # 1b. A general-purpose Claude through the shell: refused with the same roads, also after a yes; reading about it stays free.
+        H = str(ROOT)
+        starts = ("claude -p 'write the report'", "timeout 900 claude --agent general-purpose -p x", "nohup claude -p x", "codex exec 'a report'",
+                  "env FOO=1 openclaw run x", "sh -c \"claude -p x\"", "bash -c 'timeout 60 claude -p x'", f"cd {H} && claude -p x",
+                  "python3 -c \"import subprocess; subprocess.run(['claude', '-p', 'x'])\"", "python3 -c \"import os; os.system('claude -p x')\"",
+                  "/usr/local/bin/claude -p x", "sudo -u openclaw claude -p x", "setsid nohup codex exec x",
+                  "tmux new-session -d \"claude -p x\"", "screen -dmS a claude -p x", "flock /tmp/l claude -p x", "ssh host claude -p x",
+                  "osascript -e \"do shell script \\\"claude -p x\\\"\"", "watch -n 60 codex exec x", "taskset -c 1 openclaw run",
+                  "npx @anthropic-ai/claude-code -p x", "bunx @anthropic-ai/claude-code", "pnpm dlx @anthropic-ai/claude-code -p x",
+                  "strace -f claude -p x", "ltrace claude", "gdb --args claude -p x", "perf record -- claude -p x", "rlwrap claude", "cpulimit -l 50 -- codex exec x",
+                  "xvfb-run openclaw run", "firejail claude -p x", "docker run img claude -p x", "podman run img codex", "uv run claude -p x",
+                  "pipx run claude-code", "poetry run claude -p x", "python3 -m pty claude", "echo go && claude", "tmux new -d -s a -n b \"x\" \"claude -p y\"")
+        for where in ("call", "text"):
+            pol = self._f114_policy(ws, "moneypenny", state if where == "text" else None)
+            for c in starts:
+                d = pol.decide("Bash", {"command": c})
+                need(d.verdict == P.DENY and d.road and "helper.py" in d.why and d.door, f"{where}: a Claude through the shell wasn't refused: {c}: {d.verdict} {d.why[:120]}")
+                pol.approved.add(("Bash", P._key({"command": c})))
+                need(pol.decide("Bash", {"command": c}).verdict == P.DENY, f"{where}: a yes opened {c}")
+            for c in (f"grep -n claude {H}/app/policy.py", f"grep -rn 'codex' {H}/routine/cyclehook.py", f"python3 {H}/routine/helper.py start \"what does claude -p do in HQ\"",
+                      f"grep -n tmux {H}/routine/tick.py", "ps aux | grep claude", "pgrep -af claude", f"git -C {H} log --oneline --grep claude"):
+                d = pol.decide("Bash", {"command": c})
+                need(d.verdict == P.ALLOW, f"{where}: reading about it was refused: {c}: {d.why[:160]}")
+        # The word claude in a plain read changes nothing: an ssh to the server asks as any ssh does, a look on this computer passes as any look does.
+        pol = self._f114_policy(ws, "moneypenny")
+        for word in ("claude", "python"):
+            d = pol.decide("Bash", {"command": f"ssh openclaw-vps \"pgrep -af {word}\""})
+            need(d.verdict == P.ASK, f"ssh with a plain read of {word}: {d.verdict} {d.why[:120]}")
+            need(pol.decide("Bash", {"command": f"ps aux | grep {word}"}).verdict == P.ALLOW, f"ps aux | grep {word} isn't free")
+        def jobs(*a, ok=True, extra=None):
+            r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT))
+            if ok:
+                need(r.returncode == 0, f"jobs.py {a[:2]} failed: {r.stdout}{r.stderr[-400:]}")
+            return r
+        jb = f"python3 \"{ROOT}/routine/jobs.py\""
+        # 2. A report asked for on the call: the row first, then the team's job, kind research, its report's place in its own text.
+        row = "A report on all open items: for each, what's asked, what's left and what it waits on. His words: \"yes, hand the report on all open items to the team\""
+        was = self._f114_proof(env)
+        try:
+            need(self._f114_policy(ws, "moneypenny").decide("Bash", {"command": f"{jb} write-row \"{row}\""}).verdict == P.ALLOW, "a call can't write the report's row")
+        finally:
+            self._f114_unproof(was)
+        said_yes = ["--not-ready", "--said", "yes, hand the report on all open items to the team", "--guess", "40"]
+        for no_row in ([], ["--item", "H9999"]):  # a report rests on a row already open on the planning
+            r = jobs("add", "Write a report on all open items", *no_row, "--report", *said_yes, ok=False)
+            need(r.returncode != 0 and "Nothing added" in (r.stdout + r.stderr) or r.returncode != 0 and "H9999" in (r.stdout + r.stderr),
+                 f"a report without its row was added: {no_row}: {r.stdout}{r.stderr[-200:]}")
+        out = jobs("write-row", row).stdout
+        m = re.search(r"\b([HF]\d+) is on the planning", out)
+        need(m, f"write-row didn't name the row: {out}")
+        label = m.group(1)
+        need(f"| ⬜ | {label} " in (ws / "HQ/roadmap.md").read_text(), f"{label} isn't on the planning")
+        before = json.loads(jobs("next").stdout)
+        add = ["add", f"Read the {label} row and write the report it asks for", "--item", label, "--report", *said_yes]
+        r = jobs(*add[:5], "--kind", "small", ok=False)
+        need(r.returncode != 0 and "research" in (r.stdout + r.stderr), f"a report went as a small build: {r.stdout}{r.stderr[-200:]}")
+        was = self._f114_proof(env)
+        try:
+            cmd = f"{jb} add \"Read the {label} row and write the report it asks for\" --item {label} --report --not-ready --said \"yes, hand the report on all open items to the team\" --guess 40"
+            d = self._f114_policy(ws, "moneypenny").decide("Bash", {"command": cmd})
+            need(d.verdict == P.ALLOW, f"a call can't hand the report to the team: {d.why}")
+        finally:
+            self._f114_unproof(was)
+        out = jobs(*add).stdout
+        m = re.search(r"Job (\d+) is ready", out)
+        need(m, f"the report job wasn't added: {out}")
+        n = int(m.group(1))
+        q = json.loads(jobs("next").stdout)
+        j = next((x for x in q["ready"] if x["n"] == n), None)
+        need(j and len(q["ready"]) == len(before["ready"]) + 1, f"the job isn't on the copy's queue: {q['ready'][-2:]}")
+        rel = f"HQ/reports/{day}-{label}.md"
+        need(f"The report goes to {rel}" in j["text"] and "gitlock.py" in j["text"] and f"the {label} row" in j["text"],
+             f"the job doesn't name its report's place: {j['text']}")
+        need((j.get("item") or {}).get("label") == label, f"the job doesn't carry its row: {j.get('item')}")
+        r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import estimate; print((estimate._load_state().get(sys.argv[2]) or {}).get('kind'))",
+                     str(ROOT / "routine"), str(n)], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        need(r.stdout.strip() == "research", f"the report job's kind isn't research: {r.stdout} {r.stderr[-200:]}")
+        # 3. Closing it: only his own line from this call or this text, today, with a closing word and the job's name in it, or a bare yes
+        # to her own question to close that job. A build closed past its record also needs the second look at his words.
+        out = jobs("add", "flow 480 build: change the colours", "--kind", "bigbuild").stdout
+        b = int(re.search(r"Job (\d+) is ready", out).group(1))
+        his = f"Job {n}, the report on all items, may close as done."
+        real = f"Job {n}, last night's weekly sweep, may close as done without its test record."  # his real line of 4 November, on this job
+        no_go = [(f"Job {n} is still running. Shall I put the dentist in your calendar on Thursday?", "yes, go ahead please"),
+                 ("Noted.", f"Sure, job {n} remains open for now"), ("Noted.", f"Yes, job {n} stays open"), ("Noted.", f"Yeah, keeping job {n} open"),
+                 ("Noted.", f"yes, job {n} has to be redone"), ("Noted.", f"Ok job {n} is broken, redo it"), ("Noted.", f"job {n} can go in the bin"),
+                 ("Noted.", "I checked the calendar and the inbox, close it"), (f"Job {n} is still open. Shall I close it?", f"Yeah, no, keep job {n} open for now"),
+                 ("Noted.", f"Should job {n} close or stay open"), ("All fine. Anything for the team?", "hello Moneypenny how are you doing today"),
+                 (f"Job {n} is waiting on you.", f"job {n}"), (f"Job {n} is done. Shall I put the dentist in?", "sure"),
+                 (f"Shall I keep job {n} open or close it?", "yep"),
+                 # the third check's lines: no go, whatever the second look would say
+                 ("Noted.", f"Tell me when job {n} is done"), ("Noted.", f"Job {n} will be done tomorrow"), ("Noted.", f"Job {n} is almost done"),
+                 ("Noted.", f"Is job {n} done"), ("Noted.", f"Job {n} is done badly, the report is wrong"), ("Noted.", f"When job {n} is done, close it"),
+                 ("Noted.", f"Close the dentist event, job {n} is still running"), ("Noted.", f"job {n} is finished"),
+                 (f"Shall I put the dentist in on Thursday and close job {n}?", "yeah sure"), (f"Job {n} is still running. Shall I close it?", "alright")]
+        go = [("Noted.", his), ("Noted.", real), ("Noted.", f"close job {n}, it's done"), ("Noted.", f"done with job {n}, close it"),
+              ("Noted.", f"#{n} can close"), ("Noted.", f"close job {n} please"), ("Noted.", f"job {n}'s done, close it"), ("Noted.", f"job {n} can be closed"),
+              (f"Job {n} is done. Shall I close it?", "yes"), (f"Shall I close job {n} as done?", "ok do it"),
+              ("Noted.", f"close job {b}, it's done")]
+        t0 = time.time()
+        thread = [x for pair in no_go + go for x in (("agent", pair[0]), ("me", pair[1]))]
+        (ws / "HQ/team-line/thread.jsonl").write_text("".join(json.dumps({"at": t0 - 300 + 2 * i, "from": w, "text": t}) + "\n" for i, (w, t) in enumerate(thread)))
+        yesterday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
+        (ws / f"HQ/calls/{yesterday}-0000.md").write_text(f"# Call, 00:00\n\nStarted 00:00:00 · agent Moneypenny · brain opus\n\n"
+                                                          f"- 00:00:05 **HQ:** Job {n}?\n- 00:00:20 **Me:** yes, close job {n} now, it is finished\n")
+        notes = ws / "HQ/notes.md"
+        notes.write_text((notes.read_text() if notes.exists() else "# Notes\n\n## Notes\n\n") + f"- {day} 00:00:00 · yes close job {n} as done, settled\n")
+        team = [str(ws / "HQ/team-line")]
+        was = self._f114_proof(env)
+        old_rm = JB.ROADMAP
+        JB.ROADMAP = str(ws / "HQ/roadmap.md")  # the policy reads the copy's queue, as a call reads the real one
+        try:
+            for words_from in (team, [str(call)]):
+                pol = P.Policy(ws)
+                pol.agent, pol.words_from = "moneypenny", words_from
+                for c in (f"{jb} done {n}", f"{jb} done {n} --said \"close the report job now please\"",
+                          f"{jb} done {n} --at 12:00 --said \"yes close job {n} as done, settled\"",  # a quick note of today: never a door
+                          f"{jb} done {n} --at 12:00 --said \"yes, close job {n} now, it is finished\"",  # another day's call
+                          f"{jb} done {n} --said \"{his}\"" if words_from != team else f"{jb} done {n} --said \"yes, hand the report on all open items to the team\""):
+                    d = pol.decide("Bash", {"command": c})
+                    need(d.verdict == P.DENY and ("his own words" in d.why or "his go" in d.why), f"done went through on words that aren't his from here: {c}: {d.verdict} {d.why}")
+            pol = P.Policy(ws)
+            pol.agent, pol.words_from = "moneypenny", team
+            for _, words in no_go:
+                for at in ("", "--at 12:00 "):
+                    d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{words}\""})
+                    need(d.verdict == P.DENY and "his" in d.why, f"done went through on a line that isn't his go: {words!r}: {d.verdict} {d.why}")
+            for _, words in go[:-1]:
+                for at in ("", "--at 12:00 "):
+                    d = pol.decide("Bash", {"command": f"{jb} done {n} {at}--said \"{words}\""})
+                    need(d.verdict == P.ALLOW, f"done on his own go was refused: {words!r}: {d.why}")
+            d = pol.decide("Bash", {"command": f"{jb} done {b} --said \"close job {n}, it's done\""})  # his go names another job
+            need(d.verdict == P.DENY, f"his go to close job {n} closed job {b}: {d.why}")
+            verdict, said = await self._f114_hook(pol, "Bash", {"command": f"{jb} done {n}"})
+            need(verdict == "deny" and "his own words" in said, f"the refusal she's told doesn't say why: {said[:200]}")
+        finally:
+            JB.ROADMAP = old_rm
+            self._f114_unproof(was)
+        # The queue checks again, on the session's own words: a quick note, another day's call and lines that aren't his go stay refused.
+        for words, place in ((f"yes close job {n} as done, settled", team), (f"yes, close job {n} now, it is finished", [str(call)]),
+                             (f"Should job {n} close or stay open", team), ("yes, go ahead please", team), (f"Yes, job {n} stays open", team),
+                             ("I checked the calendar and the inbox, close it", team), (f"Tell me when job {n} is done", team),
+                             (f"Is job {n} done", team), (f"When job {n} is done, close it", team), (f"Close the dentist event, job {n} is still running", team)):
+            r = jobs("done", str(n), "--said", words, ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(place)})
+            need(r.returncode != 0 and "Refused" in (r.stdout + r.stderr), f"the queue closed it on {words!r}: {r.stdout}{r.stderr[-200:]}")
+        # His go passes the words, and the second look still decides: a no there keeps any job open, the report as much as a build.
+        r = jobs("done", str(n), "--said", f"close job {n} please", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "no"})
+        need(r.returncode != 0 and "second look" in (r.stdout + r.stderr), f"the report job closed on the words alone: {r.stdout}{r.stderr[-300:]}")
+        r = jobs("done", str(b), "--said", f"close job {b}, it's done", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "no"})
+        need(r.returncode != 0 and "second look" in (r.stdout + r.stderr), f"a build closed past its record on the word check alone: {r.stdout}{r.stderr[-300:]}")
+        r = jobs("done", str(b), "--said", f"close job {b}, it's done", ok=False, extra={"HQ_WORDS_FROM": os.pathsep.join(team), "HQ_SAYSO_FAKE": "yes"})
+        need(r.returncode == 0, f"a build wasn't closed on his go and the second look's yes: {r.stdout}{r.stderr[-300:]}")
+        (ws / "HQ/reports").mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text("# Report: all open items\n\nmade up for flow 480\n")
+        jobs("mark", str(n), "running since 12:00")
+        out = jobs("done", str(n), "--said", his, extra={"HQ_WORDS_FROM": str(ws / "HQ/team-line")}).stdout
+        need(f"Its report: {rel}." in out, f"done didn't name the report's place: {out}")
+        q = json.loads(jobs("next").stdout)
+        need(not any(x["n"] == n for k in ("running", "ready", "held") for x in q.get(k) or []), "the job is still open")
+        told = ""
+        for _ in range(40):  # her text on her line, sent in the background (qa.tell)
+            for t in ("team-line", "direct-line"):
+                p = ws / "HQ" / t / "thread.jsonl"
+                if p.exists():
+                    told = next((l for l in p.read_text().splitlines() if rel in l and '"agent"' in l), told)
+            if told:
+                break
+            await asyncio.sleep(0.5)
+        need(told, "the report's place didn't reach her line")
+        return (f"Agent, Task and SendMessage refused on a call and in a text with HQ's helper and the team's report job named, on the "
+                f"ledger, a yes doesn't open them, out of the session; {len(starts)} ways to start claude, codex or openclaw through the shell "
+                f"refused, also with a yes, reading about them free; the report: no row or a missing one refused, {label} written first, "
+                f"then job {n} (research, {rel} in its text, a small build refused); done, with --at or without, refused without his "
+                f"words, on a quick note, another day's call, another place, another job and {len(no_go)} lines that aren't his go, let "
+                f"through on {len(go) - 1} that are (two gates: the words, then the second look, whose no keeps it open), by the policy and by the queue; a build past its record still needs the second look; the "
+                f"report's place in its done and on her line")
+
     async def flow478(self) -> str:
         """F141, no Claude: a switch still built in pieces gets its own settings boxes in Settings, as once it's shipped.
         A throwaway in-pieces list (HQ_FEATURES_PIECES) holds agents_run (the agents' cycles) and driving (the maps
@@ -38381,6 +38597,7 @@ FLOWS = {
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
+    480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),
     390: ("F114, the second check: naming a script isn't running it: reads of cycles.py, usageline.py and feedback.py pass and stay off the ledger, timeout N is fine, his nice is judged on its words, bash -c still refused", False, "flow390"),

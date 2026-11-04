@@ -29,6 +29,9 @@ usage (from the workspace):
                                                            planning row it names must carry the Ready mark (H272,
                                                            sprint.py ready), or --not-ready on his explicit say-so,
                                                            and the job then says it went without the mark
+  python3 "routine/jobs.py" add "TEXT" --item LABEL --report [--not-ready --said "HIS WORDS"] [--guess MINUTES]   F145: a report
+                                                           for him (kind research): the job writes one file, HQ/reports/<date>-LABEL.md
+                                                           in the workspace, and at done its path goes to him on Moneypenny's line
   python3 "routine/jobs.py" add-row "TEXT" [--bug] [--kind K]   the status page (H160): a numbered roadmap row first
                                                            (F with --bug, else H), then a job that reads that row
   python3 "routine/jobs.py" feedback "TEXT" [--from NAME] [--bug] [--when "YYYY-MM-DD HH:MM"] [--via agent]   H247: a row under Phase U · Feedback, no job
@@ -170,6 +173,58 @@ def item_of(rest):
         if m.group(1) == "item":
             return {"id": m.group(2), "label": m.group(3)}
     return None
+
+
+# F145 (4 November 2026, call at 11:59, Moneypenny), his words at 12:32: "When your work is bigger than a quick look, like that
+# report on all 68 items, you hand it to the team as a job. Then it has a time box, falls under my usage lines, shows on the status
+# page, and writes its report the normal way." A report job (add --report, kind research) writes one file in the workspace, under
+# REPORTS, named in its own text; at done the path goes to him on Moneypenny's line (qa.tell "report").
+REPORTS = "HQ/reports"
+REPORT_RE = re.compile(r"The report goes to (HQ/reports/[\w.-]+\.md)")
+REPORT_TAIL = " This is a report for him, not a build:"
+
+
+def report_rel(label, jobs=(), day=None):
+    """F145: where a new report goes, relative to the workspace: HQ/reports/<YYYY-MM-DD>-<label>.md, a number after it when that
+    name is taken, on disk or by a job on the list."""
+    day = day or time.strftime("%Y-%m-%d")
+    name = re.sub(r"[^\w.-]+", "-", label or "").strip("-.")[:60] or "report"
+    taken = {report_of(j) for j in jobs}
+    rel, k = f"{REPORTS}/{day}-{name}.md", 2
+    while rel in taken or os.path.exists(os.path.join(hqpaths.FOLDER, rel)):
+        rel, k = f"{REPORTS}/{day}-{name}-{k}.md", k + 1
+    return rel
+
+
+def report_of(j):
+    """F145: the report a job writes, from its own text, or None."""
+    m = REPORT_RE.search((j or {}).get("text") or "")
+    return m.group(1) if m else None
+
+
+def report_words(rel, label):
+    """F145: what a report job is told, after its question: the one file it writes and how it commits it."""
+    return (f"{REPORT_TAIL} read what it needs and change nothing in HQ or the workspace except the one report file. Write the report "
+            f"in the workspace as {rel}, plain and complete (what was asked, what you found, item by item where it's about items, and "
+            f"what you couldn't check), then commit only that file: python3 \"{os.path.join(hqpaths.HQ, 'routine', 'gitlock.py')}\" commit \"Report: {label or 'report'}\" "
+            f"{rel}. The report goes to {rel}.")
+
+
+def tell_report(j):
+    """F145: at done, the report's path goes to him on Moneypenny's line, or that it wasn't written. Returns what was said, or None."""
+    rel = report_of(j)
+    if not rel:
+        return None
+    what = one_line((j.get("text") or "").split(REPORT_TAIL)[0])[:200].rstrip(" .")
+    there = os.path.isfile(os.path.join(hqpaths.FOLDER, rel))
+    facts = (f"The report he asked for is ready, in the workspace at {rel}. What it was about: {what}." if there else
+             f"The report he asked for wasn't written: the team finished without a file at {rel}. What it was about: {what}.")
+    try:
+        import qa
+        qa.tell("report", facts, (j.get("item") or {}).get("id"))
+    except Exception as e:
+        print(f"(couldn't text the report's place: {e!r})", file=sys.stderr)
+    return f"Its report: {rel}." if there else f"No report was written at {rel}."
 
 
 def carry(j, item=None):
@@ -480,6 +535,153 @@ def job_names(n, text):
     return (f"job {n}", *( [m.group(0)] if m else [] ))
 
 
+# F145: closing or settling a team job on his words from a call or a text (the third check of 4 November 2026). Two gates, both must pass:
+# the words (close_go, here, no model) and a narrow second look at the same two lines (close_look, a small model, one turn), for every job
+# closed on his words from a call or a text, whatever its kind. The words: (1) his own line names the job ("job N", "job twelve", "number 12",
+# "#N" or its row's label) and holds a go form (close / settle / mark / tick + it or the job, may / can / can be + close or settle, done with
+# it or the job), with nothing holding it back; or (2) his line is a bare yes (a short run of yes words) to her last question, which asks to
+# close that job (by name, or by "it" with the sentence just before naming it). "done", "finished" or "complete" alone close nothing.
+_ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _in_words(n):
+    """F145: a number as he'd say it, as a pattern: 12 'twelve', 499 'four hundred (and) ninety(-)nine'."""
+    n = int(n)
+    if n < 20:
+        w = _ONES[n]
+    elif n < 100:
+        w = _TENS[n // 10] + ("" if n % 10 == 0 else " " + _ONES[n % 10])
+    elif n < 1000:
+        w = _ONES[n // 100] + " hundred" + ("" if n % 100 == 0 else " and " + _in_words(n % 100).replace("[\\s-]+", " "))
+    else:
+        return re.escape(str(n))
+    return w.replace(" and ", " (?:and )?").replace(" ", "[\\s-]+")
+
+
+_HOLD_FORMS = (r"keep|keeps|keeping|kept|stay|stays|staying|stayed|remain|remains|remaining|remained|open|opens|opened|reopen\w*|"
+               r"redo|redoes|redid|redone|redoing|broken|break|breaks|more\s+work|not\s+yet|later|bin|trash|leave|leaving|"
+               r"or|whether|should|would|could|shall|maybe|perhaps|wait|hold|no|nope|not|don'?t|first|if|unless|\w+n't|"
+               r"when|whenever|once|until|till|tomorrow|tonight|will|almost|nearly|never|still|running|badly|wrong|tell\s+me|let\s+me\s+know")
+_CLOSE_HOLD = re.compile(rf"\?|(?<![\w'-])(?:{_HOLD_FORMS})(?![\w'-])|^(?:did|is|does|do|has|have|are|was|were|can|could|will|would|shall|should)(?![\w'-])")
+_TURN_HOLD = re.compile(r"(?<![\w'-])(?:keep\w*|kept|stay\w*|remain\w*|open\w*|reopen\w*|redo\w*|redone|redid|broken|or|whether|not|later|bin|"
+                        r"and|also|plus|then|tomorrow|when|once|until)(?![\w'-])")
+_BEFORE_HOLD = re.compile(r"(?<![\w'-])(?:still|running|not|broken|wrong|badly|almost|nearly|redo\w*|redone|later|tomorrow|will|\w+n't)(?![\w'-])")
+_YES_FIRM = {"yes", "yeah", "yep", "yup", "ok", "okay", "oke", "sure", "ja", "absolutely", "alright", "go", "do", "definitely", "please"}
+_YES_TOKENS = _YES_FIRM | {"ahead", "it", "that", "for", "right", "fine", "of", "course", "all"}
+
+
+def _low(line):
+    return " ".join(str(line or "").lower().replace("’", "'").split())
+
+
+def _job_name(n, text):
+    """F145: how a line names job N: 'job N', 'job twelve', 'job number 12', 'number 12', '#N', or its row's label (never its other words)."""
+    labels = [re.escape(x.lower()) for x in job_names(n, text)[1:]]
+    num = rf"(?:{int(n)}|{_in_words(n)})"
+    return rf"(?<![\w-])(?:(?:job\s+(?:number\s+|no\.?\s*|#\s*)?|number\s+|#\s*){num}{''.join('|' + x for x in labels)})(?![\w-])"
+
+
+def _go(name):
+    """F145: a go form for closing, with the job's name pattern as one of its objects."""
+    obj = rf"(?:it|this|that|this\s+one|{name})"
+    return re.compile(rf"(?<![\w'-])(?:(?:close|settle)\s+{obj}|(?:mark|tick)\s+{obj}|done\s+with\s+{obj}|(?:may|can|could)\s+(?:now\s+)?(?:be\s+)?(?:close[ds]?|settled?)|"
+                      rf"(?:may|can|could|shall|should)\s+(?:i|we|you|it|{name})\s+(?:now\s+)?(?:be\s+)?(?:close[ds]?|settled?))(?![\w'-])")
+
+
+def names_job(n, text, line):
+    """F145: whether LINE names job N."""
+    return bool(re.search(_job_name(n, text), _low(line)))
+
+
+def bare_yes(line):
+    """F145: his line is a short run of yes words and nothing else ("yes", "yes, go ahead please", "yeah sure", "ok do it")."""
+    toks = re.sub(r"[^\w' ]", " ", _low(line)).split()
+    return 0 < len(toks) <= 6 and all(t in _YES_TOKENS for t in toks) and any(t in _YES_FIRM for t in toks)
+
+
+def close_go(n, text, line, turn):
+    """F145, the first gate: whether his LINE (with her TURN just before it) reads as his go to close or settle job N."""
+    low, tlow, name = _low(line), _low(turn), _job_name(n, text)
+    go = _go(name)
+    if _CLOSE_HOLD.search(low):
+        return False
+    if re.search(name, low) and go.search(low):
+        return True
+    if bare_yes(line):  # his yes to her own question, the last one in her line, to close this very job
+        sentences = re.findall(r"[^.!?]+[.!?]?", tlow)
+        qs = [i for i, x in enumerate(sentences) if x.strip().endswith("?")]
+        if not qs:
+            return False
+        asked = sentences[qs[-1]]
+        if _TURN_HOLD.search(asked) or not go.search(asked):
+            return False
+        if re.search(name, asked):
+            return True
+        before = sentences[qs[-1] - 1] if qs[-1] > 0 else ""  # "Job 12 is done. Shall I close it?"
+        return bool(re.search(r"(?<![\w'-])(?:it|this|that)(?![\w'-])", asked) and re.search(name, before) and not _BEFORE_HOLD.search(before))
+    return False
+
+
+CLOSE_LOOK = ("You check one thing, from the lines of a chat between a man and his assistant. Answer yes only when his line says, now, that "
+              "the job named may be closed or settled. Answer no for a question, a request to be told, a plan or a moment later on, a "
+              "condition (when, once, if), a complaint that it's wrong or unfinished, a yes to something else, or anything unclear. "
+              "Answer with one word: yes or no.")
+
+
+def close_look(n, what, line, turn):
+    """F145, the second gate: a small model's one-word look at his line and her line just before it: does he say job N may be closed now?
+    "" when it says yes, else why not. HQ_SAYSO_FAKE stands in for the model in a test, as for sprint.his_yes; a test never asks the model."""
+    fake = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
+    try:
+        if fake is None and hqpaths.under_test():
+            raise RuntimeError("a test without a stand-in")
+        if fake is None:
+            import mistakes
+            fake = mistakes.ask(CLOSE_LOOK, f"The job: job {int(n)}, {one_line(what)[:200]}\n\nThe assistant, just before:\n"
+                                            f"{turn or '(nothing)'}\n\nHim:\n{line}", what="close look")
+        answer = fake.strip().lower()
+    except Exception as e:
+        return f"the second look at his words failed ({type(e).__name__}), so they don't close it"
+    if answer.startswith("yes"):
+        return ""
+    if answer.startswith("no"):
+        return f"the second look at his words says they don't close job {n} now"
+    return f"the second look at his words failed (it said {answer[:40]!r}), so they don't close it"
+
+
+def close_hit(n, words, places, ws=None):
+    """F145, the first gate: (why, his line) for WORDS as his go to close or settle job N from this call or this text (PLACES: its transcript
+    or thread), today. why is "" when they stand; his line ({"line", "turn"}) is None when there's none to show (a test copy without lines)."""
+    if os.environ.get("HQ_IN_JOB"):
+        return "a job can't give itself his say-so", None
+    if not (words or "").strip():
+        return "no words of his were given", None
+    if len(re.findall(r"\w+", words)) < 3 and not bare_yes(words):
+        return "a quote under three words proves nothing: give his whole line", None
+    text, jobs, _ = read()
+    j = next((x for x in jobs if x["n"] == int(n)), None)
+    if not j:
+        return f"there's no job {n} on the list", None
+    import sprint as sp_
+    if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):  # a test copy without lines of his, as sprint.his_quote
+        return "", None
+    hits = sp_.his_said_now(words, ws, places)
+    if not hits:
+        return "those aren't his words from this call or this chat, today", None
+    ok = [h for h in hits if close_go(j["n"], j["text"], h["line"], h["turn"])]
+    if not ok:
+        return (f"those are his words, but they aren't his go to close job {n}: his own line has to say it closes now (close it, close "
+                f"job {n}, it may close, done with it) and name it (job {n}, or its row), with nothing holding it back, or be a plain yes "
+                f"right after you asked one thing: to close job {n}"), None
+    return "", {**ok[-1], "what": j["text"]}
+
+
+def close_refused(n, words, places, ws=None):
+    """F145: the first gate's why, or "" (the policy asks it before the command runs; jobs.py done runs both gates)."""
+    return close_hit(n, words, places, ws)[0]
+
+
 def sayso(n, words, by="", ticket=None, what=""):
     """F100: his say-so for a build in his day hours, kept with who and when: his own words (sprint.his_yes), or his tap
     on the status page (a ticket only its server can make good). Never from a job's own process. None when it doesn't stand."""
@@ -780,7 +982,8 @@ def main(argv):
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
             at_once = "--now" in args  # F100: a build in his day hours, only on his own say-so
-            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now")]
+            report = "--report" in args  # F145: a report for him, kind research, one file in the workspace
+            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now", "--report")]
             item = None  # F103: the item this job is for, as an argument: its id or its label
             for i, a in enumerate(words):
                 if a == "--item" or a.startswith("--item="):
@@ -814,10 +1017,20 @@ def main(argv):
                 import estimate as est_
                 if not est_.kind_word_ok(kind):  # H215: a build's size in words too
                     sys.exit(f"--kind is one of: {est_.kind_words()}.")
+            if report:  # F145: a report is research, for a row already on the planning
+                if not item or not re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()):
+                    sys.exit("A report goes for a row on the planning: write the row first (write-row), then add --report --item LABEL. Nothing added.")
+                open_row(text, item.strip().upper())  # exits with why when it isn't an open row
+                if kind not in (None, "research"):
+                    sys.exit(f"A report is research, so --report goes with --kind research or no --kind, not {kind}. Nothing added.")
+                kind = "research"
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
             said = sp_.gate(text, one_line(" ".join(words)), say_so, his)
+            if report:  # F145: where it writes, named in its own text, so done can tell him
+                lab = item if item and re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()) else ""
+                said = one_line(said) + report_words(report_rel(lab.strip().upper(), jobs), lab.strip().upper())
             n = max([j["n"] for j in jobs] + [0]) + 1
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
@@ -1173,6 +1386,14 @@ def main(argv):
                 i = args.index("--said")
                 his = args[i + 1] if i + 1 < len(args) else ""
                 args = args[:i] + args[i + 2:]
+            import sprint as sp_
+            here = sp_.words_from_env() if cmd == "done" and his is not None else None  # F145: from a call or a text, only its own words
+            if here is not None and not was.startswith("done"):  # F145: both gates, the words and the second look, for every kind of job
+                no_go, hit = close_hit(j["n"], his, here)
+                if not no_go and hit:
+                    no_go = close_look(j["n"], hit["what"], hit["line"], hit["turn"])
+                if no_go:
+                    sys.exit(f"Refused: {no_go}. The job stays open.")
             if cmd == "done" and not was.startswith("done"):
                 waiting = [x for x in j.get("notes") or [] if not x.get("read")]
                 if waiting:  # F101 (C23): a note he sent while it ran is read before it's over
@@ -1180,8 +1401,9 @@ def main(argv):
                              f"{j['n']} first. The job stays open.")
                 import proof
                 no = proof.refuses(j, text)
-                if no:
-                    import sprint as sp_
+                if no and here is not None:  # F145: both gates above passed on this call's or this text's words, the second look among them
+                    proof.keep_say_so(j, his)
+                elif no:  # by hand: his words, read by the second look as before
                     where, why = sp_.his_yes(his, f"closing job {j['n']} as done without its green test record ({no}): {j['text'][:300]}", names=job_names(j["n"], j["text"])) if his else (None, "")
                     if not where:
                         sys.exit(f"Refused: {no} {why.capitalize() + '. ' if why else ''}The job stays open.")
@@ -1205,6 +1427,8 @@ def main(argv):
                     routines.bad("qa", f"QA couldn't be queued for job {j['n']}: {e!r}", every=30 * 86400)  # F102
             write(text, jobs, on)
             print(show(j))
+            if cmd == "done" and not was.startswith("done") and report_of(j):  # F145: its report's place, to him on her line
+                print(tell_report(j))
             if qa_job:
                 estimate("on_add", qa_job["n"], qa_job["text"], "qa")
                 print(f"Job {qa_job['n']} is ready: QA of what job {j['n']} built (F56).")

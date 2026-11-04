@@ -92,7 +92,8 @@ import agents as _agents  # noqa: E402  stdlib only
 VENV_PY = ROOT / ".venv" / "bin" / "python"
 AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")  # at import; agent() reads the variable each time (H266)
 TEAM_AGENT = "moneypenny"  # H266: the team line is hers
-TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team", "estimate-miss", "estimate-misses")
+TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-held", "team", "estimate-miss", "estimate-misses",
+              "report")  # F145: a report he asked for, written by the team
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
 SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
@@ -678,6 +679,7 @@ PLAIN = {
     "helper": ["About what you asked on the call. {facts}", "What you asked on the call came back. {facts}", "From the call. {facts}"],
     "estimates": ["Before the sprint planning, how our estimates held this week: {facts}",
                   "The week's estimates, for Friday: {facts}"],
+    "report": ["From the team: {facts}", "The team's report: {facts}"],  # F145: the facts hold the report's place
     "qa-failed": ["A check didn't pass, so it goes back to the team: {facts}",
                   "Held one back, it didn't pass my check: {facts}"],
     "release-held": ["Not everything went out with the release: {facts}",
@@ -812,6 +814,10 @@ KINDS = {
     "estimates": "Every Friday before the sprint planning: how the team's time estimates held this week (the facts give "
                  "the numbers). Two or three short sentences: how many finished by the latest end they were given, plainly when "
                  "it's below nine in ten, and which kinds of work missed. Numbers are fine here, he plans with them.",
+    "report": "The team finished a report he asked for (F145; the facts say what it was about and where it is, or that it wasn't "
+              "written). A short text: it's ready, what it's about in a few words, and where to find it, the file's place in the "
+              "workspace exactly as the facts write it (here a file's place belongs in the text, it's what he asked for). If it wasn't "
+              "written, say so plainly and that you'll look into why. No job numbers.",
     "qa-failed": "You checked the team's work on something and it didn't pass (the facts say what and what's off). A "
                  "short text: what didn't pass in everyday words, what's off in one line, and that it went back to "
                  "the team for a fix (or, when the facts say so, that it waits for him). No job numbers, no file names.",

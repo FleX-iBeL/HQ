@@ -31,6 +31,7 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 | Weekly reviews | `reviews/YYYY-Www.md` | on demand |
 | The status block, the job queue, the roadmap of what HQ builds next | `HQ/roadmap.md` | on demand (the status page reads it) |
 | Call transcripts (full, one file per call) | `HQ/calls/YYYY-MM-DD-HHMM.md` | on demand |
+| Reports the team wrote for you (a review of many items, research you asked for on a call or in a text), one file each; your agent texts you where it is when it's done | `HQ/reports/YYYY-MM-DD-<item>.md` (written by the team) | on demand |
 | With two computers: when both had their own version of the same thing, the main's stayed and the other's words are kept here to look at | `HQ/kept-from-both.md` (written by HQ) | on demand |
 | Appointments and time blocks | the calendar: the visual of the files above, never the only place | when asked or when planning |
 | Something new (a goal, a plan, a project) | a new `.md` file or folder here, plus a line in this map | decide per file |
