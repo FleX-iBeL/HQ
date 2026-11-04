@@ -282,6 +282,19 @@ def is_on(fid: str, base: Path | None = None) -> bool:
     return not f.get("needs") or is_on(f["needs"], base)
 
 
+def _settings_boxes(f: dict, item: dict) -> None:
+    """The boxes Settings draws under a shown row: the agents' cycles, the maps key (F141: for one in pieces too)."""
+    if f.get("cycles"):  # H298: the agents' cycle settings, a line per agent under this row when it's on
+        item["cycles"] = True
+    if f.get("key"):  # H230: their own maps key, kept on this computer (drive.py); never the key itself
+        try:
+            sys.path.insert(0, str(ROOT / "app"))
+            import drive
+            item["key"] = drive.status()
+        except Exception:
+            item["key"] = {"key": False}
+
+
 def listing(base: Path | None = None) -> list[dict]:
     """For Settings: each switch, on or off, its line, what it needs, and which buttons go when it's off."""
     base = base or folder()
@@ -295,6 +308,7 @@ def listing(base: Path | None = None) -> list[dict]:
                 item["pieces"] = f"Still being built ({f.get('row') or 'no row'}"
                 item["pieces"] += f", {f['pieces']})" if f.get("pieces") else ")"
                 item["pieces"] += ": only on your HQ until its last piece passes QA; before that only when you turn it on yourself"
+                _settings_boxes(f, item)  # F141: its own settings box under the row, as once it's shipped
             else:
                 item["hidden"] = True
             out.append(item)
@@ -319,15 +333,7 @@ def listing(base: Path | None = None) -> list[dict]:
             item["needs_name"] = need["name"].replace("{agent}", agent)
         if _computer_off(f):
             item["on"], item["fixed"] = False, "Off on this computer"
-        if f.get("cycles"):  # H298: the agents' cycle settings, a line per agent under this row when it's on
-            item["cycles"] = True
-        if f.get("key"):  # H230: their own maps key, kept on this computer (drive.py); never the key itself
-            try:
-                sys.path.insert(0, str(ROOT / "app"))
-                import drive
-                item["key"] = drive.status()
-            except Exception:
-                item["key"] = {"key": False}
+        _settings_boxes(f, item)
         out.append(item)
     byid = {i["id"]: i for i in out}
     for i in out:  # what leans on a switch that's off is off too, and says why
