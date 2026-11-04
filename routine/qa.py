@@ -751,6 +751,12 @@ def proof_refuses(label: str, compared: str) -> str | None:
     rec = proof.latest(label)
     if not rec:
         return f"{label} has no record of a green run (routine/proof.py run), so there's nothing to pass."
+    try:
+        import qatests  # real QA: the record must hold her tests' run at the end, green
+        if qatests.gate_on() and not (rec.get("qa_tests") or {}).get("green"):
+            return f"the last run for {label} has no green run of her QA tests: {(rec.get('qa_tests') or {}).get('why') or 'none ran'}."
+    except ImportError:
+        return f"{label}'s QA tests couldn't be read, so there's nothing to pass."
     if not rec.get("green"):
         return f"the last run for {label} wasn't green: {'; '.join((rec.get('failed') or []) + (rec.get('not_tried') or []))[:400]}."
     # F121: the record has to hold every commit of the row: one made before a newer commit of it doesn't stand for it

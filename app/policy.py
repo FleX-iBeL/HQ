@@ -960,6 +960,13 @@ class Policy:
                        "add", "now"):  # nowroad: add, her words and his quotes in one marked place (its walls in add); now, a round of hers (3 at most)
                 return Decision(ALLOW, "the planning's review and its flags")
             return Decision(DENY, "from a call, the review script takes list, flags, clear, reword, add, now or keep")
+        # Real QA (4 November 2026): her own QA tests for an item: start them, the program's two hard checks and seal, their own review
+        # round (three at most), where they stand. The end run is the proof's own (proof.py), never hers.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "qatests.py"):
+            sub = args[1] if len(args) > 1 else "show"
+            if sub in ("new", "check", "review", "show"):
+                return Decision(ALLOW, "her QA tests for an item: the hard checks, their review, where they stand")
+            return Decision(DENY, "from a call or a text, the QA tests script takes new, check, review or show")
         # H173: the usage counts, read only: what a job or a call cost on its own tokens, the rate, the room now.
         if prog in ("python3", "python") and args and self.hq_script(args[0], "usagecost.py"):
             sub = args[1] if len(args) > 1 else ""

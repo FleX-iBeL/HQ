@@ -42,6 +42,7 @@ nowroad.PORTS, nowroad.TEST_PORT = (7863, 4763), 7903  # its own ports: nowroad 
 PY = sys.executable
 T0 = time.time()
 RESULTS: dict[str, list] = {}
+WITH_HER = False
 
 WORDS_A = chainrun.WORDS  # "On the status page, when nothing is on the schedule, it just says Nothing planned. I'd like it to say Nothing planned yet, ..."
 WORDS_B = "The other cards on the status page say Nothing yet. when they are empty. I'd like them to say Nothing here yet, it reads friendlier."
@@ -57,8 +58,8 @@ GOOD_TESTS = r'''#!/usr/bin/env python3
 import re, sys, pathlib
 hq = pathlib.Path(sys.argv[1])
 page = (hq / "status" / "index.html").read_text(encoding="utf8")
-coming = re.search(r"key === 'coming' \? '([^']*)'", page)
-said = coming.group(1) if coming else None
+coming = re.search(r"if \(!list\.length\) card\.append\(el\('div', 'row soft', key === 'coming' \? (['\"`])(.*?)\1", page)
+said = coming.group(2) if coming else None
 def t(name, ok, why):
     print(("PASS " if ok else "FAIL ") + name + ("" if ok else ": " + why), flush=True)
 t("says_yet", said == "Nothing planned yet.", f"the empty schedule says {said!r}, not 'Nothing planned yet.'")
@@ -355,7 +356,9 @@ def her_turn(root, env):
     at = json.loads(th.read_text(encoding="utf8").splitlines()[-1])["at"]
     real = env["NOWROAD_REAL_CLAUDE"]
     t1 = time.time()
-    r = subprocess.run([str(HERE.parent / ".venv/bin/python"), "app/direct_line.py", "--team", "reply"], cwd=str(root / "HQ"),
+    vpy = next((str(p) for p in (root / "HQ" / ".venv/bin/python", HERE.parent / ".venv/bin/python", Path.home() / "HQ" / ".venv/bin/python")
+                if p.exists()), PY)  # the call line's Python (the Agent SDK), as the text server runs it
+    r = subprocess.run([vpy, "app/direct_line.py", "--team", "reply"], cwd=str(root / "HQ"),
                        env={**env, "HQ_CLAUDE": real}, text=True, capture_output=True, timeout=2400)
     (root / "her-reply.out").write_text(r.stdout + "\n----\n" + r.stderr)
     back = [m["text"] for m in (json.loads(l) for l in th.read_text(encoding="utf8").splitlines() if l.strip()) if m.get("from") == "agent" and m.get("at", 0) > at]
@@ -376,7 +379,7 @@ def finish():
         ok = all(o for o, _ in RESULTS[n])
         bad += not ok
         print(f"  check {n}: {'PASS' if ok else 'FAIL'} ({sum(o for o, _ in RESULTS[n])} of {len(RESULTS[n])})")
-    for n in ("1", "2", "3", "4", "5", "6", "7"):
+    for n in ("1", "2", "3", "4", "5", "6", "7") + (("H",) if WITH_HER else ()):
         if n not in {str(k) for k in RESULTS}:
             bad += 1
             print(f"  check {n}: FAIL (never reached)")
@@ -395,8 +398,10 @@ def main(argv):
     if root.exists():
         sys.exit(f"{root} is there already: give a new folder")
     ws = argv[argv.index("--workspace") + 1] if "--workspace" in argv else str(Path.home() / "HQ" / "workspace")
+    global WITH_HER
+    WITH_HER = "--her" in argv
     try:
-        return run(root, os.path.realpath(ws), "--her" in argv)
+        return run(root, os.path.realpath(ws), WITH_HER)
     except Exception as e:
         import traceback
         traceback.print_exc()

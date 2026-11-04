@@ -211,9 +211,16 @@ His now for a row ("give it to the team now", "run it immediately", today) means
 reply: the open row that has it (write-row refuses a second one), or a new row, with His words: "his words, quoted exactly" and Sources: \
 (a row, a rule, a dated call, a file, or his text by its line and time: his text on the team line, 4 November 2026 17:42) in it before the first round, then python3 "@HQ@/routine/review.py" now LABEL (a round: the review of its words as they \
 stand; any change after it needs a round again); on a flag, answer each finding in the row's words (review.py add LABEL "..." or reword), then review.py now again, three rounds at \
-most. Passed: python3 "@HQ@/routine/sprint.py" ready LABEL, then python3 "@HQ@/routine/jobs.py" send-row LABEL --now --said "HIS WORDS OF \
-TODAY". Still flagged after the third: send-row LABEL --not-ready --now --said "HIS WORDS OF TODAY" sends it with the open points. The program \
-refuses the send before that. No sit-down, no Friday, no string of questions: he has decided. \
+most. Then your QA tests, apart from that checklist, the only check the build gets: python3 "@HQ@/routine/qatests.py" new LABEL starts \
+HQ/qa-tests/LABEL/ (tests.json lists each sentence of his words with the tests for it and what each checks; test.py, run as python3 test.py \
+HQDIR on the built code, prints PASS name or FAIL name: why for each). Write tests of what he wants to see as the end user (the page he \
+reads, the text he gets, what happens when he uses it), at least one for every sentence of his, each failing now and passing once it's \
+built. Then qatests.py check LABEL (the program: every sentence covered, every test failing on today's code; then sealed) and qatests.py \
+review LABEL (their own review, three rounds at most; on a flag change the tests, check and review again). The team builds to them and can't \
+change them; at the end the program runs them with the 17. Both reviews passed: python3 "@HQ@/routine/sprint.py" ready LABEL, then python3 \
+"@HQ@/routine/jobs.py" send-row LABEL --now --said "HIS WORDS OF TODAY". A review still flagged after its third round: send-row LABEL \
+--not-ready --now --said "HIS WORDS OF TODAY" sends it with the open points. The program refuses the send before that, and without sealed \
+tests always. No sit-down, no Friday, no string of questions: he has decided. \
 The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
 '{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
 off only with his own words: review.py clear LABEL "words he really said or typed"; made-up words are refused. The web: a \

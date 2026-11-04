@@ -633,6 +633,13 @@ def now_review(label, now_fn=_clock):
     if a["pass"]:
         return f"Round {k} of {NOW_ROUNDS}: the review passed {label}. Mark it ready (sprint.py ready {label}), then send-row {label} --now --said \"HIS WORDS\"."
     fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
+    if k >= NOW_ROUNDS:  # real QA: after the last round, one message to him with all the open points
+        try:
+            import qatests
+            qatests.tell(label, "item-review", f"The review flagged {label} {NOW_ROUNDS} times; the open points: "
+                         + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"])) + f" His now may still send {label} with them.")
+        except Exception as ex:
+            print(f"(the message to him didn't go: {ex!r})", file=sys.stderr)
     nxt = (f"Answer each in the row's words (review.py add {label} \"...\", or reword), then review.py now {label} for round {k + 1}."
            if k < NOW_ROUNDS else f"That was the last round: his now sends it with these open points (send-row {label} --not-ready --now --said \"HIS WORDS\").")
     return f"Round {k} of {NOW_ROUNDS}: the review flagged {label}:{fs}\n{nxt}"
