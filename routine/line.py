@@ -159,13 +159,14 @@ def act(label, what, detail, row, st, jobs):
         j = q.with_team(jobs, label)
         if not j:
             return None
-        if e.get("rerun") == j["n"]:
-            if not e.get("told_red") == j["n"]:
-                e["told_red"] = j["n"]
+        runs = st.setdefault("_reruns", {})  # by job, kept apart from the item's own state: a result written in the row doesn't reset it
+        if str(j["n"]) in runs:
+            if not runs[str(j["n"])].get("told"):
+                runs[str(j["n"])]["told"] = True
                 _tell(label, f"red-{j['n']}", f"{label}: the team's build (job {j['n']}) is still red after its check ran twice, so it's stuck there. "
                       f"The line leaves it until a fix goes in.")
             return None
-        e["rerun"] = j["n"]
+        runs[str(j["n"])] = {"at": time.strftime("%Y-%m-%d %H:%M")}
         lock = os.path.expanduser("~/hq-fullrun.lock")
         cmd = f'python3 routine/proof.py run {j["n"]} && python3 routine/jobs.py done {j["n"]}'
         if shutil.which("flock"):
@@ -203,7 +204,7 @@ def tick(now=None):
     S.go_clear_closed(list(rows.values()))
     go = S.go_all()
     st = _load()
-    for l in [x for x in st if x not in go]:
+    for l in [x for x in st if x not in go and not x.startswith("_")]:
         st.pop(l, None)
     done = []
     for label, g in go.items():
