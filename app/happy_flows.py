@@ -15370,8 +15370,8 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
     async def flow185(self) -> str:
         """H298, piece 1, no Claude: the handbook under each agent's character, behind the switch. The template ships
         a blank handbook (part one generic, three generic sections, no one's life) and cycle defaults with numbers and
-        no names; the feature is in pieces (hidden on a friend's HQ, listed as still being built on the maker's) and
-        off by default even there. On a throwaway workspace with a made-up handbook: with the switch off the persona
+        no names; the feature is shipped (H320, 1.0.2: a normal switch every HQ shows in Settings) and off by
+        default. On a throwaway workspace with a made-up handbook: with the switch off the persona
         carries nothing of it and Moneypenny's craft is as it was; switched on, every agent gets part one and her own
         section, and Moneypenny's "fill in the nine points yourself" is replaced by grounding; an agent without a
         section gets part one only."""
@@ -15394,16 +15394,17 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
             need(isinstance(a["weekly_share"], (int, float)) and a["session"]["minutes"] > 0 and a["session"]["turns"] > 0
                  and a["hours"] == ["08:00", "22:00"], f"the template's cycle defaults for {aid} are off: {a}")
         need(not _pv.scan_text(json.dumps(c), pat), "the template's cycle defaults carry something private")
+        # H320 (1.0.2): shipped, a normal switch on every HQ, still off until they turn it on
         pieces = json.loads((ROOT / "app/features-in-pieces.json").read_text())["features"]
-        need(any(f["id"] == "agents_run" and f.get("row") == "H298" for f in pieces), "the feature isn't on the in-pieces list")
+        need(not any(f["id"] == "agents_run" for f in pieces), "the feature is still on the in-pieces list (H320 shipped it)")
         ws, env = self._h298_ws("p1", maker=False)
         fl = {i["id"]: i for i in ft.listing(ws)}
-        need(fl["agents_run"].get("hidden") and not ft.is_on("agents_run", ws), "a friend's HQ shows or has the feature")
-        need(ft.switch("agents_run", True, ws).startswith("No switch"), "a friend's HQ could switch it on")
+        need(not fl["agents_run"].get("hidden") and not fl["agents_run"]["on"] and not ft.is_on("agents_run", ws),
+             f"a friend's HQ hides the switch or has it on by itself: {fl['agents_run']}")
         (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
         ml = {i["id"]: i for i in ft.listing(ws)}
-        need(not ml["agents_run"]["on"] and "Still being built (H298" in ml["agents_run"].get("pieces", ""),
-             f"on the maker's HQ it isn't off by default and listed as still being built: {ml['agents_run']}")
+        need(not ml["agents_run"]["on"] and not ml["agents_run"].get("pieces"),
+             f"on the maker's HQ it isn't off by default, or it's still listed as being built: {ml['agents_run']}")
         need("agents_run" not in ft.rule(ws) and "run themselves" not in ft.rule(ws), "the calls hear it as turned off")
         # a made-up handbook, nothing of anyone real
         (ws / "HQ/agents/handbook.md").write_text(
@@ -39355,7 +39356,7 @@ FLOWS = {
     375: ("F115: 60 ticks and done marks with two agents writing give no error, nothing lost", False, "flow375"),
     376: ("F115: undo takes back his own last change, an agent's after it stays; hers takes back hers", False, "flow376"),
     475: ("F137: a test never hands a write to the real main: on a stand-in of this computer's own HQ memory, paired, with HQ_REAL_SUPPORT on a throwaway, todo.py's add is refused the hand-over and stays on its own list, also by another case, a link or a hard link; setup, alone and main refused; the main never reached", False, "flow475"),
-    185: ("H298, piece 1: the handbook under each agent's character behind the switch (in pieces, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
+    185: ("H298, piece 1: the handbook under each agent's character behind the switch (shipped in 1.0.2, off by default): the template's blank handbook and cycle defaults, off loads nothing, on loads part one and her own section, Moneypenny's craft trimmed", False, "flow185"),
 }
 
 

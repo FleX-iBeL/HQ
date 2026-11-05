@@ -1,12 +1,3 @@
 {
-  "features": [
-    {
-      "id": "agents_run",
-      "name": "The agents run themselves",
-      "line": "",
-      "buttons": [],
-      "row": "H298",
-      "pieces": "nine pieces"
-    }
-  ]
+  "features": []
 }
