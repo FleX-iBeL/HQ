@@ -36,8 +36,17 @@ _COUNT = re.compile(r"\b(\d+|" + "|".join(sorted((re.escape(k) for k in NUMS), k
                     r")\s+(?:(?:review|more|separate|full)\s+)?rounds?\b", re.I)
 CANT = re.compile(r"couldn.t|can.t|cannot|not able|unable|no record|not sure|whether|don.t know", re.I)
 _READY_YES = re.compile(r"\b(?:is|it's|it’s|'s|’s|are|was|been|got)\s+(?:now\s+|already\s+|also\s+|still\s+)?(?:marked\s+|set\s+)?(?:as\s+)?ready\b", re.I)
-_READY_NO = re.compile(r"(?:\bnot|n't|n’t|\bnever)\s+(?:yet\s+|been\s+|got\s+)?(?:marked\s+|set\s+)?(?:as\s+)?ready\b|\bnot\s+(?:yet\s+)?ready\b", re.I)
+_READY_NO = re.compile(r"(?:\bnot|n't|n’t|\bnever)\s+(?:yet\s+|been\s+|got\s+)?(?:marked\s+|set\s+)?(?:as\s+)?ready\b|\bnot\s+(?:yet\s+)?ready\b"
+                       r"|\b(?:no|without\s+an?|lacks\s+an?)\s+(?:ready\s+mark|mark\s+of\s+ready)\b|\bisn.t\s+(?:yet\s+)?marked\b"
+                       r"|\b(?:hasn.t|has\s+not|wasn.t|never)\s+(?:yet\s+)?(?:been\s+)?marked\b", re.I)
 _IF = re.compile(r"\b(when|once|if|until|till|as soon as|before|after|so that|whether)\b[^.,;]*$", re.I)  # "once it's ready" says nothing
+# A line that says an item isn't there or had no rounds: wrong against a record that has rounds (QA, 5 November 2026 19:18:
+# "F146 isn't on the planning, so no review count" went out while her record said two rounds, ready).
+_NONE = re.compile(r"\b(?:isn.t|is\s+not|wasn.t|not)\s+(?:on|in)\s+(?:the\s+)?(?:planning|roadmap|plan|list)\b|\bno\s+(?:such\s+)?"
+                   r"(?:item|row|record)\b|\b(?:can.t|cannot|couldn.t)\s+(?:find|see|locate)\b|\bnot\s+found\b|\bdoesn.t\s+exist\b"
+                   r"|\bno\s+(?:review\s+)?(?:count|rounds?)\b|\bzero\s+(?:review\s+)?rounds?\b|\bany\s+(?:review\s+)?rounds?\b"
+                   r"|\bnever\s+(?:been\s+)?reviewed\b|\bnot\s+(?:been\s+)?reviewed\b", re.I)
+_ABOUT = re.compile(r"\brounds?\b|\bready\b|\breview|\bplanning\b|\brecord\b|\bcheck", re.I)
 ASKS = re.compile(r"\brounds?\b|\bready\b|\breview(?:ed|s)?\b|\bstatus\b|\bwhere (?:is|does) it stand\b", re.I)
 
 
@@ -108,15 +117,13 @@ def record(label: str, state: dict | None = None) -> dict:
     e = _entry(state.get("review") or {}, label)
     rounds = [{"verdict": x.get("verdict"), "at": x.get("at")} for x in ((e or {}).get("now_rounds") or []) if isinstance(x, dict)]
     mark = (state.get("ready") or {}).get(label)
-    ready = False
-    if isinstance(mark, dict):
-        ready = True
-        if row:
-            try:
-                import sprint
-                ready = bool(sprint.mark_holds(mark, row["line"]))
-            except Exception:
-                pass
+    ready, changed = isinstance(mark, dict), False
+    if ready and row:
+        try:
+            import sprint
+            changed = not sprint.mark_holds(mark, row["line"])
+        except Exception:
+            pass
     j = _job(label) if (row or e) else None
     try:
         import sprint
@@ -124,7 +131,7 @@ def record(label: str, state: dict | None = None) -> dict:
     except Exception:
         row_state = ""
     return {"label": label, "found": bool(row or e), "title": (row or {}).get("title", "")[:80], "row_state": row_state,
-            "rounds": rounds, "verdict": (e or {}).get("verdict") or "", "ready": ready, "marked": isinstance(mark, dict),
+            "rounds": rounds, "verdict": (e or {}).get("verdict") or "", "ready": ready, "marked": ready, "changed": changed,
             "job": {"n": j["n"], "state": j["state"]} if j else None}
 
 
@@ -144,10 +151,10 @@ def rounds_words(rec: dict) -> str:
 
 
 def ready_words(rec: dict) -> str:
+    if rec["ready"] and rec.get("changed"):
+        return f"{rec['label']} is marked ready, though its words changed since it was marked."
     if rec["ready"]:
         return f"{rec['label']} is marked ready."
-    if rec["marked"]:
-        return f"{rec['label']} isn't marked ready now: it was, but its words changed since."
     return f"{rec['label']} isn't marked ready."
 
 
@@ -173,12 +180,12 @@ def for_her(rec: dict) -> str:
         n = len(rec["rounds"])
         rs = (f"{n} review round{'s' if n != 1 else ''}: " +
               ", ".join(f"round {k} {_said(x['verdict'])} ({_when(x['at'])})" for k, x in enumerate(rec["rounds"], 1)) +
-              f"; its review now: {_said(rec['verdict'])}; " + ("marked ready" if rec["ready"] else
-                                                                ("not marked ready (the mark is from words that changed since)" if rec["marked"] else "not marked ready")))
+              f"; its review now: {_said(rec['verdict'])}; " + (("marked ready (its words changed since the mark)" if rec.get("changed")
+                                                                 else "marked ready") if rec["ready"] else "not marked ready"))
     j = rec["job"]
     js = f"job {j['n']}, {j['state']}" if j else "no job on the team's list for it"
     st = f"row {rec['row_state']}; " if rec["row_state"] else ""
-    return f"- {lab}{title}: {st}{rs}. Job: {js}."
+    return f"- {lab}{title}: on HQ's planning; {st}{rs}. Job: {js}."
 
 
 def context(words: str, history: str = "") -> dict:
@@ -206,8 +213,10 @@ def for_prompt(ctx: dict) -> str:
     if not lines:
         return ""
     return ("(HQ's record of the items in his text, from the planning, not from him and never shown to him as it is: answer from "
-            "this, not from memory. A number or a state you give must match it; what isn't here you couldn't check, so say so "
-            "and give no number. Answer in your own normal words.)\n" + "\n".join(lines) + "\n\n")
+            "this, not from memory, and over anything else you see or look up: an item listed here is on the planning even when "
+            "you don't find it elsewhere (it may be done or off the open list), so never say it isn't. A number or a state you "
+            "give must match it; what isn't here you couldn't check, so say so and give no number. Answer in your own normal "
+            "words.)\n" + "\n".join(lines) + "\n\n")
 
 
 def _sentences(text: str) -> list[str]:
@@ -244,14 +253,26 @@ def misses(draft: str, ctx: dict, words: str = "") -> list[dict]:
     out = []
     asks_ready = bool(re.search(r"\bready\b", words or "", re.I))
     for k, s in enumerate(_sentences(draft)):
+        named = labels_in(s)
+        lab = named[0] if named else ctx["default"]
+        none = bool(_NONE.search(s) or (CANT.search(s) and _ABOUT.search(s)))
+        if none and lab:  # "isn't on the planning", "no rounds", "couldn't check": wrong when the record has its rounds
+            if lab not in ctx["records"]:
+                ctx["records"][lab] = record(lab, ctx.get("state"))
+            rec = ctx["records"][lab]
+            if checkable(rec):
+                truth = rounds_words(rec) + (" " + ready_words(rec) if asks_ready else "")
+                out.append({"sentence": s, "label": lab, "what": "count", "truth": truth})
+                continue
+            if rec.get("found") and _NONE.search(s) and not re.search(r"\brounds?\b|\breview", s, re.I):
+                out.append({"sentence": s, "label": lab, "what": "unchecked", "truth": cant_words(rec)})
+                continue  # "isn't on the planning" about an item that is, though it has no rounds yet
         if CANT.search(s):
             continue  # she says she couldn't check: no claim
         counts = counts_in(s)
         ready = ready_in(s, k == 0, asks_ready)
         if not counts and ready is None:
             continue
-        named = labels_in(s)
-        lab = named[0] if named else ctx["default"]
         if lab and lab not in ctx["records"]:
             ctx["records"][lab] = record(lab, ctx.get("state"))
         rec = ctx["records"].get(lab) if lab else None
@@ -261,7 +282,7 @@ def misses(draft: str, ctx: dict, words: str = "") -> list[dict]:
         n = len(rec["rounds"])
         if counts and counts != {n}:
             out.append({"sentence": s, "label": lab, "what": "count", "truth": rounds_words(rec)})
-        elif ready is not None and ready != rec["ready"]:
+        elif ready is not None and ready != rec["ready"] and not rec.get("changed"):
             out.append({"sentence": s, "label": lab, "what": "state", "truth": ready_words(rec)})
     return out
 

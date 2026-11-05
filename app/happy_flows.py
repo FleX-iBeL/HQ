@@ -16266,7 +16266,11 @@ print("OK")
         planning = self.tmp / "f147-planning.json"
         planning.write_text(json.dumps({"review": {lab: {"verdict": "pass", "findings": [], "now_rounds": [
             {"fp": "f147aaaaaaa1", "at": now - 7200, "verdict": "flag", "n": 0},
-            {"fp": "f147aaaaaaa2", "at": now - 3600, "verdict": "pass", "n": 1}]}}, "ready": {}}, indent=1))
+            {"fp": "f147aaaaaaa2", "at": now - 3600, "verdict": "pass", "n": 1}]},
+            "F901": {"verdict": "pass", "findings": [], "now_rounds": [
+                {"fp": "f147bbbbbbb1", "at": now - 7200, "verdict": "flag", "n": 0},
+                {"fp": "f147bbbbbbb2", "at": now - 3600, "verdict": "pass", "n": 1}]}},
+            "ready": {"F901": {"at": now - 3000}}}, indent=1))
         env["HQ_SPRINT"] = str(planning)
         child = self.tmp / "f147-child.py"
         child.write_text(F147_CHILD)
@@ -16325,8 +16329,24 @@ print("OK")
         d = ask(q, [right], 4)
         need(d["texts"] == [right] and not d["ledger"] and len(d["prompts"]) == 1,
              f"a right draft didn't go out untouched: {d['texts']!r}, ledger {d['ledger']!r}")
-        return ("a wrong count and a wrong ready state are held back, rewritten once from the record, else the "
-                "record's words; each miss logged as from-memory, a right draft untouched")
+        # 5. QA, 5 November 2026 19:18: "isn't on the planning" or "no rounds" about an item with its rounds on record is
+        # held like a wrong count; still said in the rewrite, the record's rounds go out.
+        for k, wrong in enumerate([f"{lab} isn't on the planning, so there's no review count for it.",
+                                   f"{lab} hasn't had any review rounds yet."], 5):
+            e = ask(q, [wrong, wrong], k)
+            need(len(e["texts"]) == 1 and len(e["prompts"]) == 2 and item_record.counts_in(e["texts"][0]) == {2}
+                 and not re.search(r"not on the planning|any review rounds", e["texts"][0]),
+                 f"a not-found or no-rounds claim against the record went out: {e['texts']!r}")
+            need(len(from_memory(e)) >= 2, f"the not-found miss isn't on the ledger: {e['ledger']!r}")
+        # 6. "No ready mark" about a marked item is held and he gets that it's ready.
+        f = ask("how many review rounds did F901 take, and is it ready?",
+                ["F901 took two review rounds and has no ready mark yet.",
+                 "F901 took two review rounds and is marked ready."], 7)
+        need(f["texts"] == ["F901 took two review rounds and is marked ready."]
+             and any("F901" in json.dumps(x) for x in f["ledger"]),
+             f"a 'no ready mark' claim against a ready record went out or wasn't logged: {f['texts']!r}, {f['ledger']!r}")
+        return ("a wrong count, a wrong ready state, a not-found or no-rounds claim and a 'no ready mark' are held back, "
+                "rewritten once from the record, else the record's words; each miss logged as from-memory, a right draft untouched")
 
     async def flow484(self) -> str:
         """F151, no Claude: a fix QA finds goes the road of a new item. On a throwaway HQ, a made-up row with her sealed and reviewed tests is
