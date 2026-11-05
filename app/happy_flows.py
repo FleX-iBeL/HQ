@@ -17390,7 +17390,7 @@ incidents._write(data)
 donna()
 downs = [f for w, f in got_texts if w == "down" and "mailreach" in f]
 need(len(downs) == 1 and "Moneypenny" in downs[0], f"Donna didn't text him, naming Moneypenny: {got_texts}")
-need("Escalated by Donna" in ledger.text("moneypenny") and "couldn't read all the mail" in ledger.text("moneypenny"),
+need("Escalated by Moneypenny" in ledger.text("moneypenny") and "couldn't read all the mail" in ledger.text("moneypenny"),
      "it isn't in Moneypenny's ledger")
 import quick_context
 need("Passed on to you by Donna" in quick_context._planning(Path(os.environ["HQ_WORKSPACE"])), "it isn't at Moneypenny's start")
@@ -17404,7 +17404,7 @@ need(all(text.count(f"· alike {i} ·") <= 1 for i in range(120)) and all(text.c
 need(start <= mk() < held_day, "the second run moved the marker past the day")
 donna()
 need(len([f for w, f in got_texts if w == "down" and "mailreach" in f]) == 1, f"a second text: {got_texts}")
-need(ledger.text("moneypenny").count("Escalated by Donna") == 1, "a second escalation in her ledger")
+need(ledger.text("moneypenny").count("Escalated by Moneypenny") == 1, "a second escalation in her ledger")
 # the stuck-marker incident stays quiet about the same cause: a good run now, a marker over 24 hours old
 need(now - mk() > M.STUCK_S, "the held marker isn't a day old in this flow")
 open(M._ok_file(), "w").write(str(now))
@@ -21577,7 +21577,7 @@ print(json.dumps(out))
         titles = " | ".join(t for _, t in heads).lower()
         for word in ("two computers", "restart", "release", "usage", "doors", "status page", "test wall", "privacy", "checkpoint", "never"):
             need(word in titles, f"no section about {word}: {titles}")
-        for word in ("kept-from-both", "handover", "Donna's warning first", "update.py restart-all", "release.py main", "update.py back",
+        for word in ("kept-from-both", "handover", "The warning first", "update.py restart-all", "release.py main", "update.py back",
                      "update.py forward", "reserve", "this call or this chat, today", "incident", "Never send mail", "exact pid",
                      "Never write the live workspace by hand", "private files", "checkpoint-N", "privacy.py --history", "Moneypenny delegates",
                      "carries the team's findings back", "backend.py off NAME", "routine/misses.py", "extensions.py flows", "One whole run at a time",
@@ -27906,6 +27906,8 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
             # a repeated mistake reaches her score, a first one doesn't
             b3 = self._hf("small3", only=("donna",))
             fri = f"{b3.fri} 09:00"
+            # the ledger's day at the test's own Thursday, so the line isn't stamped with the real clock (on a Thursday, a week before it)
+            b3.py(f"ledger.entry('donna', 'the day', [], T('{b3.thu} 08:00'))")
             b3.py(f"out(cycles.tripwire('donna', 'boxed twice in a row', 'two runs in a row', T('{b3.thu} 10:00')))")
             s = b3.py(f"import pokes\nout(pokes.score(cycles._agent('donna'), T({fri!r}), plan=None))")
             need(s["pokes"]["repeats"] == 1 and s["pokes"]["total"] >= 1 and any("mistakes repeated: 1" in x for x in s["lines"]), f"the score: {s['pokes']} {s['lines'][:3]}")
@@ -30497,11 +30499,12 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                       f"grep -n tmux {H}/routine/tick.py", "ps aux | grep claude", "pgrep -af claude", f"git -C {H} log --oneline --grep claude"):
                 d = pol.decide("Bash", {"command": c})
                 need(d.verdict == P.ALLOW, f"{where}: reading about it was refused: {c}: {d.why[:160]}")
-        # The word claude in a plain read changes nothing: an ssh to the server asks as any ssh does, a look on this computer passes as any look does.
+        # The word claude in a plain read changes nothing: an ssh from the main is refused as any ssh is there (4 November 2026: run it
+        # here), not as a Claude; a look on this computer passes as any look does.
         pol = self._f114_policy(ws, "moneypenny")
         for word in ("claude", "python"):
             d = pol.decide("Bash", {"command": f"ssh openclaw-vps \"pgrep -af {word}\""})
-            need(d.verdict == P.ASK, f"ssh with a plain read of {word}: {d.verdict} {d.why[:120]}")
+            need(d.verdict == P.DENY and "already on the main" in d.why and not d.road, f"ssh with a plain read of {word}: {d.verdict} {d.why[:120]}")
             need(pol.decide("Bash", {"command": f"ps aux | grep {word}"}).verdict == P.ALLOW, f"ps aux | grep {word} isn't free")
         def jobs(*a, ok=True, extra=None):
             r = _sp.run([sys.executable, str(ROOT / "routine/jobs.py"), *a], capture_output=True, text=True, env={**env, **(extra or {})}, cwd=str(ROOT))

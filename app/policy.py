@@ -830,9 +830,6 @@ class Policy:
             return Decision(DENY, "empty command")
         # Only plain commands, joined by && or |. No redirection into files, no
         # subshells, variables or here-documents (quoted text may contain anything).
-        if re.match(r"\s*ssh\s", cmd) and not is_backup():  # 4 November 2026: she's on the main and tried to log in to it
-            return Decision(DENY, "you are already on the main computer, where HQ, the team, the planning and the tests run: "
-                                  "run the same command here, without ssh; no yes is needed to look")
         if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
@@ -840,6 +837,9 @@ class Policy:
             return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
         if _starts_a_claude(cmd, runs):  # F145: no general-purpose Claude through the shell either, also with a yes
             return Decision(DENY, HELPER_ROADS, road=True, door=True)
+        if re.match(r"\s*ssh\s", cmd) and not is_backup():  # 4 November 2026: she's on the main and tried to log in to it (after F145's Claude check, so ssh host claude gets the two roads)
+            return Decision(DENY, "you are already on the main computer, where HQ, the team, the planning and the tests run: "
+                                  "run the same command here, without ssh; no yes is needed to look")
         if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
             return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
                                   "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
