@@ -44,7 +44,8 @@ import hqpaths  # noqa: E402
 REL = os.path.join("HQ", "mistakes.jsonl")
 # The hand-off each kind belongs to, unless a line names its own ("Pepper to Moneypenny").
 HANDOFF = {"correction": "him to the agent", "stop-asking": "him to the agent", "say-yes": "him to the agent",
-           "refused": "the agent to the outside", "qa-fail": "the build to QA", "bug-after-qa": "QA to the release"}
+           "refused": "the agent to the outside", "qa-fail": "the build to QA", "bug-after-qa": "QA to the release",
+           "from-memory": "the record to the agent"}  # F147: a fact in her text the record contradicts or can't back
 KINDS = tuple(HANDOFF)
 QUOTE_LEAST = 3  # F103: the shortest quote taken as his words, the same three words as sprint.his_quote
 WORDS_KEPT = 600  # F103: how much of a line of his the ledger keeps; the transcript holds the rest

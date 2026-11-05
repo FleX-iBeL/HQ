@@ -1325,7 +1325,14 @@ def _answer(words: str, ids=()) -> str:
         quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None,
         resume=resume)
     b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
-    prompt = (f"The chat so far, newest last:\n{history_}\n\n" if history_ else "") + f"His new text:\n{words}"
+    try:  # F147: the record of the items his text names goes to her first, so the facts come from HQ, not from her memory
+        import item_record
+        facts = item_record.context(words, history_)
+        record = item_record.for_prompt(facts)
+    except Exception as e:
+        print(f"reply: the record: {e!r}", file=sys.stderr)
+        facts, record = None, ""
+    prompt = (f"The chat so far, newest last:\n{history_}\n\n" if history_ else "") + record + f"His new text:\n{words}"
     try:  # H298: what he may be answering: a held change's question can still be in a batch
         sys.path.insert(0, str(ROOT / "routine"))
         import cycles
@@ -1335,7 +1342,7 @@ def _answer(words: str, ids=()) -> str:
     except Exception as e:
         print(f"reply: what waits: {e!r}", file=sys.stderr)
 
-    async def go():
+    async def go(b=b, prompt=prompt):
         out = []
         try:
             async for piece in b.ask(prompt):
@@ -1350,11 +1357,28 @@ def _answer(words: str, ids=()) -> str:
             await b.stop()
         return "".join(out)
 
+    wait = 900 if on_team_line() else 300  # her QA work takes longer than a reply
     try:
-        answer = _clean(asyncio.run(asyncio.wait_for(go(), timeout=900 if on_team_line() else 300)))  # her QA work takes longer than a reply
+        answer = _clean(asyncio.run(asyncio.wait_for(go(), timeout=wait)))
     except Exception as e:
         print(f"reply: {e!r}", file=sys.stderr)
         answer = "Sorry, I couldn't get to that just now. Try me again in a minute?"
+    else:
+        def again(note: str) -> str:
+            """F147: one rewrite, in her same session when it can be resumed, else with the whole prompt again."""
+            sid = b.session_id
+            o2 = _brain.call_session_options(
+                model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
+                effort=_agents.effort_of(a, a["model"]),
+                quick_context=None if sid else (quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None),
+                resume=sid or resume)
+            b2 = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=o2)
+            return _clean(asyncio.run(asyncio.wait_for(go(b2, note if sid else prompt + "\n\n" + note), timeout=wait)))
+        if facts is not None:
+            try:
+                answer = item_record.guard(answer, facts, words, again, a["id"], folder().name)
+            except Exception as e:
+                print(f"reply: the record check: {e!r}", file=sys.stderr)
     if _backup():  # F58: the shared state.json is the main's; the backup keeps its open question here
         _write(_pending_file(), {"pending": [list(p) for p in pol.pending]})
     else:
