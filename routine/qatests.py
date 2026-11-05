@@ -290,8 +290,9 @@ def run_on(d: str, hqdir: str) -> tuple[dict, str]:
     """Her test.py in folder d on the code at hqdir: ({name: passed}, its output)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
     env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+    py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
     try:
-        r = subprocess.run([sys.executable, os.path.join(d, "test.py"), hqdir], cwd=hqdir, env=env, text=True, capture_output=True,
+        r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(d, "test.py"), hqdir], cwd=hqdir, env=env, text=True, capture_output=True,
                            timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
         out = (r.stdout + r.stderr)
     except subprocess.TimeoutExpired:
