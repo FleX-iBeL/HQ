@@ -651,7 +651,7 @@ def before_gate(root: str, label: str, sha: str | None = None) -> dict | None:
 def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: str | None = None) -> dict:
     """What the release can take: {"to": sha or None (the last commit it takes; None: nothing new it may take),
     "tip": dev's sha or None, "taken": [labels], "held": [{"label", "why"}], "behind": [labels that passed but come
-    after a held one], "before_gate": [what BEFORE_GATE let through, each with "goes": in what would go out], "all": bool}.
+    after a held one], "commits": {label: [shas of its own commits]}, "before_gate": [what BEFORE_GATE let through, each with "goes": in what would go out], "all": bool}.
     F112: it looks at what each commit brings: a merge passes when what it brought passed, and is held by the first thing it brought that
     isn't; it names nothing itself for that."""
     root = root or ROOT
@@ -659,6 +659,7 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
     all_rows = rows(text)
     cs = commits(root, base, tip)
     to, taken, held, behind, stop, past = None, [], [], [], False, {}
+    by_row = {}  # F152: each row's own commits, so a release can bring in a checked row on its own
     pending, waiting = None, []  # F112: a passed merge that goes only together with its fix: (merge, fix), and the rows on the way to it
     held_label = lambda l: l in [h["label"] for h in held]
 
@@ -684,6 +685,8 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
         for s, subj in parts:
             named = [l for l in commit_labels(root, s, subj) if l in all_rows]
             for l in named:
+                if s not in by_row.setdefault(l, []):
+                    by_row[l].append(s)
                 if all_rows[l][1] not in GATED:
                     continue
                 if l not in need:
@@ -744,7 +747,8 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
         wait_held("which isn't on this line yet")
     tipsha = cs[-1][0] if cs else None
     return {"to": to, "tip": tipsha, "taken": taken, "held": held, "behind": [l for l in behind if l not in taken],
-            "before_gate": [{**x, "goes": bool(x.get("goes"))} for x in past.values()], "all": bool(cs) and to == tipsha}
+            "before_gate": [{**x, "goes": bool(x.get("goes"))} for x in past.values()], "all": bool(cs) and to == tipsha,
+            "commits": by_row}
 
 
 def before_words(h: dict, going: bool = False) -> str:
