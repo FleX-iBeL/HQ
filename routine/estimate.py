@@ -1427,7 +1427,7 @@ def friday_report(hist=None, now=None):
     own_words = ("" if not own else f" {len(own)} ran long through their own mistake and aren't counted: "
                  + "; ".join(f"job {h.get('n')}, {mistake_what(h) or 'no reason written'}" for h in own) + ".")
     if not week:
-        return "The team's estimates this week: no finished jobs to hold them against." + own_words
+        return "The team's estimates this week: no finished jobs to hold them against." + own_words + rounds_week(now)
     by, within, rough, old, kinds = 0, 0, 0, 0, {}
     for h in week:
         if misses.counted(h):
@@ -1460,7 +1460,33 @@ def friday_report(hist=None, now=None):
         m = sum(misses.is_miss(h) for h in held)
         words += (f" The last {len(held)} jobs held to the measured latest end: {m} past it (the bar is at most {misses.MOST} in "
                   f"{misses.WINDOW}" + (", so it's broken" if m > misses.MOST else "") + ").")
-    return words + own_words
+    return words + own_words + rounds_week(now)
+
+
+ROUNDS_MANY = 6  # H318: more than this many rounds is a lot for one item
+ROUNDS_SHARE = 0.2  # H318: said when this share of the week's items or more needed more than ROUNDS_MANY
+
+
+def rounds_week(now=None):
+    """H318 (call of 5 November 2026): the night review's rounds as a metric, in the Friday text. The items whose rounds ran in the
+    last seven days, each counted by its rounds in those days, read from the record (the trail's round steps): the average, the
+    highest and the lowest, and when 20% or more needed more than 6 (a back and forth is a round), that too."""
+    import trail
+    now = time.time() if now is None else now
+    per = {}
+    for d in trail.lines():
+        if d.get("step") == "round" and now - 7 * 86400 <= (d.get("at") or 0) <= now:
+            per[d["id"]] = per.get(d["id"], 0) + 1
+    if not per:
+        return " The night review's rounds: no items this week."
+    n, ns = len(per), list(per.values())
+    avg = round(sum(ns) / n, 1)
+    words = (f" The night review's rounds this week: {n} item{'s' if n != 1 else ''}, an average of {avg:g} rounds each, "
+             f"the highest {max(ns)}, the lowest {min(ns)}.")
+    many = sum(x > ROUNDS_MANY for x in ns)
+    if many and many >= ROUNDS_SHARE * n:
+        words += f" {many} of {n} ({round(100 * many / n)}%) needed more than {ROUNDS_MANY} rounds."
+    return words
 
 
 def estimate_for(text, hist=None, kind=None, machine=None, size=None):
