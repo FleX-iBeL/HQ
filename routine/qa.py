@@ -427,6 +427,29 @@ def close_replaced(label: str, now: dt.datetime | None = None) -> list[str]:
     return done
 
 
+def tick_done(label: str, now: dt.datetime | None = None) -> bool:
+    """5 November 2026, his yes in the laptop chat: an item that passed her check is ticked off on the planning (✅), so the open list
+    is the real one; 15 items had passed and still stood open. Not a piece of a feature built in pieces with pieces left."""
+    with q.locked():
+        text, jobs, on = q.read()
+        r = rows(text).get(label)
+        if not r:
+            return False
+        line = r[0]
+        cs = hqpaths.cells(line)
+        if cs[0] != "⬜":
+            return False
+        m = re.search(r"\bpiece (\d+) of (\d+)\b", line, re.I)
+        if m and int(m.group(1)) < int(m.group(2)):
+            return False
+        cs[0] = "✅"
+        new = hqpaths.join_cells(cs)
+        if len(hqpaths.cells(new)) != len(cs):
+            return False
+        q.write(text.replace(line, new, 1), jobs, on)
+    return True
+
+
 def fix_refuses(label: str) -> str | None:
     """F151: a fix on its road passes QA only when her tests pass on the build, the new one and the earlier ones, and the 17 happy flows."""
     import qatests
@@ -932,6 +955,8 @@ def main(argv: list[str]) -> int:
         print(f"QA passed for {label}, in its row; the release may take it.")
         for lab in close_replaced(label):
             print(f"{lab} is closed as replaced by {label}.")
+        if tick_done(label):
+            print(f"{label} is ticked off on the planning.")
         for said in ship_whole(label, row):
             print(said)
         return 0
