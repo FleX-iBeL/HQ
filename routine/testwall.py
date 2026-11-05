@@ -347,6 +347,10 @@ def _copy_workspace(real_ws: str, dest: str) -> None:
             pass
     me = ("-c", "user.name=test", "-c", "user.email=t@example.invalid")
     _git("init", "-q", cwd=dest)
+    # the copy's own name to commit under: the after-call work commits the notes with plain git, and on a computer with no
+    # global name every such commit was refused, so the call-notes flows went red now and then (5 November 2026)
+    _git("config", "user.name", "test", cwd=dest)
+    _git("config", "user.email", "t@example.invalid", cwd=dest)
     _git("add", "-A", cwd=dest)
     _git(*me, "commit", "-q", "--allow-empty", "-m", "The workspace of a test run", cwd=dest)
 
