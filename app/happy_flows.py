@@ -15940,8 +15940,7 @@ print("OK")
         shares the way Settings and the agents' gate take them (cycles.settings: the template's under the workspace's own). On a
         stand-in site with the template: a fresh HQ (no own file) shows 3, 2 and 5 = 10; a saved entry without a weekly share
         keeps the template's; 4, 1.5 and 7 shows 12.5, Pepper to 6 shows 17, all three at 0 shows 0; each time the same as
-        cycles.settings, and the page says the sum with each share. Job 520: the reserve behind the page and the points held back
-        under his stop lines (usagecost.reserve_points) are that same sum each time, no fixed 15."""
+        cycles.settings, and the page says the sum with each share."""
         import json as js
         import subprocess as _sp
         import urllib.request
@@ -15992,13 +15991,6 @@ print("OK")
                 need(got["total"] == want, f"F149: with {agents} the page says {got['total']}, not {want}")
                 need({k: float(v) for k, v in got["shares"].items()} == settings_say(),
                      f"F149: with {agents} the page's shares {got['shares']} aren't what Settings shows {settings_say()}")
-                # job 520: the points really held back are that sum too, behind the page (reserveOf) and under his stop lines
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/page.json", timeout=30) as x_:
-                    behind = js.loads(x_.read())["parts"]["head"]["data"]["usageReserve"]
-                need(behind == want, f"F149: with {agents} the reserve behind the page is {behind}, not {want}")
-                held = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, 'routine'); import usagecost as U; print(U.reserve_points())"],
-                               cwd=str(ROOT), env={k: v for k, v in env.items() if k != "HQ_NO_WALL"}, capture_output=True, text=True, timeout=60)
-                need(held.stdout.strip() == f"{want:g}", f"F149: with {agents} the stop lines hold back {held.stdout.strip() or held.stderr[-300:]}, not {want}")
                 seen.append(f"{got['total']:g}")
         finally:
             srv.terminate()
@@ -16326,11 +16318,6 @@ print("OK")
         """A throwaway workspace with the wall on (the other flows run with it off), its own usage reading, a pinned hour,
         and a driver for the routine's real minute with the windows, the mail and the pairing stood in."""
         ws, env = self._h298_ws(f"wall-{name}")
-        # F149 (job 520): a fresh HQ holds back the sum of the agents' weekly shares; the wall's flows keep his own number of 15
-        rm = ws / "HQ/roadmap.md"
-        if "**Usage reserve:" not in rm.read_text():
-            rm.write_text(rm.read_text().replace("- **Team line at least:", "- **Usage reserve: 15 points.** Taken off each stop line for the agents' "
-                                                 "cycles and the team. Switched from a call.\n- **Team line at least:", 1))
         d = self.tmp / f"wall-{name}"
         d.mkdir(exist_ok=True)
         env = {k: v for k, v in env.items() if k not in ("HQ_NO_WALL", "HQ_SUPPORT")}
@@ -38998,7 +38985,7 @@ FLOWS = {
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
     484: ("F151: a fix QA finds goes the road of a new item: no job by itself, the finding an open point in the row, her new test failing on the build and sealed, its own review and the item's again (round 1 of 20 each), then send-row; QA's pass needs the new test and the 17, and closes the row it replaces", False, "flow484"),
-    483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set; the reserve behind the page and under the stop lines the same sum", False, "flow483"),
+    483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set", False, "flow483"),
     482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),

@@ -375,7 +375,7 @@ def tag_once(log=None):
 
 # ---------- the stop lines, as status/usage.mjs has them (lineSettings, movingLine, stopLine) ----------
 
-RESERVE = 15  # F100: points taken off each stop line when the agents' shares can't be read at all (his to turn on the roadmap)
+RESERVE = 15  # F100: points taken off each stop line for the agents' cycles and the team (Fable's default, his to turn)
 # F113: the reserve never takes the team's line under this (or under the stop line itself, when that's lower): LEAST in
 # status/usage.mjs says why. "**Team line at least: N points.**" on the roadmap turns it. [15 is Claude's pick.]
 LEAST = 15
@@ -402,35 +402,9 @@ def line_settings(markdown):
             "weekly": pick(week), "fable": pick(fable)}
 
 
-AGENTS = ("donna", "pepper", "moneypenny")
-
-
-def agents_share_sum():
-    """F149 (5 November 2026): the weekly shares set for Donna, Pepper and Moneypenny in the settings, added up, read the way
-    Settings and the agents' gate read them (cycles.settings: the template's shares under the workspace's own, so a share not
-    saved takes the template's; a fresh HQ has 3, 2 and 5: 10). A share that isn't a number above 0 counts as 0. agentsWeekly
-    in status/server.mjs and agentsShareSum in status/usage.mjs add up the same. RESERVE when the settings can't be read."""
-    try:
-        import cycles
-        agents = cycles.settings()["agents"]
-    except Exception:
-        return RESERVE
-    total = 0.0
-    for aid in AGENTS:
-        a = agents.get(aid) or cycles.DEFAULT_AGENT
-        try:
-            n = float(a.get("weekly_share", 0))
-        except (TypeError, ValueError):
-            n = 0.0
-        total += n if math.isfinite(n) and n > 0 else 0.0
-    total = round(total, 1)
-    return int(total) if total == int(total) else total
-
-
 def reserve_points(markdown=None):
-    """F100: the points taken off each stop line for the agents' cycles and the team. F149: the sum of the agents' weekly
-    shares in the settings (agents_share_sum), unless the roadmap names a reserve of his own ("**Usage reserve: N points.**",
-    usageline.py reserve N); 0 under a test without the wall."""
+    """F100: the points taken off each stop line for the agents' cycles and the team, from the roadmap (RESERVE when it
+    doesn't name one); 0 under a test without the wall."""
     import wall
     if wall.off():
         return 0
@@ -438,9 +412,9 @@ def reserve_points(markdown=None):
         try:
             markdown = open(hqpaths.ROADMAP, encoding="utf8").read()
         except OSError:
-            markdown = ""
+            return RESERVE
     res = re.search(r"\*\*Usage reserve:\s*([0-9]{1,2})\b", markdown)
-    return min(50, int(res.group(1))) if res else min(50, agents_share_sum())  # F113: 0 to 50, as the command
+    return min(50, int(res.group(1))) if res else RESERVE  # F113: 0 to 50, as the command
 
 
 def least_points(markdown=None):

@@ -28,7 +28,6 @@ function parseRoadmap(text) {
   return out;
 }
 import { FOLDER, ROADMAP } from './paths.mjs';
-import { reserveOf } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.HQ_STATUS_PORT ?? 4748);
@@ -649,8 +648,7 @@ async function pageData(have) {
     phases = part('phases', p ? p.phases : null);
     phasesCache = { out: p, part: phases };
   }
-  // F149 (job 520): the reserve follows the settings too, so it's read fresh each time, not with the roadmap's parse (cached on its text)
-  const head = p ? { ...p, phases: undefined, agentsWeekly: await agentsWeekly(), usageReserve: reserveOf(text) } : null;
+  const head = p ? { ...p, phases: undefined, agentsWeekly: await agentsWeekly() } : null;
   const parts = {
     head: part('head', head),
     phases,

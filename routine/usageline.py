@@ -189,10 +189,7 @@ SETTING = re.compile(r"^(?:- )?\*\*(?:Usage limit|Usage reserve|Team line at lea
 
 def reserve_of(text: str) -> int:
     m = RESERVE.search(text)
-    if m:
-        return min(50, int(m.group(1)))  # F113: 0 to 50, as the command
-    import usagecost  # F149: without his own number, the sum of the agents' weekly shares in the settings
-    return min(50, usagecost.agents_share_sum())
+    return min(50, int(m.group(1))) if m else 15  # F113: 0 to 50, as the command
 
 
 def points(word: str) -> int | None:

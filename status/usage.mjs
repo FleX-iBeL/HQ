@@ -105,34 +105,10 @@ export function lineSettings(markdown) {
   };
 }
 
-/** F100: the points kept for his calls and the small routines, taken off each line for the cycles and the team; RESERVE only when
- * the agents' shares can't be read (in the browser, or the settings unreadable). */
+/** F100: the points kept for his calls and the small routines, taken off each line for the cycles and the team. */
 export const RESERVE = 15;
-/**
- * F149 (5 November 2026): the reserve is the sum of the weekly shares set for Donna, Pepper and Moneypenny in the settings, read as
- * routine/usagecost.py agents_share_sum and status/server.mjs agentsWeekly read them: the template's HQ/agents/cycles.json under
- * the workspace's own, an agent in neither gets 2 (cycles.py DEFAULT_AGENT), a share that isn't a number above 0 counts as 0.
- * Node only (this file is also the page's): the files are read with process.getBuiltinModule, so the browser never imports fs.
- */
-export function agentsShareSum() {
-  const fs = globalThis.process?.getBuiltinModule?.('node:fs');
-  const path = globalThis.process?.getBuiltinModule?.('node:path');
-  if (!fs || !path || !import.meta.url.startsWith('file:')) return RESERVE;
-  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
-  const env = globalThis.process.env;
-  const folder = env.HQ_CYCLES_FOLDER || env.HQ_WORKSPACE || path.join(root, 'workspace');  // cycles.py folder(), hqpaths.FOLDER
-  const agentsOf = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8'))?.agents ?? {}; } catch { return {}; } };
-  const tpl = agentsOf(path.join(root, 'template', 'HQ', 'agents', 'cycles.json'));
-  const own = agentsOf(path.join(folder, 'HQ', 'agents', 'cycles.json'));
-  const total = ['donna', 'pepper', 'moneypenny'].reduce((sum, a) => {
-    const n = Number({ weekly_share: 2, ...(tpl?.[a] ?? {}), ...(own?.[a] ?? {}) }.weekly_share);
-    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
-  }, 0);
-  return Math.round(10 * total) / 10;
-}
 export function reserveOf(markdown) {
-  const own = /\*\*Usage reserve:\s*([0-9]{1,2})\b/.exec(markdown ?? '')?.[1];  // his own number on the roadmap wins
-  return Math.min(50, own !== undefined ? Number(own) : agentsShareSum());  // F113: 0 to 50, as the command
+  return Math.min(50, Number(/\*\*Usage reserve:\s*([0-9]{1,2})\b/.exec(markdown ?? '')?.[1] ?? RESERVE));  // F113: 0 to 50, as the command
 }
 
 /**
