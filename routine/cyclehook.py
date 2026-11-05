@@ -133,7 +133,7 @@ NO_SUBS = {"features": {"on", "off"}, "backend": {"on", "off"}, "cycles": {"set"
            "jobs": _JOB_WRITES, "sprint": {"rank", "plan", "moscow", "ready", "go"}, "review": {"clear", "reword", "add", "sitdown", "no", "pass", "run", "golden", "tick", "keep", "round-before", "round-after"},
            "qa": {"pass", "fail", "queue"}, "mistakes": {"add", "put"},
            "feedback": {"send", "connect", "disconnect", "texts"}}  # F114: feedback leaves this HQ: his yes on a call or in a chat, never a cycle's
-MAY_SUBS = {"moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready", "go"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
+MAY_SUBS = {"pepper": {"jobs": {"write-row"}}, "moneypenny": {"jobs": {"stop", "resume", "tell", "write-row", "feedback"}, "sprint": {"rank", "moscow", "ready", "go"}, "review": {"reword", "add", "sitdown", "no"}, "qa": {"queue"}}}
 # what's his, read and never written by a cycle
 HIS = ("my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lifestyle-design.md", "map.md", "rules.md", "me.md", "CLAUDE.md", "where-things-go.md",
        "current-situation.md", "handbook.md", "cycles.json", "cycles-state.json", "backend.json", "features-in-pieces.json", "notes.md", "log-archive.md", "challenges-archive.md")
