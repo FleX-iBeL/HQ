@@ -47,6 +47,10 @@ _NONE = re.compile(r"\b(?:isn.t|is\s+not|wasn.t|not)\s+(?:on|in)\s+(?:the\s+)?(?
                    r"|\bno\s+(?:review\s+)?(?:count|rounds?)\b|\bzero\s+(?:review\s+)?rounds?\b|\bany\s+(?:review\s+)?rounds?\b"
                    r"|\bnever\s+(?:been\s+)?reviewed\b|\bnot\s+(?:been\s+)?reviewed\b", re.I)
 _ABOUT = re.compile(r"\brounds?\b|\bready\b|\breview|\bplanning\b|\brecord\b|\bcheck", re.I)
+# QA, 5 November 2026 21:43: "its job stopped partway and left no record", "I haven't checked whether any of its work made it
+# in" talk about the job or the work, not the rounds or the ready mark: not a claim the record can check.
+_JOB_TALK = re.compile(r"\bjobs?\b|\bwork\b|\blanded\b|\bmade it in\b|\bcommits?\b|\bbuilds?\b|\bpushed\b", re.I)
+_RECORD_TALK = re.compile(r"\brounds?\b|\bready\b|\breview|\bplanning\b|\broadmap\b", re.I)
 ASKS = re.compile(r"\brounds?\b|\bready\b|\breview(?:ed|s)?\b|\bstatus\b|\bwhere (?:is|does) it stand\b", re.I)
 
 
@@ -255,6 +259,8 @@ def misses(draft: str, ctx: dict, words: str = "") -> list[dict]:
     for k, s in enumerate(_sentences(draft)):
         named = labels_in(s)
         lab = named[0] if named else ctx["default"]
+        if _JOB_TALK.search(s) and not _RECORD_TALK.search(s):
+            continue  # about its job or its work, not its rounds or its mark
         none = bool(_NONE.search(s) or (CANT.search(s) and _ABOUT.search(s)))
         if none and lab:  # "isn't on the planning", "no rounds", "couldn't check": wrong when the record has its rounds
             if lab not in ctx["records"]:
@@ -302,14 +308,32 @@ def rewrite_note(ms: list[dict]) -> str:
 
 
 def fallback(draft: str, ms: list[dict]) -> str:
-    """Her rewrite was still wrong: the lines the record contradicts are left out and the record's own words go in their place."""
-    bad = {m["sentence"] for m in ms}
-    kept = [s for s in _sentences(draft) if s not in bad]
-    truths = []
+    """Her rewrite was still wrong: each line the record contradicts is replaced, where it stood, by the record's own words, and
+    only by what the rest of her text doesn't already tell (QA, 5 November 2026 21:43: the record's rounds went out beside her
+    own telling of them, so he got the rounds twice)."""
+    bad = {}
     for m in ms:
-        if m["truth"] not in truths:
-            truths.append(m["truth"])
-    return " ".join(truths + kept).strip()
+        bad.setdefault(m["sentence"], []).append(m["truth"])
+    ss = _sentences(draft)
+    kept = [s for s in ss if s not in bad]
+    told_count = any(counts_in(s) or re.search(r"\bround\s+\d", s, re.I) for s in kept)
+    told_ready = any(ready_in(s) is not None for s in kept)
+    out, said = [], set()
+    for s in ss:
+        if s not in bad:
+            out.append(s)
+            continue
+        for truth in bad[s]:
+            for part in _sentences(truth):
+                if part in said:
+                    continue
+                if counts_in(part) and told_count or ready_in(part) is not None and told_ready:
+                    continue  # her other lines already tell it, rightly
+                said.add(part)
+                told_count = told_count or bool(counts_in(part))
+                told_ready = told_ready or ready_in(part) is not None
+                out.append(part)
+    return " ".join(out).strip()
 
 
 def log(agent: str, where: str, ms: list[dict], rewrite: bool = False) -> None:

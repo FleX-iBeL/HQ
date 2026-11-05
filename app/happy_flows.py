@@ -16367,6 +16367,66 @@ print("OK")
         need(three not in g, f"a done row kept its switches: {g}")
         return f"the line: his switch, one prep job, marked and sent by the program, her build at night, stuck after {made}, paused, cleared"
 
+    async def flow487(self) -> str:
+        """F147, no Claude (QA, 5 November 2026 21:43): talk about a paused job isn't a rounds claim, and the record's words
+        never sit beside a second telling. On a throwaway HQ a made-up item has two review rounds (flagged, then passed) and a
+        ready mark; her real reply runs with a stand-in model. A true draft that says its job stopped partway and left no
+        record, and that she hasn't checked whether its work made it in, goes out as written with nothing on the mistakes
+        ledger, and so does each of those lines alone. A draft with a right telling and one wrong line ('isn't on the
+        planning'), twice, gives one text that tells the rounds once and the ready mark once."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f147job")
+        lab = "F902"
+        now = int(time.time())
+        planning = self.tmp / "f147job-planning.json"
+        planning.write_text(json.dumps({"review": {lab: {"verdict": "pass", "findings": [], "now_rounds": [
+            {"fp": "f147ccccccc1", "at": now - 7200, "verdict": "flag", "n": 0},
+            {"fp": "f147ccccccc2", "at": now - 3600, "verdict": "pass", "n": 1}]}},
+            "ready": {lab: {"at": now - 3000}}}, indent=1))
+        env["HQ_SPRINT"] = str(planning)
+        child = self.tmp / "f147job-child.py"
+        child.write_text(F147_CHILD)
+        ledger = self.tmp / "f147job-mistakes.jsonl"
+
+        def ask(question, drafts, k):
+            line = self.tmp / f"f147job-line-{k}"
+            line.mkdir()
+            ledger.write_text("")
+            out = self.tmp / f"f147job-out-{k}.json"
+            e = {**env, "HQ_DIRECT_DIR": str(line), "HQ_TEAM_LINE_DIR": str(line), "HQ_DIRECT_TEAM": "1",
+                 "HQ_DIRECT_AGENT": "moneypenny", "HQ_DIRECT_PUSH_DIR": str(self.tmp / f"f147job-nopush-{k}"),
+                 "HQ_MISTAKES": str(ledger)}
+            e.pop("HQ_DIRECT_DRY", None)
+            r = _sp.run([sys.executable, str(child), str(ROOT), json.dumps(drafts), str(out), question], env=e,
+                        cwd=str(ROOT), capture_output=True, text=True, timeout=300)
+            need(out.exists(), f"her reply didn't run: {r.stderr[-800:]}")
+            o = json.loads(out.read_text())
+            o["texts"] = [m.get("text", "") for m in o["thread"] if m.get("from") == "agent"]
+            o["ledger"] = [x for x in ledger.read_text().splitlines() if x.strip()]
+            return o
+
+        import item_record
+        q = f"How many review rounds did {lab} take? Is it ready, and where's its job?"
+        right = f"{lab} took two review rounds, flagged then passed, and it's marked ready."
+        stopped = "Its job, 510, stopped partway and left no record of what it did, so nothing from it has landed yet."
+        unchecked = "I haven't checked yet whether any of its work made it in."
+        # 1. The true draft about a paused job, whole and each job line alone: out as written, one turn, nothing logged.
+        for k, draft in enumerate([f"{right} {stopped} {unchecked}", f"{right} {stopped}", f"{right} {unchecked}"], 1):
+            o = ask(q, [draft], k)
+            need(o["texts"] == [draft] and len(o["prompts"]) == 1 and not o["ledger"],
+                 f"a true draft about a paused job was held or logged: {o['texts']!r}, ledger {o['ledger']!r}")
+        # 2. One wrong line beside a right telling, twice: the record's words replace it, each fact told once.
+        wrong = f"{right} {lab} isn't on the planning anymore, though."
+        o = ask(q, [wrong, wrong], 4)
+        need(len(o["texts"]) == 1 and len(o["prompts"]) == 2, f"not one text after one rewrite: {o['texts']!r}")
+        told = [x for x in re.split(r"(?<=[.!?])\s+", o["texts"][0]) if x.strip()]
+        need(len([x for x in told if item_record.counts_in(x)]) == 1 and len([x for x in told if re.search(r"\bready\b", x)]) == 1
+             and not re.search(r"not on the planning", o["texts"][0]),
+             f"the record's words sat beside a second telling: {o['texts']!r}")
+        need(any(lab in x and re.search(r"from.memory", x) for x in o["ledger"]), f"the miss isn't logged: {o['ledger']!r}")
+        return ("a true draft about a job that stopped partway goes out untouched, each job line alone too; a wrong line's "
+                "fallback tells the rounds and the ready mark once")
+
     async def flow485(self) -> str:
         """F147, no Claude: she answers from the item's record, not from memory. On a throwaway HQ a made-up item has two
         review rounds (flagged, then passed) and no ready mark; her real reply runs with a stand-in model that writes
@@ -39257,6 +39317,7 @@ FLOWS = {
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
     486: ("the line: his two switches on an item (prepare, build); the routine carries it from the record: one prep job for Moneypenny, the Ready mark and the send by the program, his switch the say-so by day, hers at night, stuck after three tries, held by his pause, cleared when the row closes", False, "flow486"),
+    487: ("F147: a true draft about her item's paused job (stopped partway, left no record, its work not checked yet) goes out untouched and unlogged; a wrong line's fallback replaces it and tells the rounds and the ready mark once", False, "flow487"),
     485: ("F147: she answers from the item's record, not from memory: a planted wrong count and a wrong ready state in her reply are held back, rewritten once from the record, else the record's own words go out, one text, each miss on the mistakes ledger as from-memory naming the item; a right draft untouched", False, "flow485"),
     484: ("F151: a fix QA finds goes the road of a new item: no job by itself, the finding an open point in the row, her new test failing on the build and sealed, its own review and the item's again (round 1 of 20 each), then send-row; QA's pass needs the new test and the 17, and closes the row it replaces", False, "flow484"),
     483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set; the reserve behind the page and under the stop lines the same sum", False, "flow483"),
