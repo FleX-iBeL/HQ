@@ -597,6 +597,22 @@ function part(name, data) {
   partCache.set(name, x);
   return x;
 }
+/**
+ * F149 (5 November 2026): the agents' share of the week is the sum of the weekly shares set for Donna, Pepper and Moneypenny in
+ * the settings (routine/cycles.py's SETTINGS_REL), not a fixed 15. A share that's missing, unset or not a number counts as 0
+ * (Moneypenny's choice: nothing is selected for her), so with all three unset it's 0; no settings file at all is 0 too.
+ */
+const AGENTS = ['donna', 'pepper', 'moneypenny'];
+async function agentsWeekly() {
+  let own = {};
+  try { own = JSON.parse(await readFile(join(FOLDER, 'HQ', 'agents', 'cycles.json'), 'utf8'))?.agents ?? {}; } catch {}
+  const shares = Object.fromEntries(AGENTS.map((a) => {
+    const n = Number(own?.[a]?.weekly_share);
+    return [a, Number.isFinite(n) && n > 0 ? n : 0];
+  }));
+  return { shares, total: Math.round(10 * Object.values(shares).reduce((x, y) => x + y, 0)) / 10 };
+}
+
 let phasesCache = { out: null, part: null };
 async function pageData(have) {
   let text = null;
@@ -625,7 +641,7 @@ async function pageData(have) {
     phases = part('phases', p ? p.phases : null);
     phasesCache = { out: p, part: phases };
   }
-  const head = p ? { ...p, phases: undefined } : null;
+  const head = p ? { ...p, phases: undefined, agentsWeekly: await agentsWeekly() } : null;
   const parts = {
     head: part('head', head),
     phases,
