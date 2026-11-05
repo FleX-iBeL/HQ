@@ -366,7 +366,8 @@ DEFAULTS: list[dict] = [
             "The loop (F86): when the review flags a row, a short run of yours opens for that one row. A round only adds: "
             "your marked addition, read by the review; its pass first, then your mark. What only he can answer goes on the "
             "sit-down list with one if-then text, and the loop stops there. No is an answer too: can't be done or not worth "
-            "building, say why and what could work instead; he decides. Three rounds a row at most. What the look after a "
+            "building, say why and what could work instead; he decides. 20 rounds a row at most, counted across nights, a stopped night going on "
+            "where it stopped; after the 20th, the sit-down list. What the look after a "
             "round puts back he hears at once; on his keep it: python3 routine/review.py keep.\n"
             "Size, never nights (H276): say a small build, a big build or research, never which nights; "
             "that's only decided at the sprint planning.\n"
@@ -384,7 +385,7 @@ DEFAULTS: list[dict] = [
 ]
 
 PARTS = ("morning", "afternoon", "evening", "night")
-CRAFT_MAX = 10000  # how long an agent's craft may be before it's cut on load (H282: 8000; H303: 10000, Moneypenny's grew again)
+CRAFT_MAX = 10500  # how long an agent's craft may be before it's cut on load (H282: 8000; H303: 10000, Moneypenny's grew again; H318: 10500, her 20 night rounds)
 # The keys that make up an agent's character (H76); is_default compares these with HQ's own.
 CHARACTER_KEYS = ("character", "personality", "craft", "pushback", "greetings", "back_greetings", "continue_greetings",
                   "handover_greetings")
