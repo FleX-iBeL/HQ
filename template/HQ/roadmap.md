@@ -31,7 +31,6 @@ Legend: ✅ done · 🔨 in progress · ⬜ not started · ❓ needs a decision 
 - **Usage limit: 70%.** The 5-hour usage line when it's fixed: jobs stop starting above it. Change it to your own.
 - **5-hour line: moving.** Moving: the 5-hour usage line grows every minute through the session, from 10% after a reset up to 100% at the next (H87, H91). Fixed: it stays at the usage limit above. Switched from a call or the status page.
 - **Weekly line: moving; fixed at 90% when switched.** Moving: the weekly all-models line grows every minute through the week, from 20% up to 100% at its reset (H91). Fixed: it stays at the number in it. Switched from a call or the status page.
-- **Usage reserve: 15 points.** Taken off each stop line for the agents' cycles and the team, so your calls and the small routines always have room. Switched from a call.
 - **Team line at least: 15 points.** The reserve never takes the team's stop line under this (or under the stop line itself), so the first hours after a reset still have room for the team and the agents; from a line of this plus the reserve on, the whole reserve is kept. 0 keeps the whole reserve always. Switched from a call.
 - **Fable line: moving; fixed at 90% when switched.** Moving: the weekly Fable line grows every minute through its week, from 20% up to 100% at its reset (H91). Fixed: it stays at the number in it. Switched from a call or the status page.
 

@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The points held back under your stop lines for the agents and the team are no longer a fixed 15: they're the sum of the weekly shares set for Donna, Pepper and Moneypenny in Settings (3, 2 and 5 on a fresh HQ: 10), and they follow Settings when you change one. A share you never saved counts as the one Settings shows; a 0 counts as 0. The status page's reserve says the same sum. A reserve of your own, set from a call, still wins (F149).
+
 ## 1.0.1 · 5 November 2026
 
 - Your data: A row's words are written once on the planning: the copy in the Model column of rows written by a call, a text or the status page is cleared. Going back a version undoes it.
