@@ -16367,6 +16367,151 @@ print("OK")
         need(three not in g, f"a done row kept its switches: {g}")
         return f"the line: his switch, one prep job, marked and sent by the program, her build at night, stuck after {made}, paused, cleared"
 
+    async def flow488(self) -> str:
+        """H324 (6 November 2026), no Claude: the night run's failures go through the whole rotation, never a quick patch. On a throwaway HQ with
+        the full run stood in: a red round started by the routine makes one row per failing flow, each held against the item its flow belongs to,
+        both switches on as the night's own (Moneypenny's, so built at night), and no team job; the H169 job and a run by hand find nothing to
+        run or fix; a planned release waits while the night is open, other items don't; the next full run starts only once every failure passed
+        her check, not beside a running job; a second red round makes new rows for what still fails; after the third red run the night is paused:
+        no more rows, the release no longer waits (and holds itself), no fourth run; a green round ends the night. His pause holds the night too."""
+        import subprocess as _sp
+        ws, env, d = self._wall_env("night324", hour=3)
+        night_out = d / "night"
+        night_out.mkdir(exist_ok=True)
+        env.update({"HQ_NIGHT_OUT": str(night_out), "HQ_REVIEW_FAKE": "auto", "HQ_LINE_STATE": str(d / "line.json")})
+        env.pop("HQ_DIRECT_AGENT", None)
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        code = r"""
+import sys, os, re, json, subprocess
+sys.path.insert(0, sys.argv[1] + "/routine")
+import nightly, qa, sprint, schedule, release, hqpaths, line
+o = {}
+calls = []
+real_run = subprocess.run
+outcome = {"kind": "red"}
+def run_(cmd, *a, **k):
+    if any("happy_flows.py" in str(c) for c in cmd):
+        calls.append(1)
+        k["stdout"].write("== Result\n3 of 3 passed\n" if outcome["kind"] == "green" else
+                          "== Result\n401: FAILED - the order wasn't picked up\n402: FAILED - two looks a day became three\n1 of 3 passed\n")
+        return subprocess.CompletedProcess(cmd, 0 if outcome["kind"] == "green" else 1)
+    return real_run(cmd, *a, **k)
+subprocess.run = run_
+def tick_done(labels):
+    t = open(hqpaths.ROADMAP, encoding="utf8").read()
+    for l in labels:
+        t = re.sub(r"^\| ⬜ \| " + l + " ", "| ✅ | " + l + " ", t, flags=re.M)
+    open(hqpaths.ROADMAP, "w", encoding="utf8").write(t)
+# 1. round 1, red, started by the routine
+o["r1"] = nightly.run(routine=True)
+rec = nightly.last()
+labels = sorted(set(rec["items"].values()))
+o["labels"] = labels
+o["held1"] = rec["held"]
+rows = {r["label"]: r["line"] for r in sprint.open_rows()}
+o["rows"] = {l: rows.get(l, "") for l in labels}
+o["go"] = {l: sprint.go_of(l) for l in labels}
+o["queue1"] = open(hqpaths.ROADMAP, encoding="utf8").read().split("## The queue", 1)[1].split("\n## ", 1)[0]
+o["show"] = line.show(labels)
+o["suggest"] = release.suggest(rec, {"hq": [], "tests": []}, True)
+# 2. the H169 job and a run by hand: nothing to run or fix
+o["job"] = nightly.run()
+o["hand"] = nightly.run(again=True)
+o["calls"] = len(calls)
+# 3. a planned release waits for the night, other items don't
+o["wait_rel"] = schedule.waits_for_night({"text": "H178 and H186, the daily release on the nightly line"})
+o["wait_rel2"] = schedule.waits_for_night({"text": "Release 1.0.2: python3 routine/release.py main --version 1.0.2"})
+o["wait_other"] = schedule.waits_for_night({"text": "Agent cycle: pepper, notes look"})
+# 4. the next full run: only once every failure passed her check, never beside a job
+started = []
+real_popen = subprocess.Popen
+class _Night:
+    pid = 4242
+def P(cmd, *a, **k):
+    if any("nightly.py" in str(c) for c in cmd):
+        started.append([str(c) for c in cmd])
+        return _Night()
+    return real_popen(cmd, *a, **k)
+subprocess.Popen = P
+st = {labels[0]: "passed", labels[1]: "failed"}
+qa.state = lambda l: st.get(l, "none")
+o["n_open"] = nightly.rotation_minute()
+st[labels[1]] = "passed"
+o["n_busy"] = nightly.rotation_minute(busy=True)
+o["n_go"] = nightly.rotation_minute()
+o["started"] = started
+# 5. round 2, red again: new rows for what still fails (round 1's passed and are ticked off)
+tick_done(labels)
+o["r2"] = nightly.run(again=True, routine=True)
+rec2 = nightly.last()
+labels2 = sorted(set(rec2["items"].values()))
+o["round2"], o["labels2"] = rec2["round"], labels2
+# 6. round 3, red: paused
+tick_done(labels2)
+before = len(sprint.open_rows())
+o["r3"] = nightly.run(again=True, routine=True)
+rec3 = nightly.last()
+o["held3"], o["items3"], o["rows_after"] = rec3["held"], rec3["items"], len(sprint.open_rows()) - before
+o["wait_after"] = schedule.waits_for_night({"text": "H178 and H186, the daily release"})
+o["n_after"] = nightly.rotation_minute()
+o["suggest3"] = release.suggest(rec3, {"hq": [], "tests": []}, True)
+c = len(calls)
+o["r4"] = nightly.run(again=True, routine=True)
+o["calls4"] = len(calls) - c
+o["job3"] = nightly.run()
+# 7. a fresh night: red round 1, then green: the night ends, the release goes
+os.remove(os.path.join(nightly.OUT, "last.json"))
+o["f1"] = nightly.run(routine=True)
+outcome["kind"] = "green"
+o["f2"] = nightly.run(again=True, routine=True)
+o["wait_green"] = schedule.waits_for_night({"text": "H178 and H186, the daily release"})
+o["green"] = nightly.tonight(nightly.last())["green"]
+print("RESULT " + json.dumps(o))
+"""
+        r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=300)
+        m = re.search(r"RESULT (.*)", r.stdout)
+        need(m, f"the night's rotation: {r.stdout[-800:]} {r.stderr[-2500:]}")
+        o = json.loads(m.group(1))
+        labels = o["labels"]
+        need(o["r1"] == 1 and len(labels) == 2 and all(re.fullmatch(r"F\d+", x) for x in labels) and not o["held1"], f"round 1: {o['r1']} {labels}")
+        r401 = next(v for v in o["rows"].values() if "flow 401" in v)
+        need("night run" in r401 and "Held against H308's row" in r401 and "bigger picture" in r401 and "the whole rotation" in r401
+             and "her check" in r401, f"the row for flow 401: {r401[:600]}")
+        need(all((g.get("prep") or {}).get("by") == "moneypenny" and (g.get("build") or {}).get("by") == "moneypenny" for g in o["go"].values()),
+             f"the switches: {o['go']}")
+        need("the nightly run, was red" not in o["queue1"],
+             f"a team job to patch it: {o['queue1'][-800:]}")
+        need(o["suggest"][0] == "again" and "rotation" in o["suggest"][1], f"the release's words: {o['suggest']}")
+        need(o["job"] == 0 and o["hand"] == 0 and o["calls"] == 1, f"the H169 job or a hand ran or fixed it: {o['job']} {o['hand']} {o['calls']}")
+        need(o["wait_rel"] and o["wait_rel2"] and not o["wait_other"], f"the release waiting: {o['wait_rel']} {o['wait_rel2']} {o['wait_other']}")
+        need(o["n_open"] is None and o["n_busy"] is None and o["n_go"] == 4242 and len(o["started"]) == 1
+             and o["started"][0][-2:] == ["again", "--routine"], f"the next round: {o['n_open']} {o['n_busy']} {o['n_go']} {o['started']}")
+        need(o["r2"] == 1 and o["round2"] == 2 and len(o["labels2"]) == 2 and not set(o["labels2"]) & set(labels), f"round 2: {o['r2']} {o['labels2']}")
+        need(o["r3"] == 3 and o["held3"] and o["items3"] == {} and o["rows_after"] == 0, f"round 3: {o['r3']} {o['held3']} {o['items3']} {o['rows_after']}")
+        need(not o["wait_after"] and o["n_after"] is None and o["suggest3"][0] == "hesitate", f"after the pause: {o['wait_after']} {o['n_after']} {o['suggest3']}")
+        need(o["r4"] == 3 and o["calls4"] == 0 and o["job3"] == 0, f"a fourth run: {o['r4']} {o['calls4']} {o['job3']}")
+        need(o["f1"] == 1 and o["f2"] == 0 and o["green"] and not o["wait_green"], f"a green round: {o['f1']} {o['f2']} {o['green']} {o['wait_green']}")
+        # his pause holds the night, its run and its next round
+        snip = """
+import sys, os, json
+sys.path.insert(0, sys.argv[1] + '/routine')
+import tick, nightly, hqpaths
+hqpaths.is_maker = lambda: True
+nightly.is_main = lambda: True
+hit = []
+tick.nightly_minute = lambda now=None, busy=False: hit.append('night')
+nightly.rotation_minute = lambda now=None, busy=False: hit.append('next') and None
+tick.night_step({'running': []})
+print('RESULT ' + json.dumps(hit))
+"""
+        run_ = lambda: json.loads(re.search(r"RESULT (.*)", _sp.run([sys.executable, "-c", snip, str(ROOT)], capture_output=True, text=True,
+                                                                     env={**env, "HQ_NIGHT_MINUTE": "1"}, cwd=str(ROOT)).stdout).group(1))
+        need(run_() == ["night", "next"], "without his pause the minute doesn't reach the night and its next round")
+        p = jobs("pause", "testing")
+        need(p.returncode == 0, p.stderr)
+        need(run_() == [], "his pause doesn't hold the night")
+        return f"the night's failures: {', '.join(labels)} in the rotation, the next run after her checks, paused after three"
+
     async def flow487(self) -> str:
         """F147, no Claude (QA, 5 November 2026 21:43): talk about a paused job isn't a rounds claim, and the record's words
         never sit beside a second telling. On a throwaway HQ a made-up item has two review rounds (flagged, then passed) and a
@@ -39316,6 +39461,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    488: ("H324: the night run's failures go through the whole rotation, never a quick patch: a row per failing flow held against its item, the night's own switches, no team job; the release waits for the night; the next full run once every failure passed her check; paused after the third red run; his pause holds the night", False, "flow488"),
     486: ("the line: his two switches on an item (prepare, build); the routine carries it from the record: one prep job for Moneypenny, the Ready mark and the send by the program, his switch the say-so by day, hers at night, stuck after three tries, held by his pause, cleared when the row closes", False, "flow486"),
     487: ("F147: a true draft about her item's paused job (stopped partway, left no record, its work not checked yet) goes out untouched and unlogged; a wrong line's fallback replaces it and tells the rounds and the ready mark once", False, "flow487"),
     485: ("F147: she answers from the item's record, not from memory: a planted wrong count and a wrong ready state in her reply are held back, rewritten once from the record, else the record's own words go out, one text, each miss on the mistakes ledger as from-memory naming the item; a right draft untouched", False, "flow485"),

@@ -123,6 +123,9 @@ def suggest(run: dict | None, changed: dict, tonight: bool) -> tuple[str, str]:
             return "hesitate", "every test passed, but HQ itself changed after that full run"
         return "sure", f"all {run['ran']} tests passed{after}"
     if n < most:
+        if run.get("items"):  # H324: the failures are in the rotation; the routine starts the next full run itself
+            return "again", (f"round {n} found {len(run.get('failed') or []) or 'a'} failure(s), each on the planning for the whole rotation; "
+                             f"the routine starts round {n + 1} of {most} once each passed her check, and the release waits for it")
         return "again", (f"round {n} found {len(run.get('failed') or []) or 'a'} failure(s): fix everything it found, "
                          f"then a full run again (nightly.py again, round {n + 1} of {most})")
     return "hesitate", f"still not green after {n} full runs tonight; the next night tests it again"

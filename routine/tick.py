@@ -513,7 +513,16 @@ def night_step(q) -> None:
         return
     import nightly
     if hqpaths.is_maker() and nightly.is_main():
+        import jobs as _jobs
+        if _jobs.is_paused():  # H324: "put everything on hold" (6 November 2026): his pause holds the night too, its run and its next round
+            return
         nightly_minute(busy=bool(q.get("running")))
+        try:
+            pid = nightly.rotation_minute(busy=bool(q.get("running")))
+            if pid:
+                log(f"the night's next full run started (pid {pid}): every failure of the round before passed her check (H324)")
+        except Exception as e:
+            log(f"nightly rotation: {e!r}")
 
 
 def job_env() -> str:

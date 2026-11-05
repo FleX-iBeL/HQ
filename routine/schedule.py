@@ -281,6 +281,21 @@ def passed(items, now=None):
     return sorted((i for i in items if due(i, now)), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
 
 
+RELEASE_ITEM = re.compile(r"release\.py|daily release|\bH178\b", re.I)
+
+
+def waits_for_night(item, now=None):
+    """H324: a planned release stays waiting while tonight's night isn't settled (its run going, or its failures in the rotation with a
+    full run left); it goes once the night ends green or is paused (then the release itself holds)."""
+    if not RELEASE_ITEM.search(item.get("text") or ""):
+        return False
+    try:
+        import nightly
+        return nightly.night_open(now)
+    except Exception:
+        return False
+
+
 def promote():
     """The routine, every minute. A due item with the priority tag (H99): once no job runs, it becomes a job
     first in line, ahead of the waiting jobs (after the tagged ones that went in before it). Any other item:
@@ -294,7 +309,7 @@ def promote():
         running = any(jobs.open_job(j) and not jobs.waiting(j) for j in queue)
         busy = any(jobs.open_job(j) for j in queue)
         now = dt.datetime.now()
-        ready = passed(items, now)  # H111: every item whose time has passed, not only this minute's
+        ready = [i for i in passed(items, now) if not waits_for_night(i, now)]  # H111: every item whose time has passed; H324: a release waits
         did = ""
         item = ready[0] if ready else None
         if on and item and (not busy or (item.get("priority") and not running)):

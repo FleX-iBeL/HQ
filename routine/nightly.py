@@ -65,10 +65,10 @@ ROW = "H169"
 MARK = "Nights:"
 KEEP_NIGHTS = 7
 KEEP_LOGS = 14
-OUT = os.path.join(HQ, "scratch", "nightly")
+OUT = os.environ.get("HQ_NIGHT_OUT") or os.path.join(HQ, "scratch", "nightly")  # H324: a test's own place for the record
 MORNING = (8, 0)  # when Moneypenny (H266) texts the line for the morning
 ROUNDS = 3  # H226: at most three full runs a night
-NIGHT_HOURS = 12  # a round belongs to tonight when tonight's round 1 started less than this long ago [Claude's choice]
+NIGHT_HOURS = 20  # H324: the rotation between rounds can run into the morning; was 12. a round belongs to tonight when tonight's round 1 started less than this long ago [Claude's choice]
 
 
 def flow_args() -> list[str]:
@@ -217,6 +217,114 @@ def team_job(failed: list[str]) -> None:
                     "morning's text.", "--kind", "small"], capture_output=True, text=True)
 
 
+# H324, his words (the laptop chat, 6 November 2026, 00:20): "i want that during a nightly run, they FINISH the whole run, and if there are
+# multiple that broke, then they get all fixed through the whole rotation that we built the last two days (MP makes the row, the review checks
+# it, MP makes the test case, the review checks it, MP ready marks it and puts it on the planning), and then if after 3 full cycles of testing
+# they couldnt have everything fixed, it is paused." And: "it must be held against the initial item as well to make sure it still fits the
+# bigger picture". So a red round no longer goes to a team job that patches it: each failure becomes a row on the planning with both switches
+# on as the night's own (built at night, like Moneypenny's pick), the line carries each through the whole rotation, and the routine starts
+# the next full run only once every failure of the round passed her check. After the third red run the night is paused: nothing goes out.
+H324 = "H324"
+
+
+def _flow_item(num: str) -> tuple[str, str]:
+    """The flow's own line in FLOWS and the item it belongs to (the F or H label it starts with), or ("", "")."""
+    try:
+        src = open(os.path.join(HQ, "app", "happy_flows.py"), encoding="utf8").read()
+    except OSError:
+        return "", ""
+    m = re.search(rf'^\s+{num}: \(\s*"((?:[^"\\]|\\.)*)"', src, re.M)
+    desc = m.group(1) if m else ""
+    lab = re.search(r"\b([FH]\d{1,4})\b", desc)  # the first item it names: most flows start with it
+    return desc, (lab.group(1) if lab else "")
+
+
+def rotate(failed: list[str], n: int, night: str) -> dict:
+    """H324: each failure of a red round a row on the planning (one per failing flow; the same flow's open row from tonight is used again),
+    held against the item its flow belongs to, both switches on as the night's own, so the line carries it through the whole rotation.
+    Returns {failure line: label} (or "not written: why")."""
+    import sprint as S
+    items = {}
+    for ln in failed or ["the run ended without a flow failing: see the log's end"]:
+        m = re.match(r"\s*(\d+): FAILED - (.*)", ln)
+        num, why = (m.group(1), m.group(2).strip()) if m else ("", ln.strip())
+        desc, item = _flow_item(num) if num else ("", "")
+        what = (f"flow {num}" + (f" ({desc[:160]})" if desc else "")) if num else "the run itself"
+        mark = f"(night run, flow {num or 'run'})"
+        said = (f"{what[0].upper() + what[1:]} failed in the night run {mark}: {why[:600]}. Found on {night[:10]}, round {n} of {ROUNDS} ({H324}): "
+                "fixed through the whole rotation, never a quick patch: the row, the review, her test, the review, the Ready mark, the team, "
+                "her check. " + (f"Held against {item}'s row as well, so the fix still fits what {item} is for and the bigger picture. " if item
+                                 else "Held against the item this flow belongs to as well, and the bigger picture. ")
+                + "The night's next full run starts once every failure of this round passed her check.").replace("|", "/")
+        try:
+            with jobs.locked():
+                text, queue, on = jobs.read()
+                same = next((r["label"] for r in S.open_rows(text) if mark in r["line"]), None)
+                if same:
+                    label = same
+                else:
+                    text, label = jobs.roadmap_row(text, said, True, by="the night run")
+                    jobs.write(text, queue, on)
+            S.set_go(label, "both", True, by="night")
+            items[ln] = label
+        except (Exception, SystemExit) as e:  # one failure not written never stops the others
+            items[ln] = f"not written: {e!r}"[:200]
+    return items
+
+
+def _tell_paused(night: str, n: int, failed: list[str]) -> None:
+    """H324: after the last full run still red: the night is paused, one text to him on her line, and the morning's line."""
+    what = "; ".join(failed)[:400] or "the run ended with an error"
+    words = (f"The night run of {night[:10]} is paused: after {n} full runs it still isn't green ({what}). Nothing goes out; "
+             "the night's work holds on nightly. The failures are on the planning.")
+    try:
+        import qatests
+        qatests.tell(H324, f"night-paused-{night[:10]}", words)
+    except Exception:
+        pass
+    try:
+        morning(words)
+    except Exception:
+        pass
+
+
+def night_open(now: dt.datetime | None = None) -> bool:
+    """H324: tonight isn't settled yet: its run is going, or a red round's failures are in the rotation with a full run left. A release waits
+    for it (schedule.py). A copy under test reads only its own record (HQ_NIGHT_OUT)."""
+    if hqpaths.under_test() and not os.environ.get("HQ_NIGHT_OUT"):
+        return False
+    if running():
+        return True
+    rec = last() or {}
+    t = tonight(rec, now)
+    return bool(t and not t["green"] and rec.get("routine") and not rec.get("held") and rec.get("items"))
+
+
+def rotation_minute(now: dt.datetime | None = None, busy: bool = False):
+    """H324: the routine, every minute on the main: tonight's red round, every one of its failures through her check (or no longer an
+    open row), gets the next full run, once. Returns the run's pid when it started one, else None."""
+    if running() or busy:
+        return None
+    rec = last() or {}
+    t = tonight(rec, now)
+    if not t or t["green"] or not rec.get("routine") or rec.get("held") or t["round"] >= ROUNDS:
+        return None
+    items = sorted({v for v in (rec.get("items") or {}).values() if re.fullmatch(r"[FH]\d+", str(v))})
+    if not items:
+        return None
+    import qa
+    import sprint as S
+    open_ = {r["label"] for r in S.open_rows()}
+    if [x for x in items if x in open_ and qa.state(x) != "passed"]:
+        return None
+    os.makedirs(OUT, exist_ok=True)
+    out = open(os.path.join(OUT, "rotation.log"), "a")
+    p = subprocess.Popen([_python(), os.path.abspath(__file__), "again", "--routine"], cwd=HQ, stdin=subprocess.DEVNULL, stdout=out,
+                         stderr=subprocess.STDOUT, start_new_session=True)
+    json.dump({"pid": p.pid, "at": (now or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")}, open(_running_file(), "w"))
+    return p.pid
+
+
 def run(again: bool = False, routine: bool = False) -> int:
     stamp = dt.datetime.now()
     if not is_main():
@@ -232,6 +340,14 @@ def run(again: bool = False, routine: bool = False) -> int:
         if t and t["green"] and (last() or {}).get("routine"):
             print(f"Tonight's run already passed every flow (round {t['round']}): nothing to run.")
             return 0
+    rec_ = last() or {}
+    if not routine and rec_.get("routine") and tonight(rec_, stamp) and (rec_.get("items") or rec_.get("held")):
+        # H324: the routine's night is in the rotation (or paused): no job patches it or runs it again by hand
+        labels = sorted({v for v in (rec_.get("items") or {}).values() if re.fullmatch(r"[FH]\d+", str(v))})
+        print("Tonight's night is " + ("paused after its last full run" if rec_.get("held") else
+              f"in the rotation ({H324}): its failures are on the planning as {', '.join(labels) or 'rows'}, each through the whole rotation; "
+              "the routine starts the next full run itself once each passed her check") + ". Nothing for this job to run or fix.")
+        return 0
     night, n, rounds = stamp.strftime("%Y-%m-%d %H:%M"), 1, []
     if again:
         t = tonight(last(), stamp)
@@ -265,7 +381,11 @@ def run(again: bool = False, routine: bool = False) -> int:
     failed = failures(out)
     entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "commit": commit, "dirty": dirty, "ran": ran, "passed": passed, "failed": failed,
              "exit": r.returncode, "minutes": mins, "log": log}
-    json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry], "routine": routine},
+    green_ = r.returncode == 0 and bool(ran) and not failed
+    items = rotate(failed, n, night) if routine and not green_ and n < ROUNDS else {}  # H324
+    entry["items"] = items
+    held = bool(routine and not green_ and n >= ROUNDS)
+    json.dump({**entry, "round": n, "rounds_max": ROUNDS, "night": night, "rounds": rounds + [entry], "routine": routine, "held": held},
               open(os.path.join(OUT, "last.json"), "w"), indent=1)
     _prune()
     when = stamp.strftime("%-d %b %H:%M")
@@ -284,12 +404,18 @@ def run(again: bool = False, routine: bool = False) -> int:
                   f"Write one line for the night with nightly.py log (what each round found and what was fixed). "
                   f"Then the tutorial read: nightly.py tutorial.")
         return 0
-    if routine:
-        team_job(failed)
     print(f"Round {n}: {passed} of {ran} passed ({mins} min). Failed:")
     for ln in failed or [f"(no flow failed, but the run ended with exit {r.returncode}: see the log's end)"]:
         print("  " + ln)
     print(f"The full output: {log}")
+    if routine:  # H324: the whole rotation, not a team job that patches it
+        if n < ROUNDS:
+            print(f"Each failure is on the planning for the whole rotation ({H324}): " + ", ".join(f"{v}" for v in items.values())
+                  + f". The routine starts round {n + 1} of {ROUNDS} once every one passed her check.")
+            return 1
+        _tell_paused(night, n, failed)
+        print(f"That was the last of {ROUNDS} full runs: the night is paused, its work holds on nightly, not released. Told him once.")
+        return 3
     if n < ROUNDS:
         print(f"Fix everything this round found (check each fix on the flows it touches; no full run per fix), "
               f"then: nightly.py again (round {n + 1} of {ROUNDS}).")
@@ -350,7 +476,7 @@ def main(argv: list[str]) -> int:
     if cmd == "run":
         return run()
     if cmd == "again":
-        return run(again=True)
+        return run(again=True, routine="--routine" in argv)  # H324: the routine's next round after the rotation
     if cmd == "tutorial":
         return tutorial(done=argv[1:2] == ["done"])
     if cmd == "set":

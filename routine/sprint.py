@@ -333,8 +333,10 @@ def set_go(label, which, on, by="him", words=None):
         sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no switch.")
     rec = None
     if on:
-        if by == "moneypenny":  # her own pick: a build she switched on goes only at night (line.py)
+        if by in ("moneypenny", "night"):  # her own pick: a build she switched on goes only at night (line.py)
             rec = {"by": "moneypenny"}
+            if by == "night":  # H324: a failure of the night run, switched on by the night itself; built at night like her pick
+                rec["why"] = "the night run (H324)"
         else:
             if not words:
                 sys.exit("A switch goes on with his own words of today: --said \"HIS WORDS\" (or --by moneypenny from her own cycle).")
