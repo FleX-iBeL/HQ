@@ -244,6 +244,18 @@ Q_LATE_CANCEL = "Count slowly from one to forty in words, one number per sentenc
 
 # -- reporting ---------------------------------------------------------------------------
 
+def _night_rounds():
+    """H318: the night review's rounds an item (review.ROUNDS), read from its source so a flow doesn't load the routine."""
+    return int(re.search(r"^ROUNDS = (\d+)", (ROOT / "routine/review.py").read_text(), re.M).group(1))
+
+
+def _seed_rounds(sj, label, n):
+    """H318: an item that already had n night rounds, so a flow reaches the cap without running all of them."""
+    d = json.loads(sj.read_text())
+    d.setdefault("review", {}).setdefault("rows", {}).setdefault(label, {}).setdefault("fix", {})["n"] = n
+    sj.write_text(json.dumps(d))
+
+
 def _free_port():
     import socket as _s
     with _s.socket() as s_:
@@ -14012,7 +14024,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         row whose finding needs his words: a made-up quote is refused and not written, the sit-down list names it, one
         text in if-then shape, no second text, no further round, until the row's words change. A round cut off halfway:
         words half changed, the row stays flagged and not ready, the Ready mark refused, the round counted, its words
-        reviewed as any change. Past three rounds a row: on the sit-down list, named, no fourth. Over her day's share:
+        reviewed as any change. Past its rounds a row (20 since H318): on the sit-down list, named, no round more. Over her day's share:
         nothing opens, named once in her ledger. Rows flagged before the loop was on wait, unless ranked; the rank goes
         first. A round whose row was settled meanwhile is skipped and not counted."""
         import datetime as _dt
@@ -14114,7 +14126,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         s = drive("start", extra=f1)
         p = s["prompt"]
         need(p.startswith(f"let's go. This is job {s['n']} from the queue: Moneypenny's own cycle, F9101 round 1 (H298)"), f"the round's prompt head: {p[:200]}")
-        need("HOLE: no size named" in p and "round 1 of at most 3 on one row" in p and "- no size named" in p and "add F9101" in p and "sitdown F9101" in p and "no F9101" in p
+        need("HOLE: no size named" in p and f"round 1 of at most {_night_rounds()} on one row" in p and "- no size named" in p and "add F9101" in p and "sitdown F9101" in p and "no F9101" in p
              and "F9105" not in p and "Never mark it ready in this round" in p, f"the round's prompt: {p[-1500:]}")
         need("--max-minutes 5 --max-turns 60" in s["script"], f"the round's box: {s['script']}")
         need("HOLE: no size named" in rm.read_text() and "Moneypenny's addition" in rm.read_text() and "Size: a small build" in rm.read_text() and "not mine" not in rm.read_text(),
@@ -14175,17 +14187,19 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         review_at(t1 + 1600)
         review_at(t1 + 1901)
         need(st()["F9102"]["findings"] == ["which currency"] and st()["F9102"]["ask"] != e["ask"], f"the half words weren't reviewed: {st()['F9102']}")
-        # the cap: the third round, then the sit-down list
+        # the cap: the last round (H318: 20; the ones between seeded), then the sit-down list
+        cap = _night_rounds()
+        _seed_rounds(sj, "F9102", cap - 1)
         drive("tick")
-        need([x[1] for x in items()] == ["F9102 round 3"], f"no third round: {items()}")
+        need([x[1] for x in items()] == [f"F9102 round {cap}"], f"no last round: {items()}")
         tool("schedule.py", "promote")
         drive("start", extra=fake("noop", ""))
-        need(st()["F9102"]["fix"]["n"] == 3, f"the third round: {st()['F9102']}")
+        need(st()["F9102"]["fix"]["n"] == cap, f"the last round: {st()['F9102']}")
         t = drive("tick")
         need(not items() and any("F9102 went on the sit-down list" in x for x in t["fixes"]), f"past the cap: {items()} {t}")
-        need("3 rounds and the review still flags it" in tool("review.py", "sitdown-list").stdout, "the cap isn't named on the sit-down list")
+        need(f"{cap} rounds and the review still flags it" in tool("review.py", "sitdown-list").stdout, "the cap isn't named on the sit-down list")
         led = (ws / "HQ/ledger/moneypenny.md").read_text()
-        need("F9102 on the sit-down list: 3 rounds" in led and "F9102 round 2: cut off" in led, f"the ledger: {led[-600:]}")
+        need(f"F9102 on the sit-down list: {cap} rounds" in led and "F9102 round 2: cut off" in led, f"the ledger: {led[-600:]}")
         # over her share: nothing opens, named once
         word("| F9103 It keeps failing | ", "| F9103 It keeps failing | HOLE: when. ")
         review_at(t1 + 2000)
@@ -14311,6 +14325,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         def fields(label):
             return (lambda r: r.stdout + r.stderr)(tool("sprint.py", "fields", label))
 
+        b.sj = sj
         b.drive, b.tool, b.st, b.flag, b.fake, b.items, b.go, b.noon, b.minute, b.texts, b.ledger, b.settle, b.fields = drive, tool, st, flag, fake, items, go, noon, minute, texts, ledger, settle, fields
         for a in ("pepper", "donna"):
             tool("cycles.py", "set", a, "on", "off")
@@ -14975,7 +14990,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.minute()
             s = b.go("")
             need(f"--fix F9301 fix" in open(b.env["HQ_JOB_RUN"] + "/job-settings.json").read(), f"the round's settings don't name its row: {s['script'][:300]}")
-            need("at most 3 today" not in s["prompt"] and "round 1 of at most 3 on one row" in s["prompt"], "the round's prompt counts by the day")
+            need("at most 3 today" not in s["prompt"] and f"round 1 of at most {_night_rounds()} on one row" in s["prompt"], "the round's prompt counts by the day")
 
         def held(b):
             b.flag("F9301", "no size named")
@@ -15090,6 +15105,9 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         def two_rows(b):
             b.flag("F9301", "no size named")
             b.flag("F9302", "no test named")
+            cap = _night_rounds()  # H318: 20 a row; the first ones seeded, the last three run
+            _seed_rounds(b.sj, "F9301", cap - 3)
+            _seed_rounds(b.sj, "F9302", cap - 3)
             seen = []
             for _ in range(8):
                 b.minute()
@@ -15100,15 +15118,18 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 seen.append(it[0])
                 b.go("")
                 need(len(b.items()) == 0, f"a round beside the one running: {b.items()}")
-            need(seen == [f"F9301 round {i}" for i in (1, 2, 3)] + [f"F9302 round {i}" for i in (1, 2, 3)], f"the rounds: {seen}")
+            last = range(cap - 2, cap + 1)
+            need(seen == [f"F9301 round {i}" for i in last] + [f"F9302 round {i}" for i in last], f"the rounds: {seen}")
             b.minute()
             lst = b.tool("review.py", "sitdown-list").stdout
-            need("F9301" in lst and "F9302" in lst and lst.count("3 rounds and the review still flags it") == 2, f"the list: {lst}")
+            need("F9301" in lst and "F9302" in lst and lst.count(f"{cap} rounds and the review still flags it") == 2, f"the list: {lst}")
             need(b.texts().count("If you tell me what F9301 should say") == 1 and b.texts().count("If you tell me what F9302 should say") == 1, f"the texts: {b.texts()[-500:]}")
 
         def for_good(b):
             b.flag("F9301", "no size named")
-            for i in (1, 2, 3):
+            cap = _night_rounds()  # H318: the rounds before the last three seeded
+            _seed_rounds(b.sj, "F9301", cap - 3)
+            for i in range(cap - 2, cap + 1):
                 b.minute()
                 need(b.items() == [f"F9301 round {i}"], f"round {i}: {b.items()}")
                 b.go("")
@@ -26327,7 +26348,7 @@ fp = S.ask_fp(row['line'])
 d = {'review': {'fix_since': 1, 'rows': {'F9801': {'verdict': 'flag', 'ask': fp, 'at': int(now), 'findings': ['a hole']}}}, 'order': ['F9801']}
 S._save(S.RANKS, d)
 seen = []
-for day in range(4):
+for day in range(R.ROUNDS + 1):
     got = R.next_round(now + day * 86400)
     seen.append((got['pick'] or {}).get('round'))
     if got['pick']:
@@ -26337,7 +26358,7 @@ print(json.dumps({'seen': seen, 'capped': got['capped']}))
         r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env={**env, "HQ_SPRINT": str(ws / "HQ/sprint.json")}, cwd=str(ROOT))
         need(r.returncode == 0, f"the rounds: {r.stderr[-500:]}")
         o = json.loads(r.stdout.strip().splitlines()[-1])
-        need(o["seen"] == [1, 2, 3, None] and o["capped"] == ["F9801"], f"rounds aren't per item: {o}")
+        need(o["seen"] == list(range(1, _night_rounds() + 1)) + [None] and o["capped"] == ["F9801"], f"rounds aren't per item: {o}")
         code = """
 import sys, os, json, time
 sys.path.insert(0, sys.argv[1] + '/routine')
@@ -39428,7 +39449,7 @@ FLOWS = {
     346: ("F116: the phone page uses a tenth of what it did: bytes a minute with the page open, counted in front of the server", False, "flow346"),
     347: ("F116: an empty planning or a block it can't read is can't read the status, red with its file, never Done", False, "flow347"),
     348: ("F116: missing routine lines, usage reading or incident log are red, each saying what it means; grey only in a fresh install's first minutes", False, "flow348"),
-    208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, three rounds an item, the night is the routine's, a friend stays on the release", False, "flow208"),
+    208: ("F101: the status block can't break the planning, the reviewer's answer needs all five probes and real quotes, 20 rounds an item (H318), the night is the routine's, a friend stays on the release", False, "flow208"),
     207: ("F101: the release reads the night and refuses a red or missing one with the night named; a commit naming no item holds it", False, "flow207"),
     460: ("F121: one run on a commit is the proof for every row it holds: a record each, a red own flow only red for its row, a red quick set for all", False, "flow460"),
     206: ("F101: QA's pass stands on a green run and a named comparison; a piece needs its switch on the hidden list", False, "flow206"),
@@ -39438,7 +39459,7 @@ FLOWS = {
     201: ("F99: the doors: his vision, map, rules and CLAUDE.md ask, the shared files are refused whatever the tool, each script way in passes, the web asks on anything but a plain address, the wrap-up writes only the log, the lists and the transcript", False, "flow201"),
     202: ("F99: a job and a cycle start without his folder, with the never-send list, and the guard file really loads", False, "flow202"),
     203: ("F99: a flag and a say-so stand on his own words: made-up words and an agent's words are refused, his are kept with where and when", False, "flow203"),
-    199: ("F86: the fix-and-review loop runs by itself: a flagged row opens her short session (one at a time, her box, her share, her hours), it improves that row only, the review looks again, a pass gets her mark; a finding only he can answer goes on the sit-down list with one text and stops the loop until the words change; a cut-off round stays flagged and counts; three rounds a row, then the sit-down list", False, "flow199"),
+    199: ("F86: the fix-and-review loop runs by itself: a flagged row opens her short session (one at a time, her box, her share, her hours), it improves that row only, the review looks again, a pass gets her mark; a finding only he can answer goes on the sit-down list with one text and stops the loop until the words change; a cut-off round stays flagged and counts; 20 rounds a row (H318), then the sit-down list", False, "flow199"),
     198: ("F81: Moneypenny decides grounded and brings the rest to a sit-down with him: his why word for word on top of how she works, no line telling her to fill in the nine points alone", False, "flow198"),
     197: ("F59: the server stopped mid-call, for real: the call line's own stop script with a caller on ends the call itself and writes it down as the server's, in the log and the transcript", True, "flow197"),
     196: ("F58: the two computers never write the same file: two private Syncthings and two throwaway HQs, main and backup, both texting, reading the weather and marking the calendar at the same moment: one thread with every line on both, the backup's shown at once and kept while the main is away, no conflict copy, no merge job; two versions of a log of lines merged by the routine itself", False, "flow196"),

@@ -956,7 +956,8 @@ ADD_MOST = 4000  # F86: characters in one addition, about two pages; three round
 REVIEW_READS = 24000
 ROUNDS_DIR = roundlog.folder()
 ROUND_QUIET = 300  # F86: seconds no row may have changed before a round starts, his five minutes
-ROUNDS = 3  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day)
+ROUNDS = 20  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day;
+# H318, 5 November 2026: 20, the same as his now road and her tests, counted per item across nights)
 STOP_WORDS = {"his": "needs him", "cap": f"{ROUNDS} rounds and the review still flags it", "mark": "her mark didn't land",
               "no": "she says no, it's his to decide, and only his words lift it, through review.py clear",
               "broke": "its own row changed during a round, outside its one addition, with no door behind it"}
