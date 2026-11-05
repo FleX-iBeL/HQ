@@ -1005,7 +1005,7 @@ def main(argv):
             label = (args[0] if args else "").strip().upper()
             if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", label):
                 sys.exit("Which roadmap item? Give its number, like H182.")
-            keep = [a for i, a in enumerate(args) if a in ("--now", "--said", "--not-ready") or (i and args[i - 1] == "--said")]  # F100; nowroad: --not-ready
+            keep = [a for i, a in enumerate(args) if a in ("--now", "--said", "--not-ready", "--line") or (i and args[i - 1] == "--said")]  # F100; nowroad: --not-ready; the line
             import qatests as qt_  # F151: tests their review flagged never go to the team, his now neither
             no_ = qt_.flagged_why(label)
             if no_:
@@ -1025,7 +1025,8 @@ def main(argv):
             import estimate as est_
             title = one_line(title).replace("·", "-").rstrip(".")
             cmd = "add"
-            how_ = "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call" if os.environ.get("HQ_WORDS_FROM") else "from the status page"  # nowroad: where it came from
+            how_ = ("by the line" if "--line" in args else "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call"
+                    if os.environ.get("HQ_WORDS_FROM") else "from the status page")  # nowroad: where it came from; the line: its own send
             args = [f"{label} on the HQ roadmap, sent to the team {how_}: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
                     f"write the result in the {label} row.", "--item", label, "--kind", est_.kind_of(line), *keep]
@@ -1034,7 +1035,11 @@ def main(argv):
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
             at_once = "--now" in args  # F100: a build in his day hours, only on his own say-so
             report = "--report" in args  # F145: a report for him, kind research, one file in the workspace
-            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now", "--report")]
+            by_line = "--line" in args  # the line (5 November 2026): the program's own send of a ready row, his build switch its say-so
+            prep = "--prep" in args  # the line: a prep job for Moneypenny, getting one item ready; it builds nothing
+            if (by_line or prep) and os.environ.get("HQ_IN_JOB"):
+                sys.exit("Refused: only the routine's line sends an item or starts a prep job this way, never a job.")
+            words = [a for a in args if a not in ("--past-the-line", "--not-ready", "--now", "--report", "--line", "--prep")]
             item = None  # F103: the item this job is for, as an argument: its id or its label
             for i, a in enumerate(words):
                 if a == "--item" or a.startswith("--item="):
@@ -1078,7 +1083,7 @@ def main(argv):
             if not words or not one_line(" ".join(words)):
                 sys.exit("What should the job do? Give it as one self-contained line.")
             import sprint as sp_  # H272: the open planning rows it names must be marked ready, or his say-so
-            said = sp_.gate(text, one_line(" ".join(words)), say_so, his, now=at_once, build=not report)  # realqa: a report builds nothing
+            said = sp_.gate(text, one_line(" ".join(words)), say_so, his, now=at_once, build=not (report or prep))  # realqa: a report builds nothing; nor a prep job
             now_checked = at_once and say_so and said != one_line(" ".join(words))  # nowroad: the gate read his now, once is enough
             if report:  # F145: where it writes, named in its own text, so done can tell him
                 lab = item if item and re.fullmatch(r"[A-Z]\d+(\.\d+)*", item.strip().upper()) else ""
@@ -1087,6 +1092,11 @@ def main(argv):
             j = {"n": n, "state": "ready", "past": past, "agreed": time.strftime("%Y-%m-%d %H:%M"),
                  "text": one_line(said).replace("·", "-")}
             carry(j, item)
+            if by_line and item:  # the line: by day a build goes on his own build switch; at night on hers too, and the wall lets it
+                b = (sp_.go_of(item) or {}).get("build") or {}
+                if b.get("by") == "him":
+                    j["sayso"] = {"at": b.get("at") or time.strftime("%Y-%m-%d %H:%M"), "who": "his build switch",
+                                  "words": clean_mark(b.get("words") or "")}
             if at_once:
                 j["sayso"] = sayso(n, his, what=j["text"], checked=now_checked)
                 if not j["sayso"]:

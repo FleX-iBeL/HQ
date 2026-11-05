@@ -283,6 +283,105 @@ def set_moscow(label, word):
     return None if t == "off" else t
 
 
+# ---------- the two switches on an item (the line, 5 November 2026) ----------
+
+# His words (laptop chat, 5 November 2026): "it should just be a switch that the whole process goes on. it either gets flipped during
+# her cycle, when she sees there is usage space left and we have some items on the planning" and "another switch that also says it can
+# be built right now (considering the previous flow has accepted it fully and it's on ready status), which she can either also activate
+# in her cycle so then that night things will get built, or during daytime if i tell her to flip it". Prepare: the routine (line.py)
+# carries the item through its review, her tests and their review to ready. Build: once ready, the program sends it to the team itself;
+# by day only when he flipped it in his own words, at night also when she did. Kept in sprint.json under "go", outside the row.
+
+GO_KINDS = ("prep", "build")
+
+
+def go_of(label, d=None):
+    """{"prep": {...} | None, "build": {...} | None} for LABEL: who flipped each on, when, and his words when they were his."""
+    d = _load(RANKS) if d is None else d
+    g = (d.get("go") or {}).get(label.strip().upper()) or {}
+    return {k: g.get(k) for k in GO_KINDS}
+
+
+def go_all(d=None):
+    """{label: go_of} for every row with a switch on."""
+    d = _load(RANKS) if d is None else d
+    return {l: {k: v.get(k) for k in GO_KINDS} for l, v in (d.get("go") or {}).items() if any(v.get(k) for k in GO_KINDS)}
+
+
+def _go_words(words):
+    """His words for a switch, checked as his own line of today, here (or, on the main, as the backup checked them at its door).
+    Returns (record, why_not)."""
+    import role
+    h = role.handed_words()
+    if h:
+        role.note_handed("go", h)
+        return {"words": h.get("said") or h.get("line") or words, "where": h.get("where") or f"checked on {h.get('by')}", "checked_by": h.get("by")}, ""
+    hits = his_said_now(words, places=words_from_env())
+    if not hits:
+        return None, "those aren't his words from this call or this chat, today"
+    return {"words": words, "where": hits[-1].get("where", "")}, ""
+
+
+def set_go(label, which, on, by="him", words=None):
+    """Switch prep, build or both on or off for LABEL. On needs his words of today (--said) or, for Moneypenny's own cycle, by="moneypenny".
+    Returns the switches as they are now. Exits with why."""
+    label = label.strip().upper()
+    kinds = GO_KINDS if which == "both" else (which,)
+    if any(k not in GO_KINDS for k in kinds):
+        sys.exit("go LABEL prep|build|both on|off [--said \"HIS WORDS\" | --by moneypenny]")
+    if on and label not in {r["label"] for r in open_rows()}:
+        sys.exit(f"{label} isn't an open row on the planning (done, parked, repeating or not there), so it gets no switch.")
+    rec = None
+    if on:
+        if by == "moneypenny":  # her own pick: a build she switched on goes only at night (line.py)
+            rec = {"by": "moneypenny"}
+        else:
+            if not words:
+                sys.exit("A switch goes on with his own words of today: --said \"HIS WORDS\" (or --by moneypenny from her own cycle).")
+            r, why = _go_words(words)
+            if not r:
+                sys.exit(f"Refused: {why}. Nothing switched.")
+            rec = {"by": "him", **r}
+        rec["at"] = time.strftime("%Y-%m-%d %H:%M")
+    d = _load(RANKS)
+    g = d.setdefault("go", {})
+    e = g.setdefault(label, {})
+    for k in kinds:
+        e[k] = rec if on else None
+    if not any(e.get(k) for k in GO_KINDS):
+        g.pop(label, None)
+    d["set"] = int(time.time())
+    _save(RANKS, d)
+    return go_of(label, d)
+
+
+def go_clear_closed(rows=None):
+    """A row that's done, parked or gone loses its switches (the line is through with it)."""
+    rows = open_rows() if rows is None else rows
+    have = {r["label"] for r in rows}
+    d = _load(RANKS)
+    g = d.get("go") or {}
+    gone = [l for l in g if l not in have]
+    if gone:
+        for l in gone:
+            g.pop(l, None)
+        d["go"] = g
+        _save(RANKS, d)
+    return gone
+
+
+def go_words(label, g=None):
+    """The switches in a few plain words: "prepare on (his words, 5 Nov 20:10), build off"."""
+    g = go_of(label) if g is None else g
+    def one(k, v):
+        name = {"prep": "prepare", "build": "build"}[k]
+        if not v:
+            return f"{name} off"
+        who = "his words" if v.get("by") == "him" else "Moneypenny"
+        return f"{name} on ({who}, {v.get('at', '')})"
+    return ", ".join(one(k, g.get(k)) for k in GO_KINDS)
+
+
 # ---------- the Ready mark (H272) ----------
 
 # H272 (25 October 2026, call at 12:36), in the user's words: "Btw can items pass through if they are not checked? How do
@@ -1838,6 +1937,17 @@ def main(argv):
         import role
         if not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
             sys.exit(role.forward("sprint", list(argv)))
+    if cmd == "go":  # the line: on the backup his words are checked here, at its own door, then the switch goes to the main with them
+        import role
+        if not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
+            said = argv[argv.index("--said") + 1] if "--said" in argv and argv.index("--said") + 1 < len(argv) else None
+            env = None
+            if said:
+                hits = his_said_now(said, places=words_from_env())
+                if not hits:
+                    sys.exit("Refused: those aren't his words from this call or this chat, today. Nothing switched.")
+                env = role.checked_env(said, hits)
+            sys.exit(role.forward("sprint", list(argv), env))
     if cmd == "list":
         print(words(plan()))
     elif cmd == "json":
@@ -1865,6 +1975,24 @@ def main(argv):
             set_ready(argv[1], on)
         label = argv[1].strip().upper()
         print(f"{label} is marked ready for the sprint." if on else f"{label} has no Ready mark now.")
+    elif cmd == "go":
+        if len(argv) < 2:
+            sys.exit("go LABEL [prep|build|both on|off] [--said \"HIS WORDS\" | --by moneypenny]")
+        label = argv[1].strip().upper()
+        rest = [a for a in argv[2:]]
+        said = by = None
+        if "--said" in rest:
+            i = rest.index("--said"); said = rest[i + 1] if i + 1 < len(rest) else ""; rest = rest[:i] + rest[i + 2:]
+        if "--by" in rest:
+            i = rest.index("--by"); by = rest[i + 1] if i + 1 < len(rest) else ""; rest = rest[:i] + rest[i + 2:]
+        if not rest:
+            print(f"{label}: {go_words(label)}.")
+            return
+        which = rest[0] if rest[0] in ("prep", "build", "both") else "both"
+        onw = rest[-1] if rest[-1] in ("on", "off") else "on"
+        with q.locked():
+            g = set_go(label, which, onw == "on", by=(by or "him"), words=said)
+        print(f"{label}: {go_words(label, g)}.")
     elif cmd == "check":  # H272: why a row isn't ready, for a call or the page; H298: and the fields
         rows = {r["label"]: r for r in open_rows()}
         for l in [a.strip().upper() for a in argv[1:]]:

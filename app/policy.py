@@ -979,9 +979,9 @@ class Policy:
         if prog in ("python3", "python") and args and self.hq_script(args[0], "sprint.py"):
             sub = args[1] if len(args) > 1 else "list"
             if sub in ("list", "json", "rank", "lay", "plan", "moscow", "ready", "check",  # H271: moscow; H272: ready, check
-                       "show", "open", "fields"):  # Fable clean-up: one row, and the open items only (H288); H298: the fields
+                       "show", "open", "fields", "go"):  # Fable clean-up: one row, and the open items only (H288); H298: the fields; the line: his switches
                 return Decision(ALLOW, "the planning's ranks and estimates, and the sprint")
-            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, fields, lay, "
+            return Decision(DENY, "from a call, the sprint script takes list, json, rank, moscow, ready, check, fields, go, lay, "
                                   "plan, show or open")
         # F77: the automatic review of the planning's rows: read it, and take a flag off on his say-so (sprint.json only).
         if prog in ("python3", "python") and args and self.hq_script(args[0], "review.py"):

@@ -40,8 +40,8 @@
       "session": {"at": "21:00", "every": "thursday", "minutes": 40, "turns": 120, "useful_until": "friday 12:30"},
       "step": {"minutes": 5, "turns": 20, "most_a_day": 3},
       "looks": [
-        {"name": "morning look", "at": "09:00", "every": "day", "minutes": 5, "turns": 20,
-         "what": "What did the night do: a job paused, held, failed QA, or past its range? Read the team's open jobs and the newest finished ones (jobs.py list), the QA marks and the night's log line. Act inside your limits (resume a held job, queue QA, stop a job that's looping); write what you did in your ledger. Text your line only when the user is needed, in the batch unless it's a tripwire."}
+        {"name": "evening look", "at": "21:30", "every": "day", "minutes": 8, "turns": 30,
+         "what": "Set up the night for the team. First what the day did: a job paused, held, failed QA, or past its range (jobs.py list, the QA marks); act inside your limits and write it in your ledger. Then the planning (sprint.py list): when the usage leaves room (usageline.py), switch prepare on as yourself for the next ranked rows (sprint.py go LABEL prep on --by moneypenny), and build on for rows that are ready (go LABEL build on --by moneypenny), so the line prepares and builds them tonight. Never send a row yourself. Text your line only when the user is needed, in the batch unless it's a tripwire."}
       ]
     }
   },

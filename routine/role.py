@@ -75,7 +75,7 @@ PY = sys.executable or "/usr/bin/python3"
 # What a call may ask of the queue and the schedule, and so what the backup hands to the main.
 # H203 (17 October 2026): also the to-do list (todo.py), the agent's reminders and notes (pings.py), and a call's or
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
-WRITES = {"sprint": {"rank", "plan", "moscow", "ready"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
+WRITES = {"sprint": {"rank", "plan", "moscow", "ready", "go"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
           "jobs": {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume", "done"},  # F57: done only with --at is ever forwarded
           "schedule": {"add", "cancel", "move", "priority", "every"},
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},

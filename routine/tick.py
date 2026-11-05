@@ -1815,6 +1815,13 @@ def tick():
     # F77: a fresh reviewer for every row whose ask is new or changed, once it's been quiet a few minutes (main only).
     import review
     guarded("review", lambda: review.tick(log=log), every=review.LINE_EVERY)
+    # The line (5 November 2026): every item with a switch on is carried to its next step from the record (main only).
+    def _line():
+        import line as line_
+        for l in line_.tick():
+            log(f"line: {l}")
+        routines.good("line", "Carries the items with a switch on")
+    guarded("line", _line)
     try:  # F107: the plan in use: set once, and following what Claude Code reports
         import usagecost
         usagecost.plan_minute(log=log)

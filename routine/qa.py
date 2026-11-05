@@ -797,6 +797,18 @@ def ship_whole(label: str, row: str) -> list[str]:
 def prompt_extra(text: str) -> str:
     """The QA job's first prompt gets Moneypenny's character and craft (F56). A build of a piece of a feature gets
     the in-pieces rule (F56, piece 2)."""
+    if (text or "").startswith("Prep of "):  # the line (5 November 2026): a prep job runs as Moneypenny too
+        try:
+            from pathlib import Path
+            sys.path.insert(0, os.path.join(ROOT, "app"))
+            import agents
+            a = agents.find(Path(hqpaths.FOLDER), "moneypenny")
+            body = f"Your character: {a['personality']}\nHow you work:\n{a.get('craft', '')}\n"
+        except Exception as e:
+            body = f"(Her character couldn't be loaded here: {e!r}.)\n"
+        return ("\n\nThis is a prep job of the line. You are Moneypenny, head of development, getting one item ready for the team, "
+                "on his switch or your own. The program sends it to the team once it's ready and its build switch is on; you do the "
+                "work, never the send. Every step's result is read from the record, never from what you say.\n" + body)
     if not is_qa(text):
         m = re.search(r"\bpiece (\d+) of (\d+)\b", text or "", re.I)
         if not m or int(m.group(2)) < 2 or not job_label(text):

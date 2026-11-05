@@ -16252,6 +16252,121 @@ print("OK")
         need(real == "True", "a test wrote the real ledger")
         return "the row's words stand once, reword stays in the ask, 004 and its undo; add from a text; the re-review settles; his now never sends it flagged (F151), and once it passes his now of today starts it; no test line on his ledger"
 
+    async def flow486(self) -> str:
+        """The line (5 November 2026), no Claude: his two switches on an item, and the routine carries it from the record, nobody poking.
+        On a throwaway planning: a switch goes on only with his own line of today (an old one and none are refused) or as Moneypenny's own pick;
+        with prepare on and the review flagging the row, the line starts one prep job for her (a second minute starts no second one); the row
+        settled and reviewed, the line sets the Ready mark itself, then sends the row to the team itself: by day on his build switch, with his
+        switch as the say-so on the job; on her own build switch it holds by day and goes at night. The same step three times without the record
+        moving leaves the item (no fourth prep job). His pause of the team holds the line. A row no longer open loses its switches."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        ws, env, d = self._wall_env("line", hour=14)
+        env.update({"HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_DIRECT_AGENT": "", "HQ_LINE_STATE": str(d / "line.json")})
+        env.pop("HQ_DIRECT_AGENT", None)
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        th = ws / "HQ/team-line"
+        th.mkdir(parents=True, exist_ok=True)
+        go_words = "Yes, flip it on and let it go all the way, build it today."
+        said_at = time.time()
+        (th / "thread.jsonl").write_text(json.dumps({"at": time.time() - 3 * 86400, "from": "me", "text": "Flip it on and build it please, all of it."}) + "\n"
+                                         + json.dumps({"at": said_at, "from": "me", "text": go_words}) + "\n")
+        env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+        rm = ws / "HQ/roadmap.md"
+        fields = f'His words: "{go_words}" Sources: his text on the team line, {time.strftime("%-d %B %Y %H:%M", time.localtime(said_at))}.'
+
+        def script(name, *a, **k):
+            return _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env={**env, **k}, cwd=str(ws))
+
+        def py(code, **k):
+            r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, %r)\n" % str(ROOT / "routine") + code], capture_output=True,
+                        text=True, env={**env, **k}, cwd=str(ws))
+            need(r.returncode == 0, f"{code[:80]}: {r.stderr[-1200:]}")
+            return r.stdout.strip()
+
+        def line_tick(**k):
+            return py("import line\nprint(json.dumps(line.tick()))", **k)
+
+        def queue():
+            return rm.read_text().split("## The queue", 1)[1].split("\n## ", 1)[0]
+
+        # an item, flagged by the review (the stand-in flags HOLE)
+        r = jobs("write-row", "The made-up card says Nothing planned yet. What's wrong: it says Nothing planned. What right looks like: Nothing planned yet. "
+                              "How to check: the empty card. HOLE: which card.", "--bug")
+        need(r.returncode == 0, r.stderr)
+        label = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+        # 1. the switches: his words of today, never an old line or none; her own pick as herself
+        r = script("sprint.py", "go", label, "both", "on")
+        need(r.returncode != 0 and "his own words" in (r.stdout + r.stderr), f"a switch without his words: {r.stdout} {r.stderr}")
+        r = script("sprint.py", "go", label, "both", "on", "--said", "Flip it on and build it please, all of it.")
+        need(r.returncode != 0 and "today" in (r.stdout + r.stderr), f"an old line of his flipped it: {r.stdout} {r.stderr}")
+        r = script("sprint.py", "go", label, "both", "on", "--said", go_words)
+        need(r.returncode == 0 and "prepare on (his words" in r.stdout and "build on (his words" in r.stdout, f"his switch: {r.stdout} {r.stderr}")
+        # 2. prepare on, the review flagged it: one prep job for her, and only one
+        got = json.loads(line_tick())
+        need(any("a prep job for Moneypenny" in x for x in got), f"no prep job: {got}")
+        q = queue()
+        need(q.count(f"Prep of {label} (the line)") == 1 and "which card" in q.split(f"Prep of {label}", 1)[1][:2000] and "Never send it to the team" in q,
+             f"the prep job: {q[-1500:]}")
+        n = int(re.search(rf"Job (\d+) · ready · [^\n]*Prep of {label}", q).group(1))
+        need(not any("prep job" in x for x in json.loads(line_tick())), "a second minute started a second prep job")
+        # 3. her work done: the row settled and reviewed, her prep job ends; the line marks it ready, then sends it itself
+        line = next(l for l in rm.read_text().split("\n") if f"| {label} " in l)
+        rm.write_text(rm.read_text().replace(line, line.replace("HOLE: which card.", "The card is the planning's empty card."), 1))
+        r = script("review.py", "add", label, fields, HQ_SAYSO_FAKE="yes")
+        need(r.returncode == 0, f"her fields: {r.stdout} {r.stderr}")
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+        r = jobs("done", str(n))
+        need(r.returncode == 0, f"her prep job's done mark: {r.stdout} {r.stderr}")
+        steps = []
+        before = py("import line, sprint\nprint(line.show([%r]))\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % (label, label))
+        for _ in range(3):
+            steps += json.loads(line_tick())
+        need(any("marked ready by the line" in x for x in steps) and any("sent to the team by the line" in x for x in steps),
+             f"before: {before}; the line's steps: {steps}; it sees: {py('import line' + chr(10) + 'print(line.show([%r]))' % label)}")
+        q = queue()
+        m = re.search(rf"^- Job (\d+) · ready · [^\n]*{label} on the HQ roadmap, sent to the team by the line[^\n]*", q, re.M)
+        need(m and "his build switch" in m.group(0), f"the team's job by the line, with his switch as its say-so: {q[-1500:]}")
+        # 4. her own build switch: by day it holds, at night it goes
+        r = jobs("write-row", "The weather tile shows Celsius twice. What's wrong: the unit repeats. What right looks like: one unit. How to check: the tile.", "--bug")
+        two = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        need(script("review.py", "add", two, fields, HQ_SAYSO_FAKE="yes").returncode == 0, "the second row's fields")
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % two)
+        need(script("sprint.py", "ready", two, "on").returncode == 0, "the second row's mark")
+        r = script("sprint.py", "go", two, "build", "on", "--by", "moneypenny")
+        need(r.returncode == 0 and "build on (Moneypenny" in r.stdout, f"her own pick: {r.stdout} {r.stderr}")
+        shown = py("import line\nprint(line.show([%r]))" % two)
+        need("hold" in shown and "at night" in shown, f"her build switch by day: {shown}")
+        got = json.loads(line_tick(HQ_WALL_HOUR="23"))
+        need(any(f"{two}: sent to the team by the line" in x for x in got), f"her build switch at night: {got}")
+        # 5. the same step three times without the record moving: the line leaves it
+        r = jobs("write-row", "The calendar chip is grey on mondays. HOLE: which chip.", "--bug")
+        three = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % three)
+        need(script("sprint.py", "go", three, "prep", "on", "--said", go_words).returncode == 0, "the third row's switch")
+        made = 0
+        for _ in range(5):
+            got = json.loads(line_tick())
+            if any(f"{three}: a prep job" in x for x in got):
+                made += 1
+                k = int(re.search(rf"Job (\d+) · ready · [^\n]*Prep of {three}", queue()).group(1))
+                need(jobs("done", str(k)).returncode == 0, "a prep job's done mark")
+        need(made == 3, f"{made} prep jobs on the same step, not 3")
+        st = json.loads((d / "line.json").read_text())
+        need(st[three].get("told") is True, f"the stuck item isn't marked as told: {st[three]}")
+        # 6. his pause holds the line; a row no longer open loses its switches
+        need(jobs("off").returncode == 0, "the pause")
+        need(json.loads(line_tick()) == [], "the line ran while the team was paused")
+        need(jobs("on").returncode == 0, "back on")
+        line = next(l for l in rm.read_text().split("\n") if f"| {three} " in l)
+        rm.write_text(rm.read_text().replace(line, line.replace("| ⬜ |", "| ✅ |", 1), 1))
+        line_tick()
+        g = json.loads(py("import sprint\nprint(json.dumps(sprint.go_all()))"))
+        need(three not in g, f"a done row kept its switches: {g}")
+        return f"the line: his switch, one prep job, marked and sent by the program, her build at night, stuck after {made}, paused, cleared"
+
     async def flow485(self) -> str:
         """F147, no Claude: she answers from the item's record, not from memory. On a throwaway HQ a made-up item has two
         review rounds (flagged, then passed) and no ready mark; her real reply runs with a stand-in model that writes
@@ -39141,6 +39256,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    486: ("the line: his two switches on an item (prepare, build); the routine carries it from the record: one prep job for Moneypenny, the Ready mark and the send by the program, his switch the say-so by day, hers at night, stuck after three tries, held by his pause, cleared when the row closes", False, "flow486"),
     485: ("F147: she answers from the item's record, not from memory: a planted wrong count and a wrong ready state in her reply are held back, rewritten once from the record, else the record's own words go out, one text, each miss on the mistakes ledger as from-memory naming the item; a right draft untouched", False, "flow485"),
     484: ("F151: a fix QA finds goes the road of a new item: no job by itself, the finding an open point in the row, her new test failing on the build and sealed, its own review and the item's again (round 1 of 20 each), then send-row; QA's pass needs the new test and the 17, and closes the row it replaces", False, "flow484"),
     483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set; the reserve behind the page and under the stop lines the same sum", False, "flow483"),

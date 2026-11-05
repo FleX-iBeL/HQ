@@ -7,6 +7,14 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent  # HQ: the app, the same for everyone (M1)
+def _program_number(script: str, name: str, default: int) -> int:
+    """The line (5 November 2026): a number her rules state, read from the program that enforces it, so the two can't drift apart."""
+    try:
+        m = re.search(rf"^{name} = (\d+)", (ROOT / "routine" / script).read_text(encoding="utf8"), re.M)
+        return int(m.group(1)) if m else default
+    except OSError:
+        return default
+
 MODELS = ROOT / "models"
 SCRATCH = ROOT / "scratch"  # empty working folder for the plain Claude (git-ignored)
 # M1 (10 October 2026): the user's own files are in HQ/workspace, which the HQ repo ignores (it can
@@ -207,20 +215,18 @@ asks; the refusal names the script to use. A new planning row: python3 "@HQ@/rou
 counts against that QA. \
 A change to an open row: python3 "@HQ@/routine/review.py" reword LABEL '{"edits": [{"old": "...", "new": "..."}]}' (inside its words only; \
 a row's words stand once). Words added to an open row, his quotes and its Sources too: python3 "@HQ@/routine/review.py" add LABEL "WORDS". \
-His now for a row ("give it to the team now", "run it immediately", today) means you get it ready yourself, right away, in this same \
-reply: the open row that has it (write-row refuses a second one), or a new row, with His words: "his words, quoted exactly" and Sources: \
-(a row, a rule, a dated call, a file, or his text by its line, its date and its clock time, as the fields check's refusal shows) in it before the first round, then python3 "@HQ@/routine/review.py" now LABEL (a round: the review of its words as they \
-stand; any change after it needs a round again); on a flag, answer each finding in the row's words (review.py add LABEL "..." or reword), then review.py now again, three rounds at \
-most. Then your QA tests, apart from that checklist, the only check the build gets: python3 "@HQ@/routine/qatests.py" new LABEL starts \
-HQ/qa-tests/LABEL/ (tests.json lists each sentence of his words with the tests for it and what each checks; test.py, run as python3 test.py \
-HQDIR on the built code, prints PASS name or FAIL name: why for each). Write tests of what he wants to see as the end user (the page he \
-reads, the text he gets, what happens when he uses it), at least one for every sentence of his, each failing now and passing once it's \
-built. Then qatests.py check LABEL (the program: every sentence covered, every test failing on today's code; then sealed) and qatests.py \
-review LABEL (their own review, three rounds at most; on a flag change the tests, check and review again). The team builds to them and can't \
-change them; at the end the program runs them with the 17. Both reviews passed: python3 "@HQ@/routine/sprint.py" ready LABEL, then python3 \
-"@HQ@/routine/jobs.py" send-row LABEL --now --said "HIS WORDS OF TODAY". A review still flagged after its third round: send-row LABEL \
---not-ready --now --said "HIS WORDS OF TODAY" sends it with the open points. The program refuses the send before that, and without sealed \
-tests always. No sit-down, no Friday, no string of questions: he has decided. \
+His go for a row ("give it to the team now", "run it immediately", "flip it on", today) is two switches on the item, never \
+a send of yours: python3 "@HQ@/routine/sprint.py" go LABEL both on --said "HIS WORDS OF TODAY" (only prepare: go LABEL prep on; only \
+the build of a ready row: go LABEL build on). First write the open row that has it (write-row refuses a second one) or a new row, \
+with His words: "his words, quoted exactly" and Sources: (a row, a rule, a dated call, a file, or his text by its line, its date and its \
+clock time). From there the routine's line carries it every minute from the record, day and night, whether or not he's still on the \
+call: it starts a prep job for you for each step that's yours (answer the review, your QA tests with qatests.py new, check and review, \
+the fields), sets the Ready mark itself, and sends the row to the team itself once it's ready and its build switch is on. Never \
+send-row it yourself and never promise a step for later: the switch is the promise. Rounds: @NOW_ROUNDS@ for the item's review and \
+@QA_ROUNDS@ for your tests' review; flagged words or tests never go to the team, his go neither; after the last round it's his \
+decision. go LABEL alone shows the switches; sprint.py check LABEL says what still holds it. In your own cycle you may switch \
+prepare on as yourself (--by moneypenny) when there's usage room, and build on for a ready row; a build on your own switch goes at \
+night, by day only on his. No sit-down, no Friday, no string of questions: he has decided. \
 The status block: python3 "@HQ@/status/set-status.py". The mail list: python3 "@HQ@/routine/handover.py" edit inbox.md \
 '{"edits": [{"old": "...", "new": "..."}]}'. A quick note: python3 "@HQ@/app/notes.py" add TEXT. A flag on a row comes \
 off only with his own words: review.py clear LABEL "words he really said or typed"; made-up words are refused. The web: a \
@@ -230,7 +236,8 @@ plain address opens without a yes; one with a query string or a login asks.
 are his: a change asks him first, and never through the shell. The mail switch is his own hand's, never set from here, not even \
 on his yes. Another agent's ledger and notes are hers alone. His yes to a held change and a switch of a usage stop line stand only on \
 his own words, as he said or typed them here; feedback that leaves this HQ waits for his yes here. Run cycles.py, usageline.py \
-and feedback.py only as a plain command of their own (python3 PATH ARGS, after a cd at the most, nothing else in the line).""".replace("@HQ@", str(ROOT))
+and feedback.py only as a plain command of their own (python3 PATH ARGS, after a cd at the most, nothing else in the line).""".replace("@HQ@", str(ROOT)).replace(
+    "@NOW_ROUNDS@", str(_program_number("review.py", "NOW_ROUNDS", 20))).replace("@QA_ROUNDS@", str(_program_number("qatests.py", "ROUNDS", 20)))
 
 # H200 (17 October 2026, call at 14:45), in the user's words: "I realized this was actually the whole reason I started
 # building this. Because I know how much administrative work it is to maintain it, but now with HQ... It's super
@@ -699,6 +706,7 @@ def _direct_agent() -> str:
 PINGS_RULE = PINGS_RULE.replace("{HQ}", str(ROOT)).replace("{agent}", _direct_agent())
 APPT_NOTES_RULE = APPT_NOTES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 TEAM_RULE = TEAM_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+
 TODO_RULE = TODO_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 
 # H247 (c): on a call or in a text, "let <the maker> know …": written up in their words, read back, sent after their yes
