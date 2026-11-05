@@ -282,7 +282,7 @@ def misses(draft: str, ctx: dict, words: str = "") -> list[dict]:
         n = len(rec["rounds"])
         if counts and counts != {n}:
             out.append({"sentence": s, "label": lab, "what": "count", "truth": rounds_words(rec)})
-        elif ready is not None and ready != rec["ready"] and not rec.get("changed"):
+        elif ready is not None and ready != rec["ready"]:
             out.append({"sentence": s, "label": lab, "what": "state", "truth": ready_words(rec)})
     return out
 
