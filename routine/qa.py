@@ -15,8 +15,10 @@ How it goes:
   Moneypenny: the routine puts her character and craft in its first prompt (prompt_extra).
 - The QA job ends with qa.py pass LABEL "WHAT WAS TRIED" or qa.py fail LABEL "WHAT'S OFF". Each writes a mark in the
   row: "QA passed (job N, 26 October 2026 17:40): ..." or "QA failed (job N, ...): ...". The newest mark counts.
-- A fail queues a fix job (a small build) that reads the row and its QA failed line; when that's done, QA again. After
-  MAX_FAILS failed QAs in a row no fix job is queued by itself: it waits for a call, and the morning text says so.
+- F151 (5 November 2026): a fail queues nothing. The finding goes back into the row as an open point, and the fix goes the road of a
+  new item (qatests.py): a new test of hers for it that fails on the build, sealed, its own review, the item reviewed again against
+  his words and the whole picture, each 20 rounds at most and fresh per QA failure; only then send-row. A pass on that road needs her
+  tests, new and earlier, and the 17 happy flows; it closes the rows that say they're replaced by this one.
 - The release (release.py) walks dev's commits since main, oldest first; each names its rows at the start of its
   subject ("H283: ..."). A commit for a row in Phase F or H without "QA passed" stops the walk: main gets the work
   before it, the rest stays on dev and nightly, and the morning text names what was held and why (hold()). F112: a merge
@@ -34,7 +36,7 @@ with an example missing its ran or got, is refused and nothing is written. The m
 usage:
   python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G [--example ... ] [--job N]
                                                                 QA passed, in the row, each example with its evidence
-  python3 routine/qa.py fail LABEL "WHAT'S OFF" [--job N]       QA failed, in the row; a fix job for the team
+  python3 routine/qa.py fail LABEL "WHAT'S OFF" [--job N]       QA failed, in the row; the finding an open point, the fix on its road
   python3 routine/qa.py state LABEL                             passed, failed or none, with the newest mark
   python3 routine/qa.py queue LABEL                             a QA job for the row now (a call, or by hand)
   python3 routine/qa.py hold                                    what the release would take and what it would hold
@@ -222,7 +224,7 @@ def qa_text(label: str, after: str) -> str:
             "reading the team's notes or the code is not running it, and the flows alone don't stand in for the "
             "examples), plus --compared \"what you compared on real data, how many of how many\" (F101: a pass also needs "
             f"the green run routine/proof.py keeps for this row), or python3 routine/qa.py fail {label} "
-            "\"what's off, plainly\" --job N (a fail queues a fix job by itself). No helpers fanned out (F55). Nothing to push "
+            "\"what's off, plainly\" --job N (a fail queues no fix: the finding goes back into the row, and the fix goes the road of a new item, F151). No helpers fanned out (F55). Nothing to push "
             "unless a test was fixed; the call line isn't restarted. " + DONE_LAST)
 
 
@@ -345,29 +347,116 @@ def bug_after_qa(label: str, what: str, found_in: str = "", text: str | None = N
     return None
 
 
-def fail(label: str, what: str, job: int | None = None) -> str:
-    item = item_id(label)
-    bug_after_qa(label, what)  # a pass that didn't hold: against that QA; nothing when the row had no pass
-    row = mark(label, False, what, job)
-    import mistakes, trail
-    mistakes.add("qa-fail", "team", what, where=f"QA job {job}" if job else "QA by hand", label=label, item=item or "")
-    trail.step(item, "qa", state="failed", job=job, words=what[:300])
-    name = title_of(label)
-    if fails_in_a_row(row) >= MAX_FAILS:
-        tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt didn't pass {MAX_FAILS} times in a row, so no fix "
-                          "goes to the team by itself: it waits for him, on a call or here.", item)
-        return (f"QA failed for {label}, {MAX_FAILS} times in a row now: no fix job by itself; it waits for a call, "
-                "and the release holds it.")
-    tell("qa-failed", f"What: {name}\nWhat's off: {what}\nIt went back to the team for a fix; your check follows by itself.", item)
+def open_point(label: str, what: str, now: dt.datetime | None = None) -> None:
+    """F151: the QA finding back into the row as an open point, at the end of its ask (before the team's notes), so the item review sees it."""
+    words = "Open point from QA (" + _when(now) + "): " + re.sub(r"(?<!\\)\|", r"\\|", " ".join(what.split()).rstrip(".")) + "."
+    import sprint
     with q.locked():
         text, jobs, on = q.read()
-        w = _waiting_for(jobs, label, qa=False)
-        if w and w["text"].startswith("Fix for "):
-            return f"QA failed for {label}; a fix job is already waiting: job {w['n']}."
-        j = _append(jobs, fix_text(label, " ".join(what.split()).rstrip("."), job), label)
-        q.write(text, jobs, on)
-    _estimate(j, "build")
-    return f"QA failed for {label}; job {j['n']} is the fix, and QA follows by itself."
+        r = rows(text).get(label)
+        if not r:
+            return
+        cs = hqpaths.cells(r[0])
+        if len(cs) < 3:
+            return
+        at = sprint.team_note_at(cs[2])
+        ask, notes = (cs[2], "") if at is None else (cs[2][:at], cs[2][at:])
+        cs[2] = (ask.rstrip() + " " + words + (" " + notes if notes else "")).strip()
+        new = hqpaths.join_cells(cs)
+        if len(hqpaths.cells(new)) != len(hqpaths.cells(r[0])):
+            return
+        q.write(text.replace(r[0], new, 1), jobs, on)
+
+
+def fail(label: str, what: str, job: int | None = None) -> str:
+    """F151: a failed QA queues no fix by itself. The finding goes back into the row as an open point and opens its fix road (qatests.py):
+    her new test for it first, failing on the build and sealed, its own review, the item reviewed again, and only then send-row."""
+    what = " ".join((what or "").split())
+    item = item_id(label)
+    name = title_of(label)
+    if not what.strip(" ."):  # no usable finding: held the same way, and his to see
+        tell("qa-failed", f"What: {name}\nQA failed it without saying what's off, so there's nothing to fix yet. Nothing went to the team; "
+                          "it's an open point for you.", item)
+        return (f"Refused: QA failed for {label} without a finding, so there's nothing to fix: held, nothing goes to the team, and it goes to "
+                "him as an open point on Moneypenny's line. Say in a line what's off.")
+    bug_after_qa(label, what)  # a pass that didn't hold: against that QA; nothing when the row had no pass
+    row = mark(label, False, what, job)
+    import mistakes, qatests, trail
+    mistakes.add("qa-fail", "team", what, where=f"QA job {job}" if job else "QA by hand", label=label, item=item or "")
+    trail.step(item, "qa", state="failed", job=job, words=what[:300])
+    open_point(label, what)
+    road = qatests.qa_failed(label, what.rstrip("."), job)
+    n = fails_in_a_row(row)
+    tell("qa-failed", f"What: {name}\nWhat's off: {what}\nNo fix went to the team by itself: the finding is back in the item as an open "
+                      "point, and the fix goes the road of a new item (a new test of hers that fails on the build, its own review, the item "
+                      "reviewed again)." + (f" It failed {n} times in a row." if n >= MAX_FAILS else ""), item)
+    return (f"QA failed for {label} (road {road['n']}): the finding is back in its row as an open point, and the fix is held, not sent: it "
+            f"waits for a new test of hers that fails on the build as it stands (qatests.py check {label}), that test's own review "
+            f"(qatests.py review {label}, round 1 of {qatests.ROUNDS}), and the item reviewed again against his words and the whole picture "
+            f"(review.py now {label}, round 1 of {qatests.ROUNDS}). Only then does send-row {label} go.")
+
+
+def replaced_rows(label: str, text: str) -> list[str]:
+    """F151: the rows that say they're replaced by this one ("Replaced by F151", at the start of a cell or a sentence), not closed yet."""
+    out = []
+    for lab, (line, _) in rows(text).items():
+        cs = hqpaths.cells(line)
+        if lab != label and cs and cs[0] not in ("✅",) and re.search(rf"(?:\|\s*|\.\s+)Replaced by {re.escape(label)}\b", line):
+            out.append(lab)
+    return out
+
+
+def close_replaced(label: str, now: dt.datetime | None = None) -> list[str]:
+    """F151, his words: "nope make a new item, and throw away the old one once this one passes": once this row's QA passed, each row it
+    replaces is closed, with a note that says so."""
+    done = []
+    with q.locked():
+        text, jobs, on = q.read()
+        for lab in replaced_rows(label, text):
+            line = rows(text)[lab][0]
+            cs = hqpaths.cells(line)
+            cs[0] = "✅"
+            at = len(cs) - 2 if len(cs) >= 6 else len(cs) - 1
+            cs[at] = (cs[at].strip() + f" Closed as replaced by {label} ({_when(now)}): {label}'s QA passed.").strip()
+            new = hqpaths.join_cells(cs)
+            if len(hqpaths.cells(new)) == len(cs):
+                text = text.replace(line, new, 1)
+                done.append(lab)
+        if done:
+            q.write(text, jobs, on)
+    return done
+
+
+def fix_refuses(label: str) -> str | None:
+    """F151: a fix on its road passes QA only when her tests pass on the build, the new one and the earlier ones, and the 17 happy flows."""
+    import qatests
+    if not qatests.fix_road(label):
+        return None
+    no = []
+    d = qatests.folder(label)
+    if qatests.fingerprint_of(d):
+        import proof
+        wt = proof._copy(qatests._head())
+        try:
+            got, out = qatests.run_on(d, wt)
+        finally:
+            proof._uncopy(wt)
+        failing = [n for n, ok in got.items() if not ok]
+        if failing:
+            no.append(f"her QA tests {', '.join(failing)} fail on the build")
+        elif not got:
+            no.append(f"her QA tests didn't run: {out[-200:]}")
+    else:
+        no.append(f"{label} has no QA tests of hers to run")
+    if hqpaths.under_test() and os.environ.get("HQ_HAPPY_FAKE_FAIL"):  # a test's stand-in for a red run of the 17
+        no.append("the 17 happy flows didn't all pass for it")
+    else:
+        import proof
+        if proof.gate_on():
+            rec = proof.latest(label) or {}
+            if not rec.get("green"):
+                no.append("the 17 happy flows have no green run for it (routine/proof.py)")
+    return ("the fix QA failed doesn't pass yet: " + "; ".join(no) + ".") if no else None
 
 
 # The release gate.
@@ -814,7 +903,7 @@ def main(argv: list[str]) -> int:
         if held:
             print(f"Refused: the pass says \"{held.group(0)}\": that holds QA until it's run for real (H313). Run it, or fail it. Nothing written.")
             return 2
-        no = proof_refuses(label, compared)
+        no = fix_refuses(label) or proof_refuses(label, compared)
         if no:
             print(f"Refused: {no} Nothing written.")
             return 2
@@ -822,7 +911,11 @@ def main(argv: list[str]) -> int:
         row = mark(label, True, " ".join(args[1:]), job)
         import trail
         trail.step(item_id(label), "qa", state="passed", job=job)
+        import qatests
+        qatests.qa_passed(label)
         print(f"QA passed for {label}, in its row; the release may take it.")
+        for lab in close_replaced(label):
+            print(f"{lab} is closed as replaced by {label}.")
         for said in ship_whole(label, row):
             print(said)
         return 0

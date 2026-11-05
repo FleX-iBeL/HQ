@@ -152,7 +152,12 @@ def show_words(labels, text=None):
         if r is None:
             out.append(f"{label.strip().upper()} isn't a row on the planning.")
             continue
-        s = f"{r['label']} ({STATES.get(r['state'], r['state'] or 'no mark')}; {r['phase']}): {r['title']}"
+        gone = re.search(r"Closed as replaced by ([A-Z]\d+(?:\.\d+)*)", r["line"])  # F151
+        word = f"closed, replaced by {gone.group(1)}" if gone else STATES.get(r['state'], r['state'] or 'no mark')
+        s = f"{r['label']} ({word}; {r['phase']}): {r['title']}"
+        by = None if gone else re.search(r"(?:\|\s*|\.\s+)Replaced by ([A-Z]\d+(?:\.\d+)*)\b", r["line"])
+        if by and by.group(1) != r["label"]:  # F151: the old item stays until the new one passes, then QA's pass closes it
+            s += f"\n\nIt's replaced by {by.group(1)}: it's closed once {by.group(1)} passes QA."
         if r["state"] == "⬜":  # F77: the review's state, kept outside the row
             try:
                 import review

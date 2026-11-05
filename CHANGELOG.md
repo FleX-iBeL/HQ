@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- When QA finds something wrong, no fix goes to the team by itself any more. What QA found goes back into the item as an open point, and the fix goes through the same steps as a new item. First Moneypenny writes a test for the fault, and it has to fail on the build as it stands. That test gets its own review, then the item is reviewed again against your words and the whole picture. Only then can it be sent. QA passes the fix only when the new test, her earlier tests and the 17 happy flows pass. Each review now gets up to 20 rounds, starting again after every QA failure. After the 20th flagged round it comes to you as a decision in one text, and a flagged item or flagged tests never go to the team, not even on your now. Once an item passes QA, the old item it replaces is closed (F151).
+
 - The status page's usage part says the agents' share of the week as the sum of the weekly shares set for Donna, Pepper and Moneypenny in Settings, each share next to it, instead of a fixed 15, and it follows Settings when you change one. It reads them the way Settings does, so a fresh HQ shows the shares it starts with (3, 2 and 5, so 10) and never a 0 that Settings doesn't show (F149).
 
 - The status page has a search box at the top: type a number like F86 or a few words like "talk button" and it shows just those items with where they stand, opening the folded parts they sit in; clearing it brings the page back as it was. A switch next to it picks open items only (where it starts) or all of them, and a search with no hits says nothing found. Cmd+F still finds every item on the page, finished ones too, whatever the switch says.

@@ -1006,6 +1006,10 @@ def main(argv):
             if not re.fullmatch(r"[A-Z]\d+(\.\d+)*", label):
                 sys.exit("Which roadmap item? Give its number, like H182.")
             keep = [a for i, a in enumerate(args) if a in ("--now", "--said", "--not-ready") or (i and args[i - 1] == "--said")]  # F100; nowroad: --not-ready
+            import qatests as qt_  # F151: tests their review flagged never go to the team, his now neither
+            no_ = qt_.flagged_why(label)
+            if no_:
+                sys.exit(no_)
             title, line = open_row(text, label)
             j = with_team(jobs, label)
             if j:

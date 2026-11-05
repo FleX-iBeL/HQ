@@ -13690,7 +13690,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         """F56 piece 1, no Claude, no network: QA as a real step, and the release only taking work that passed it.
         On a copy of the roadmap (F17): a build job for a Features row marked done queues a QA job by itself (kind qa,
         its first prompt Moneypenny's character and craft); a maintenance row's doesn't. qa.py fail writes "QA failed"
-        in the row and queues a fix job; the fix done queues QA again; after three fails in a row no fix job comes.
+        in the row and the finding as an open point, and queues no fix job (F151: the fix goes the road of a new item), nor after more fails.
         qa.py pass writes "QA passed". Then release.py against a throwaway HQ (as flow 109): commits for H281 (passed),
         H282 (no QA) and H283 (passed): the release takes only H281's work as 0.4.5 (its changelog line, its tag on main),
         holds H282 and H283 on nightly and dev, says why, and merges the release back so main stays under dev; once H282
@@ -13739,25 +13739,20 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         jobs("mark", str(m), "running since 12:10")
         jobs("done", str(m))
         need(not waiting_text("QA of H178"), "a maintenance row's build got a QA job")
-        # QA fails: the mark in the row, and a fix job; the fix done brings QA again.
+        # QA fails: the mark in the row, the finding back in it as an open point, and no fix job by itself (F151: the fix goes the road of a new item).
         jobs("mark", str(qa_jobs[0]["n"]), "running since 12:20")
         out = qa_("fail", "H282", "the status doesn't come back to the sender", "--job", str(qa_jobs[0]["n"])).stdout
         jobs("done", str(qa_jobs[0]["n"]))
-        fix = waiting_text("Fix for H282")
-        need(len(fix) == 1 and "the fix" in out, f"a failed QA made no fix job: {out}")
+        need(not waiting_text("Fix for H282") and "held" in out and "new test" in out, f"a failed QA still made a fix job, or didn't say it's held: {out}")
         need(re.search(r"QA failed \(job \d+, \d+ \w+ 20\d\d \d\d:\d\d\): the status doesn't come back", rm.read_text()),
              "the row lacks its QA failed line")
+        need("Open point from QA (" in rm.read_text(), "the finding isn't back in the row as an open point")
         need("failed" in qa_("state", "H282").stdout, "qa.py state doesn't say failed")
-        jobs("mark", str(fix[0]["n"]), "running since 12:30")
-        jobs("done", str(fix[0]["n"]))
-        need(len(waiting_text("QA of H282")) == 1, "the fix done didn't bring QA again")
-        # Three fails in a row: no more fix jobs by itself.
+        # A second and a third fail: the same road, never a fix job by itself; one with no finding is held too.
         for i in range(2):
             qa_("fail", "H282", f"still off {i}")
-            for j in waiting_text("Fix for H282"):
-                jobs("stop", str(j["n"]))
-        out = qa_("fail", "H282", "third time off").stdout
-        need("waits for a call" in out and not waiting_text("Fix for H282"), f"a third fail still made a fix job: {out}")
+        out = qa_("fail", "H282", "").stdout
+        need("held" in out and not waiting_text("Fix for H282"), f"a fail without a finding sent something: {out}")
         for j in queue()["waiting"]:
             jobs("stop", str(j["n"]))
 
@@ -13857,8 +13852,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         finally:
             inc.FILE, pu.ROOT, rl.ROOT, rl.is_main, qm.q.ROADMAP, _sprint.RANKS = real
             shutil.rmtree(tmp, ignore_errors=True)
-        return ("a finished build queues QA as Moneypenny (not for maintenance); a fail writes its line and a fix job, QA after the fix, "
-                "no fix job after three; the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
+        return ("a finished build queues QA as Moneypenny (not for maintenance); a fail writes its line and the open point, no fix job by itself (F151); the release takes only H281 (passed) as 0.4.5, holds H282 (failed) and H283 (behind it) on "
                 "nightly and dev, merged back under dev; once H282 passes, 0.4.6 takes the rest; --without-qa takes it all")
 
     async def flow168(self) -> str:
@@ -16100,7 +16094,7 @@ print("OK")
         review.py add, which a text may run. A re-review only asks whether the earlier points are settled by a sentence that stands in the row
         and whether a changed sentence brings a hole of its own: a point about words that didn't change doesn't count, a passed row whose words
         before aren't kept gets a first review. Her rounds: review.py now reviews the words as they stand, one round per wording, three at
-        most, and his now refuses an unready row until three rounds ran on its words as they stand. His now: send-row without the Ready mark is refused without his words and says how; with an old
+        most, and his now refuses an unready row until its review passed its words as they stand, and never sends it flagged (F151: 20 rounds, then his decision). His now: send-row without the Ready mark is refused without his words and says how; with an old
         line of his it's refused; with his line of today, which the row's His words quote, it goes without a look (the look stands in as no)
         and carries the review's open points; a now the row doesn't quote goes to the look and its no holds. The routine's real minute starts
         the job in his day hours. A policy with no agent never writes a ledger, and under test the real ledger is never written."""
@@ -16145,6 +16139,7 @@ print("OK")
         need(r.returncode != 0 and label in (r.stdout + r.stderr) and "review.py now" in (r.stdout + r.stderr), f"a second row for the same thing: {r.stdout} {r.stderr}")
         # 2. an old-shape row: reword inside the ask, then data change 004 and its undo
         r = jobs("write-row", "Old shape row. Out of scope: none at all.", "--bug")
+        need(r.returncode == 0, f"the old row: {r.stdout} {r.stderr}")
         old = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
         line = row(old)
         twice = line.replace(" | |", " | Old shape row. Out of scope: none at all. | |", 1)
@@ -16193,27 +16188,23 @@ print("OK")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", "Give it to the team and run it now please.")
         need(r.returncode != 0 and "today" in (r.stdout + r.stderr), f"an old now of his: {r.stdout} {r.stderr}")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
-        need(r.returncode != 0 and "0 of 3 rounds" in (r.stdout + r.stderr), f"his now went before her rounds: {r.stdout} {r.stderr}")
+        need(r.returncode != 0 and "0 of 20 rounds" in (r.stdout + r.stderr), f"his now went before her rounds: {r.stdout} {r.stderr}")
         need(jobs("send-row", label, "--now", "--said", now_words).returncode != 0, "a now without --not-ready went before her rounds")
-        for k in (1, 2, 3):  # her rounds: a review of the words as they stand, each after a change of hers
-            r = script("review.py", "now", label)
-            need(r.returncode == 0 and f"Round {k} of 3" in r.stdout and "which card" in r.stdout, f"round {k}: {r.stdout} {r.stderr}")
-            again = script("review.py", "now", label)
-            need(again.returncode != 0 and "haven't changed" in (again.stdout + again.stderr), f"a round on the same words counted: {again.stdout}")
-            if k < 3:
-                r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
-                need(r.returncode != 0 and f"{k} of 3 rounds" in (r.stdout + r.stderr), f"his now went after {k} rounds: {r.stdout} {r.stderr}")
-                need(script("review.py", "add", label, f"Her answer {k}: the team names the card it picks.").returncode == 0, f"her answer {k}")
+        # F151: 20 rounds; the same words again count, their verdict standing; a flagged row never goes, his now neither
+        r = script("review.py", "now", label)
+        need(r.returncode == 0 and "Round 1 of 20" in r.stdout and "which card" in r.stdout, f"round 1: {r.stdout} {r.stderr}")
+        again = script("review.py", "now", label)
+        need(again.returncode == 0 and "Round 2 of 20" in again.stdout and "verdict stands" in again.stdout, f"the same words again: {again.stdout} {again.stderr}")
+        r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
+        need(r.returncode != 0 and "flagged" in (r.stdout + r.stderr) and "never goes" in (r.stdout + r.stderr), f"his now sent a flagged row: {r.stdout} {r.stderr}")
+        need(script("review.py", "add", label, "Her answer: FILLED: which card. The team names the card it picks.").returncode == 0, "her answer")
+        r = script("review.py", "now", label)
+        need(r.returncode == 0 and "Round 3 of 20" in r.stdout and "review passed" in r.stdout, f"round 3 after her answer: {r.stdout} {r.stderr}")
         r = jobs("send-row", label, "--not-ready", "--now", "--said", now_words)
         need(r.returncode == 0, f"his now of today: {r.stdout} {r.stderr}")
-        sent = r
-        need(script("review.py", "add", label, "Her answer 3: the team names the card it picks.").returncode == 0, "her answer 3")
-        r = script("review.py", "now", label)
-        need(r.returncode != 0 and "3 rounds have run" in (r.stdout + r.stderr), f"a fourth round: {r.stdout}")
-        r = sent
         n = re.search(r"Job (\d+) is ready", r.stdout).group(1)
         line = next(l for l in rm.read_text().split("\n") if l.startswith(f"- Job {n} "))
-        need("⟪sayso" in line and "The review's open points" in line and "which card" in line, f"the job doesn't carry his now and the open points: {line}")
+        need("⟪sayso" in line and "which card" not in line, f"the job doesn't carry his now, or carries a flag: {line}")
         res = minute()
         need(state(n).startswith("running"), f"his now didn't start it in the day: {state(n)} {res['log'][-3:]}")
         # a now the row doesn't quote goes to the look, and its no holds
@@ -16227,7 +16218,101 @@ print("OK")
         need(((ws / "HQ/mistakes.jsonl").read_text() if (ws / "HQ/mistakes.jsonl").exists() else "") == before, "a policy with no agent wrote the ledger")
         real = py("import mistakes\nprint(mistakes.add('refused', 'unknown', 'a test', base=%r) is None)" % str(ws), HQ_REAL_ROADMAP=str(rm))
         need(real == "True", "a test wrote the real ledger")
-        return "the row's words stand once, reword stays in the ask, 004 and its undo; add from a text; the re-review settles; his now of today starts it with the open points; no test line on his ledger"
+        return "the row's words stand once, reword stays in the ask, 004 and its undo; add from a text; the re-review settles; his now never sends it flagged (F151), and once it passes his now of today starts it; no test line on his ledger"
+
+    async def flow484(self) -> str:
+        """F151, no Claude: a fix QA finds goes the road of a new item. On a throwaway HQ, a made-up row with her sealed and reviewed tests is
+        built (a marker file stands in for the build), and QA fails it: no job appears, the finding is an open point in the row, the ready
+        check and his now name it. Her new test that already passes isn't sealed; one that fails is. Then, in order, his now is refused until
+        that version of her tests had its own review (round 1 of 20, counted apart from the old tests) and the item its review again (round 1
+        of 20); then send-row works. QA can't pass while the new test fails or the 17 are red; once it passes, the row it replaces is closed."""
+        import subprocess as _sp
+        sys.path.insert(0, str(ROOT / "routine"))
+        ws, env, d = self._wall_env("fixroad", hour=14)
+        env.update({"HQ_SAYSO_FAKE": "no", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_DIRECT_AGENT": "moneypenny",
+                    "HQ_QA_SEALS": str(d / "seals")})
+        env.pop("HQ_PROOF_ON", None)
+        jobs, minute, state, new = self._wall_tools(env, d, ws)
+        self._wall_usage(env)
+        th = ws / "HQ/team-line"
+        th.mkdir(parents=True, exist_ok=True)
+        now_words = "Please give it to the team and lets run it immediately once it's ready."
+        his = "Hey MP, the made-up page should say Nothing planned yet, not Nothing planned. " + now_words
+        said_at = time.time()
+        (th / "thread.jsonl").write_text(json.dumps({"at": said_at, "from": "me", "text": his}) + "\n")
+        env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+        rm = ws / "HQ/roadmap.md"
+
+        def script(name, *a, **k):
+            r = _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env={**env, **k}, cwd=str(ws))
+            r.out = r.stdout + r.stderr
+            return r
+
+        def team(label):
+            return [ln for ln in script("jobs.py", "list").stdout.splitlines() if ln.startswith("Job ") and label in ln]
+
+        r = jobs("write-row", "The made-up page says Nothing planned yet. What's wrong: it says Nothing planned. What right looks like: Nothing "
+                              "planned yet. How to check: the empty card.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+        need(r.returncode == 0 and re.search(r"\b([FH]\d+) is on the planning", r.stdout), f"the row: {r.stdout} {r.stderr}")
+        label = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        r = jobs("write-row", f"Export button on the settings screen crashes the backup. What's wrong: a crash. Replaced by {label}.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+        need(r.returncode == 0 and re.search(r"\b([FH]\d+) is on the planning", r.stdout), f"the old row: {r.stdout} {r.stderr}")
+        old = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+        need(f"It's replaced by {label}" in script("sprint.py", "show", old).stdout, "the old row doesn't say what replaces it")
+        r = script("review.py", "add", label, f'His words: "{his}" Sources: his text on the team line, {time.strftime("%-d %B %Y %H:%M", time.localtime(said_at))}.',
+                   HQ_SAYSO_FAKE="yes")
+        need(r.returncode == 0, f"his words in the row: {r.out}")
+        # her tests, sealed and reviewed before the build; a marker file stands in for the build
+        script("qatests.py", "new", label)
+        qd = ws / "HQ/qa-tests" / label
+        t = json.loads((qd / "tests.json").read_text())
+        for x in t["sentences"]:
+            x["tests"] = ["t_old"]
+        t["tests"] = {"t_old": "the page says Nothing planned yet"}
+        (qd / "tests.json").write_text(json.dumps(t))
+        head = ("import pathlib\nd = pathlib.Path(%r)\n\n\ndef t(n, ok, why):\n    print((\"PASS \" if ok else \"FAIL \") + n + (\"\" if ok else \": \" + why))\n\n\n"
+                "t(\"t_old\", (d / \"built\").exists(), \"the old words\")\n" % str(d))
+        (qd / "test.py").write_text(head)
+        need("are sealed" in script("qatests.py", "check", label).out, "her first tests weren't sealed")
+        need("Round 1 of 20" in script("qatests.py", "review", label).out, "her first tests' review isn't round 1 of 20")
+        (d / "built").write_text("1")
+        # QA fails it: no job, the finding back in the row, the ready check and his now name it
+        r = script("qa.py", "fail", label, "the card still shows the old words (zq1)")
+        need(not team(label) and "held" in r.out and "new test" in r.out, f"a failed QA sent a fix: {r.out} {team(label)}")
+        need("Open point from QA" in script("sprint.py", "show", label).stdout, "the finding isn't an open point in the row")
+        need("zq1" in script("sprint.py", "check", label).out, "the ready check doesn't name the finding")
+        r = jobs("send-row", label, "--now", "--said", now_words)
+        need(r.returncode != 0 and "zq1" in (r.stdout + r.stderr) and not team(label), f"his now sent it with the finding open: {r.stdout} {r.stderr}")
+        r = script("qa.py", "fail", label, "")
+        need("held" in r.out and not team(label), f"a fail without a finding sent something: {r.out}")
+        # her new test: one that passes already isn't sealed, one that fails is
+        (qd / "test.py").write_text(head + "t(\"t_new\", True, \"\")\n")
+        r = script("qatests.py", "check", label)
+        need(r.returncode != 0 and "already pass" in r.out and "open point" in r.out, f"a new test that passes was sealed: {r.out}")
+        (qd / "test.py").write_text(head + "t(\"t_new\", (d / \"new_ok\").exists(), \"zq1 still there\")\n")
+        need("are sealed" in script("qatests.py", "check", label).out, "the failing new test wasn't sealed")
+        r = jobs("send-row", label, "--now", "--said", now_words)
+        need(r.returncode != 0 and "own review" in (r.stdout + r.stderr), f"his now went before the new tests' review: {r.stdout} {r.stderr}")
+        need("Round 1 of 20" in script("qatests.py", "review", label).out, "the new tests' review isn't a fresh round 1 of 20")
+        r = jobs("send-row", label, "--now", "--said", now_words)
+        need(r.returncode != 0 and "whole picture" in (r.stdout + r.stderr), f"his now went before the item's review again: {r.stdout} {r.stderr}")
+        r = script("review.py", "now", label)
+        need("Round 1 of 20" in r.out and "review passed" in r.out, f"the item's review again: {r.out}")
+        r = jobs("send-row", label, "--now", "--said", now_words)
+        need(r.returncode == 0 and team(label), f"with every step done the fix didn't go: {r.stdout} {r.stderr}")
+        # QA's pass: the new test, the earlier ones and the 17
+        ev = ["--example", "the empty card", "--ran", "test.py", "--got", "Nothing planned yet"]
+        r = script("qa.py", "pass", label, "x", *ev)
+        need(r.returncode != 0 and "t_new" in r.out, f"QA passed with the new test failing: {r.out}")
+        (d / "new_ok").write_text("1")
+        r = script("qa.py", "pass", label, "x", *ev, HQ_HAPPY_FAKE_FAIL="1")
+        need(r.returncode != 0 and "17 happy flows" in r.out, f"QA passed with the 17 red: {r.out}")
+        need("closed" not in script("sprint.py", "show", old).stdout.split("\n")[0], "the old row closed before the new one passed")
+        r = script("qa.py", "pass", label, "x", *ev)
+        need(r.returncode == 0 and f"{old} is closed as replaced by {label}" in r.out, f"the pass: {r.out}")
+        need(f"closed, replaced by {label}" in script("sprint.py", "show", old).stdout.split("\n")[0], "the old row isn't closed as replaced")
+        return ("a failed QA queues nothing and puts the finding in the row; a passing new test isn't sealed; his now waits for the new test, its "
+                "review and the item's, each round 1 of 20; QA's pass needs the new test and the 17; the replaced row closes once it passes")
 
     def _wall_env(self, name: str, hour: int = 23) -> tuple:
         """A throwaway workspace with the wall on (the other flows run with it off), its own usage reading, a pinned hour,
@@ -38898,7 +38983,8 @@ FLOWS = {
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
-    481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now of today starts it with the open points, an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    484: ("F151: a fix QA finds goes the road of a new item: no job by itself, the finding an open point in the row, her new test failing on the build and sealed, its own review and the item's again (round 1 of 20 each), then send-row; QA's pass needs the new test and the 17, and closes the row it replaces", False, "flow484"),
     483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set", False, "flow483"),
     482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
@@ -39122,7 +39208,7 @@ FLOWS = {
     168: ("F60: a big read on a call is cut to a part (Read and cat), the SDK buffer is raised, a session that dies mid-turn says so, reopens and answers the same turn", False, "flow168"),
     167: ("F57: a finished job without its done mark is nudged by name; a never-ending wait loop stops counting after 15 minutes; every job text ends with the done mark; done N --at HH:MM, also from a call", False, "flow167"),
     166: ("F56 piece 2: a feature built in pieces ships switched off: hidden on a friend's HQ (no Settings row, no button, no switch), shown on the maker's as still being built; QA ships it once its last piece passes", False, "flow166"),
-    165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and a fix job) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
+    165: ("F56 piece 1: QA as a real step (a finished build queues QA as Moneypenny; a fail writes its line and the open point, the fix on the road of a new item since F151) and the release only takes work whose row says QA passed, the rest held on nightly and dev", False, "flow165"),
     177: ("H286: the status page says in plain words what the team is doing (never the commands), a job that has to start fixing redoes its own estimate once with why, and a job that ran long through its own mistake is tagged, kept out of the estimates and listed", False, "flow177"),
     182: ("F77, F80: the automatic review of new or changed planning rows: the flag, the refused and lost Ready mark, team notes start nothing, the quiet wait, once per wording, retries, no daily cap, the one-time pass, first on Moneypenny's calls only", False, "flow182"),
     184: ("F78: a job held by the usage line is checked on what's left of it when it carries on in its own chat (time and usage, at least what a picked-up turn costs, all its runs counted), its waiting line says so; a fresh job and one that starts over on the whole estimate", False, "flow184"),

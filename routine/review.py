@@ -586,8 +586,10 @@ def _attempt(label, now_fn=_clock, extra=None):
 # (the tooling/system) is there to keep her in check, prompting is last line of defense not first". `review.py now LABEL` reviews the row's
 # words as they stand, in the foreground, no quiet wait, and counts as a round: one per wording, and from the second on only after a change
 # that answers a flag. At most NOW_ROUNDS. His now sends a row without the Ready mark only when its words as they stand have had a review
-# and that review passed, or NOW_ROUNDS rounds have run (now_door_why); then what's still open goes with the job.
-NOW_ROUNDS = 3
+# and that review passed (now_door_why). F151 (5 November 2026): 20 rounds, counted per road (each QA failure starts them again, as for a
+# new item); the same words again repeat the verdict, counted, without a new look; after the 20th flagged round it's his decision, in one
+# text with the open points, and a flagged row never goes to the team, his now neither ("no put it back, this is mandatory").
+NOW_ROUNDS = 20
 
 
 def now_rounds(e):
@@ -604,17 +606,25 @@ def now_review(label, now_fn=_clock):
             sys.exit(f"Refused: {label} isn't an open row on the planning.")
         fp = S.ask_fp(row["line"])
         d, rv = _state()
+        d["review"] = rv  # F151: a fresh HQ has no review state yet, and the round must be kept all the same
         rs = rv.setdefault("rows", {})
         e = rs.setdefault(label, {})
         e.setdefault("seen", fp)
         e.setdefault("seen_at", int(now_fn()))
-        rounds = now_rounds(e)
-        if rounds and rounds[-1]["fp"] == fp:
-            sys.exit(f"Refused: {label}'s words haven't changed since round {len(rounds)} ({rounds[-1]['verdict']}). Answer the findings first, "
-                     "in the row's words (review.py add or reword), then review.py now again.")
+        import qatests
+        k_ = qatests.cycle(label)
+        rounds = qatests.in_road(now_rounds(e), label)
         if len(rounds) >= NOW_ROUNDS:
-            sys.exit(f"Refused: {NOW_ROUNDS} rounds have run on {label}. If it isn't ready, his now sends it with the open points: "
-                     f"jobs.py send-row {label} --not-ready --now --said \"HIS WORDS OF TODAY\".")
+            sys.exit(f"Refused: {NOW_ROUNDS} rounds have run on {label}; no round {NOW_ROUNDS + 1}. It's his decision now, with the open points "
+                     "he has; flagged, it never goes to the team, his now neither.")
+        if rounds and rounds[-1]["fp"] == fp and e.get("ask") == fp:  # the same words again: the verdict stands, counted, no new look
+            same = {"pass": rounds[-1]["verdict"] == "pass", "findings": list(e.get("findings") or []) if rounds[-1]["verdict"] == "flag" else []}
+            if not same["pass"] and not same["findings"]:
+                same["findings"] = ["the review flagged it without findings kept"]
+            e["now_rounds"] = now_rounds(e) + [{"fp": fp, "at": int(now_fn()), "verdict": rounds[-1]["verdict"], "n": len(same["findings"]),
+                                                "cycle": k_, "same": True}]
+            S._save(S.RANKS, d)
+            return _now_words(label, same, len(rounds) + 1, k_, " (its words unchanged since the round before, so the verdict stands)")
         if e.get("pending") and now_fn() - e["pending"] < PENDING:
             sys.exit(f"{label}'s review is already on its way; look again in a minute (review.py list).")
         e["pending"] = int(now_fn())
@@ -627,36 +637,51 @@ def now_review(label, now_fn=_clock):
         e = (rv.get("rows") or {}).get(label) or {}
         if e.get("ask") != fp:
             sys.exit(f"{label}'s words changed while it was reviewed; nothing counted. Run review.py now {label} again.")
-        e["now_rounds"] = now_rounds(e) + [{"fp": fp, "at": int(now_fn()), "verdict": "pass" if a["pass"] else "flag", "n": len(a["findings"])}]
+        e["now_rounds"] = now_rounds(e) + [{"fp": fp, "at": int(now_fn()), "verdict": "pass" if a["pass"] else "flag", "n": len(a["findings"]),
+                                            "cycle": k_}]
         S._save(S.RANKS, d)
-    k = len(e["now_rounds"])
+    return _now_words(label, a, len(qatests.in_road(e["now_rounds"], label)), k_)
+
+
+def _now_words(label, a, k, road, same=""):
     if a["pass"]:
-        return f"Round {k} of {NOW_ROUNDS}: the review passed {label}. Mark it ready (sprint.py ready {label}), then send-row {label} --now --said \"HIS WORDS\"."
+        return (f"Round {k} of {NOW_ROUNDS}: the review passed {label}{same}. Mark it ready (sprint.py ready {label}), then send-row {label} "
+                f"--now --said \"HIS WORDS\".")
     fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
     if k >= NOW_ROUNDS:  # real QA: after the last round, one message to him with all the open points
         try:
             import qatests
-            qatests.tell(label, "item-review", f"The review flagged {label} {NOW_ROUNDS} times; the open points: "
-                         + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"])) + f" His now may still send {label} with them.")
+            qatests.tell(label, "item-review" + (f"-{road}" if road else ""), f"The review flagged {label} {NOW_ROUNDS} times; it's your decision "
+                         "now. The open points: " + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"]))
+                         + f" Flagged, {label} never goes to the team, your now neither.")
         except Exception as ex:
             print(f"(the message to him didn't go: {ex!r})", file=sys.stderr)
-    nxt = (f"Answer each in the row's words (review.py add {label} \"...\", or reword), then review.py now {label} for round {k + 1}."
-           if k < NOW_ROUNDS else f"That was the last round: his now sends it with these open points (send-row {label} --not-ready --now --said \"HIS WORDS\").")
-    return f"Round {k} of {NOW_ROUNDS}: the review flagged {label}:{fs}\n{nxt}"
+        return (f"Round {k} of {NOW_ROUNDS}: the review flagged {label}{same}:{fs}\nThat was the last round: it comes to him as his decision, "
+                "the open points in one text; flagged, it never goes to the team, his now neither.")
+    return (f"Round {k} of {NOW_ROUNDS}: the review flagged {label}{same}:{fs}\nAnswer each in the row's words (review.py add {label} \"...\", or "
+            f"reword), then review.py now {label} for round {k + 1}.")
 
 
 def now_door_why(row):
-    """Why his now can't send this unready row yet, or None: its words as they stand must have had a review that passed, or NOW_ROUNDS rounds."""
+    """Why his now can't send this unready row, or None: its words as they stand must have had a review that passed. F151: a flagged row
+    never goes, also after its last round (then it's his decision)."""
     e = ((_state()[1].get("rows") or {}).get(row["label"])) or {}  # a read, no lock: the queue's command that asks may hold it
     fp = S.ask_fp(row["line"])
-    rounds = now_rounds(e)
+    import qatests
+    rounds = qatests.in_road(now_rounds(e), row["label"])
     reviewed = e.get("ask") == fp and e.get("verdict") in ("pass", "flag")
-    if (reviewed and e.get("verdict") == "pass") or len(rounds) >= NOW_ROUNDS:
-        return None  # 4 November 2026: after the third round his now sends it, also with words she changed since (no fourth round exists)
-    done = f"{len(rounds)} of {NOW_ROUNDS} rounds so far" + ("" if reviewed else ", and its words as they stand haven't been reviewed")
-    return (f"Refused: his now means you get {row['label']} ready yourself first ({done}). Answer the review: review.py now {row['label']}, then answer "
-            f"its findings in the row's words with review.py add or reword, and review.py now again. If it passes, mark it ready and send it with "
-            f"--now; after the third round his now may send it with its open points.")
+    if reviewed and e.get("verdict") == "pass":
+        return None
+    if len(rounds) >= NOW_ROUNDS:
+        return (f"Refused: {row['label']} had its {NOW_ROUNDS} review rounds and its review flagged it: it's his decision, and a flagged "
+                "item never goes to the team, his now neither.")
+    if reviewed:
+        return (f"Refused: the review flagged {row['label']} ({len(rounds)} of {NOW_ROUNDS} rounds so far): " + "; ".join(e.get("findings") or [])
+                + f". A flagged item never goes to the team, his now neither. Answer it in the row's words (review.py add or reword), then "
+                f"review.py now {row['label']} again; once it passes, his now sends it.")
+    return (f"Refused: his now means you get {row['label']} ready yourself first ({len(rounds)} of {NOW_ROUNDS} rounds so far, and its words as "
+            f"they stand haven't been reviewed). Answer the review: review.py now {row['label']}, then answer its findings in the row's words "
+            "with review.py add or reword, and review.py now again. Once it passes, mark it ready or send it with --now; a flagged item never goes.")
 
 
 def review_run(label, now_fn=_clock):

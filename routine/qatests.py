@@ -17,12 +17,12 @@ The program, not a prompt, holds them:
   - the coverage: every sentence of his words in the row (the quotes in its "His words:") has at least one test that the script runs;
   - before the build: on a throwaway copy of HQ's code as it is, every test must FAIL (a test that passes already tests nothing new);
     then they're sealed: their fingerprint, the run before, and a copy of the files outside the workspace (HQ's own .status);
-  - their own review, apart from the item's: its own prompt and verdict, at most ROUNDS rounds (one per wording), and after the last
+  - their own review, apart from the item's: its own prompt and verdict, at most ROUNDS rounds per road, and after the last
     flagged one a single message to him with all the open points;
   - the Ready mark (sprint.set_ready), the way to the team (sprint.gate: jobs.py add and send-row, his now too) and the end
     (proof.py runs the sealed tests on the built copy; jobs.py done and qa.py pass read that, his words on done don't skip it).
-His now may send an item whose tests' review flagged them three times, with the open points, but never past the coverage, the run
-before, or the run at the end. The team sees her tests as the target and can't change them: the fingerprint is checked at the end.
+F151: flagged tests never go to the team, his now neither; after the 20th flagged round they're his decision, in one text. A QA
+failure opens a fix road (fix_why): a new test of hers that fails on the build, sealed, and that version's own 20 fresh rounds. The team sees her tests as the target and can't change them: the fingerprint is checked at the end.
 
     python3 routine/qatests.py new LABEL       start her folder: his sentences in tests.json, a test.py to fill in
     python3 routine/qatests.py check LABEL     the two hard checks; seals them when they hold
@@ -48,7 +48,7 @@ import hqpaths  # noqa: E402
 import jobs as q  # noqa: E402
 import sprint as S  # noqa: E402
 
-ROUNDS = 3
+ROUNDS = 20  # F151: 20 at most, counted per version: each QA failure starts them again, as for a new item
 RUN_TIMEOUT = 300  # seconds for one run of her tests
 REVIEW_TIMEOUT = 240
 BUDGET = 0.25
@@ -72,6 +72,88 @@ SYSTEM = (
     '{"sentences": [{"his": "the sentence", "checked": true or false, "why": "one plain sentence"}, ... one per sentence, in order], '
     '"pass": true or false, "findings": ["one plain sentence per hole, naming the test", ...]}. pass is false exactly when a sentence '
     "isn't checked or you found another real hole; at most four findings, the most important first.")
+
+
+# ---------- F151: a fix found by QA goes the same road as a new item ----------
+# His words, 5 November 2026: "when you find something in QA that was not of expected quality, and you propose a fix, that fix needs to be
+# checked if it still make sense in the total picture of things. so it needs to be reviewed again, and also checked against the intial
+# request", "as if it was a new item", "no put it back, this is mandatory". A QA failure queues nothing: the finding goes back into the row
+# as an open point (qa.fail) and opens a fix road here, held by the program until, in this order: a new test of hers for the finding fails
+# on the build as it stands and is sealed (check), that version of her tests passes its own review (rounds 1 to 20 of this road), and the
+# item passes its review again against his words and the whole picture (review.py now, rounds 1 to 20 of this road). Each QA failure opens
+# a new road; a QA pass closes it. Always on, a test copy too: a road only exists where a QA failure opened it.
+
+def roads(label: str) -> list[dict]:
+    return [x for x in state(label).get("qa_fails") or [] if isinstance(x, dict)]
+
+
+def cycle(label: str) -> int:
+    """Which road the rounds are counted in: 0 before any QA failure, then 1, 2, … one per QA failure."""
+    return len(roads(label))
+
+
+def fix_road(label: str) -> dict | None:
+    """The open road of this row (a QA failure without a QA pass since), or None."""
+    rs = roads(label)
+    return rs[-1] if rs and not rs[-1].get("passed") else None
+
+
+def qa_failed(label: str, finding: str, job: int | None = None) -> dict:
+    """qa.fail: a new road, with her tests as they were sealed before it (the new test is the one they don't have)."""
+    before = list((state(label).get("sealed") or {}).get("tests") or [])
+    e = _put(label, lambda x: x.update({"qa_fails": [y for y in x.get("qa_fails") or [] if isinstance(y, dict)] + [
+        {"at": int(time.time()), "finding": finding, "job": job, "tests_before": before}]}))
+    return {**e["qa_fails"][-1], "n": len(e["qa_fails"])}
+
+
+def qa_passed(label: str) -> None:
+    if fix_road(label):
+        _put(label, lambda x: x["qa_fails"][-1].update({"passed": int(time.time())}))
+
+
+def in_road(rounds: list, label: str) -> list:
+    """The rounds of the road the row is on now (a round from before F151 counts as road 0)."""
+    k = cycle(label)
+    return [x for x in rounds if isinstance(x, dict) and int(x.get("cycle") or 0) == k]
+
+
+def fix_why(row) -> str | None:
+    """Why the fix of a row QA failed can't go to the team yet, or None (no open road, or every step of it done)."""
+    label = row["label"]
+    road = fix_road(label)
+    if not road:
+        return None
+    k, fp = cycle(label), fingerprint(label)
+    finding = road.get("finding") or ""
+    sealed = state(label).get("sealed") or {}
+    if not fp or sealed.get("fp") != fp or int(sealed.get("cycle") or 0) != k:
+        return (f"{label} isn't ready: QA failed it, and the finding is an open point in the row: {finding}. As for a new item, a new test of "
+                f"hers for it goes first: it must fail on the build as it stands and be sealed by the hard checks (python3 routine/qatests.py "
+                f"check {label}); the fix is held until then")
+    rv = in_road(state(label).get("reviews") or [], label)
+    last = rv[-1] if rv else {}
+    if not (last.get("fp") == fp and last.get("verdict") == "pass"):
+        flagged = last.get("fp") == fp and last.get("verdict") == "flag"
+        return (f"{label} isn't ready: the new version of her QA tests, with the test for the QA finding, needs its own review first"
+                + (f"; it flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(last.get("findings") or []) if flagged else
+                   f" (round {len(rv) + 1} of {ROUNDS}): python3 routine/qatests.py review {label}"))
+    import review
+    e = ((review._state()[1].get("rows") or {}).get(label)) or {}
+    nr = in_road(review.now_rounds(e), label)
+    if not (nr and nr[-1].get("fp") == S.ask_fp(row["line"]) and nr[-1].get("verdict") == "pass"):
+        return (f"{label} isn't ready: after the QA failure the item itself goes through its review again, the fix against his words, the "
+                f"first request and the whole picture, before it goes to the team: python3 routine/review.py now {label} "
+                f"(round {len(nr) + 1} of {review.NOW_ROUNDS})")
+    return None
+
+
+def flagged_why(label: str) -> str | None:
+    """F151: tests their review flagged never go to the team, his now neither: why, or None."""
+    rv = in_road(state(label).get("reviews") or [], label)
+    if rv and rv[-1].get("verdict") == "flag":
+        return (f"Refused: the review of {label}'s QA tests flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(rv[-1].get("findings") or [])
+                + ". Flagged tests never go to the team, on his now neither; after the 20th round they're his decision. Nothing added.")
+    return None
 
 
 def gate_on() -> bool:
@@ -261,7 +343,20 @@ def check(label: str) -> tuple[bool, str]:
     if unrun:
         return False, (f"Refused: {label}'s test.py never reports {', '.join(unrun)} (a line \"PASS name\" or \"FAIL name: why\" for each), "
                        f"so those tests don't exist. Its output: {out[-400:]!r}. Nothing sealed.")
-    passing = [n for n in names if got.get(n)]
+    road, k = fix_road(label), cycle(label)
+    if road:  # F151: after a QA failure her earlier tests stay as they were; what's new is the test for the finding, and it must fail now
+        names = names + [n for n in got if n not in names]
+        fresh = [n for n in names if n not in (road.get("tests_before") or [])]
+        passing = [n for n in fresh if got.get(n)]
+        if not fresh or passing:
+            why = (f"no new test for the QA finding (her tests are the ones sealed before it)" if not fresh else
+                   f"the new test(s) {', '.join(passing)} already pass on HQ's code as it is ({head[:7]}), so they don't catch the fault QA found")
+            tell(label, f"fix-test-{k}", f"QA failed {label}: {road.get('finding') or 'no finding written'}. Her new test for it doesn't hold: {why}. "
+                 "The fix doesn't go to the team; it's an open point for you.")
+            return False, (f"Refused: {label}'s QA tests: {why}: {road.get('finding')}. Nothing sealed, the fix doesn't go, and the finding goes to "
+                           "him on Moneypenny's line as an open point.")
+    else:
+        passing = [n for n in names if got.get(n)]
     if passing:
         return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on HQ's code as it is ({head[:7]}), before any "
                        "build, so they don't test what he asked for. Each test must fail now and pass once it's built. Nothing sealed.")
@@ -270,7 +365,7 @@ def check(label: str) -> tuple[bool, str]:
     os.makedirs(keep, exist_ok=True)
     for f in ("test.py", "tests.json"):
         shutil.copy2(os.path.join(d, f), os.path.join(keep, f))
-    sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names,
+    sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names, "cycle": k,
               "before": {"head": head, "results": {n: got[n] for n in names}}}
     _put(label, lambda e: e.update({"sealed": sealed}))
     try:
@@ -278,13 +373,19 @@ def check(label: str) -> tuple[bool, str]:
         trail.step(trail.resolve(label), "qa_tests", fp=fp[:16], tests=len(names), before=head[:12])
     except Exception:
         pass
+    if road:
+        return True, (f"{label}'s QA tests are sealed: {len(names)} test(s), the new one(s) for the QA finding failing on {head[:7]} as they "
+                      f"should. Next, this version's own review: python3 routine/qatests.py review {label} (round 1 of {ROUNDS}).")
     return True, (f"{label}'s QA tests are sealed: {len(names)} test(s) for his {sealed['his']} sentence(s), every one failing on "
                   f"{head[:7]} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
 
 
 def why_not(row, now: bool = False) -> str | None:
     """Why her QA tests keep this row from the Ready mark (now=False) or from the team on his now (now=True), or None. The hard checks
-    always; the review must have passed them as they stand, or, on his now only, have run its ROUNDS rounds."""
+    always; the review must have passed them as they stand (F151: flagged tests never go, his now neither), and a fix QA found goes its road."""
+    fw = fix_why(row)
+    if fw:
+        return fw
     if not gate_on():
         return None
     label = row["label"]
@@ -303,11 +404,9 @@ def why_not(row, now: bool = False) -> str | None:
     if (e.get("sealed") or {}).get("fp") != fp:
         return (f"{label} isn't ready: its QA tests as they stand haven't passed the hard checks (every sentence of his covered, every test "
                 f"failing on the code as it is): python3 routine/qatests.py check {label}")
-    rv = [x for x in e.get("reviews") or [] if isinstance(x, dict)]
+    rv = in_road(e.get("reviews") or [], label)
     last = rv[-1] if rv else {}
     if last.get("fp") == fp and last.get("verdict") == "pass":
-        return None
-    if now and len(rv) >= ROUNDS:
         return None
     if last.get("fp") == fp and last.get("verdict") == "flag":
         return (f"{label} isn't ready: the review of its QA tests flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(last.get("findings") or [])
@@ -381,7 +480,22 @@ def _last_object(text: str) -> dict:
     return best
 
 
+def _fake(d) -> dict | None:
+    """HQ_REVIEW_FAKE (tests), as the item review's: "auto" flags tests whose files hold "HOLE:" and passes the rest; "fail" never answers."""
+    how = os.environ.get("HQ_REVIEW_FAKE")
+    if not how:
+        return None
+    if how == "fail":
+        return {"failed": True, "why": "the fake reviewer never answers", "cost": 0}
+    fs = _files(d)
+    holes = [ln.split("HOLE:", 1)[1].strip()[:200] for v in fs.values() for ln in (v or "").splitlines() if "HOLE:" in ln]
+    return {"pass": not holes, "findings": holes, "cost": 0, "s": 0}
+
+
 def ask_reviewer(row, d) -> dict:
+    fake = _fake(d)
+    if fake:
+        return fake
     sents = his_sentences(row)
     claude = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
     t0 = time.time()
@@ -415,21 +529,22 @@ def review(label: str) -> tuple[int, str]:
     e = state(label)
     if not fp or (e.get("sealed") or {}).get("fp") != fp:
         return 2, f"Refused: {label}'s QA tests as they stand aren't sealed: python3 routine/qatests.py check {label} first."
-    rv = [x for x in e.get("reviews") or [] if isinstance(x, dict)]
-    if rv and rv[-1].get("fp") == fp:
-        return 2, (f"Refused: {label}'s QA tests haven't changed since round {len(rv)} ({rv[-1].get('verdict')}). Answer its points in the "
-                   f"tests, check them again, then review again.")
+    rv, k_ = in_road(e.get("reviews") or [], label), cycle(label)
     if len(rv) >= ROUNDS:
-        return 2, (f"Refused: {ROUNDS} rounds have run on {label}'s QA tests; he has their open points. His now may send it with them, never "
-                   "past the hard checks.")
-    a = ask_reviewer(row, d)
+        return 2, (f"Refused: {ROUNDS} rounds have run on {label}'s QA tests; no round {ROUNDS + 1}. They're his decision now, with the "
+                   "open points he has; flagged tests never go to the team, his now neither.")
+    if rv and rv[-1].get("fp") == fp:  # the same version again: the verdict stands, no new look, and it counts as a round
+        a = {"pass": rv[-1].get("verdict") == "pass", "findings": list(rv[-1].get("findings") or []), "cost": 0, "same": True}
+    else:
+        a = ask_reviewer(row, d)
     rec = {"row": label, "at": int(time.time()), "fp": fp[:16], "kind": "qa-tests", "model": MODEL, "effort": EFFORT, "cost": a.get("cost")}
     if a.get("failed"):
         _cost_line({**rec, "failed": True, "why": a.get("why")})
         return 2, f"The review of {label}'s QA tests didn't run ({a.get('why')}); nothing counted. Try again."
     if fingerprint_of(d) != fp:
         return 2, f"{label}'s QA tests changed while they were reviewed; nothing counted."
-    entry = {"fp": fp, "at": int(time.time()), "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "cost": a.get("cost")}
+    entry = {"fp": fp, "at": int(time.time()), "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "cost": a.get("cost"),
+             "cycle": k_}
     e = _put(label, lambda x: x.update({"reviews": [y for y in x.get("reviews") or [] if isinstance(y, dict)] + [entry]}))
     _cost_line({**rec, "verdict": entry["verdict"], "findings": len(a["findings"])})
     try:
@@ -437,16 +552,18 @@ def review(label: str) -> tuple[int, str]:
         trail.step(trail.resolve(label), "qa_tests_review", verdict=entry["verdict"], findings=len(a["findings"]))
     except Exception:
         pass
-    k = len(e["reviews"])
+    k = len(in_road(e["reviews"], label))
+    same = " (unchanged since the round before, so its verdict stands)" if a.get("same") else ""
     if a["pass"]:
-        return 0, f"Round {k} of {ROUNDS}: the review passed {label}'s QA tests."
+        return 0, f"Round {k} of {ROUNDS}: the review passed {label}'s QA tests{same}."
     fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
     if k >= ROUNDS:
-        tell(label, "qa-tests", f"Her QA tests for {label} were flagged {ROUNDS} times by their review; the open points: "
-             + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"])) + f" His now may still send {label} with these points; "
-             "the hard checks hold either way.")
-        return 1, f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests:{fs}\nThat was the last round: he has the open points now."
-    return 1, (f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests:{fs}\nAnswer each in the tests, python3 routine/qatests.py "
+        tell(label, "qa-tests" + (f"-{k_}" if k_ else ""), f"Her QA tests for {label} were flagged {ROUNDS} times by their review; it's your "
+             "decision now. The open points: " + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"]))
+             + f" Flagged tests never go to the team, your now neither.")
+        return 1, (f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests{same}:{fs}\nThat was the last round: it comes to him as his "
+                   "decision, the open points in one text; flagged, it never goes to the team.")
+    return 1, (f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests{same}:{fs}\nAnswer each in the tests, python3 routine/qatests.py "
                f"check {label}, then review {label} for round {k + 1}.")
 
 
@@ -570,7 +687,7 @@ def show(label: str) -> str:
     lines = [f"{label}: QA tests " + ("there" if fp else "not written") + (", sealed as they stand" if fp and s.get("fp") == fp else
                                                                              (", changed since sealed" if s.get("fp") else ", not sealed"))]
     if rv:
-        lines.append(f"- their review: round {len(rv)} of {ROUNDS}, {rv[-1].get('verdict')}" + ("" if rv[-1].get("fp") == fp else " (on an earlier wording)")
+        lines.append(f"- their review: round {len(in_road(rv, label))} of {ROUNDS}, {rv[-1].get('verdict')}" + ("" if rv[-1].get("fp") == fp else " (on an earlier wording)")
                      + "".join(f"\n  - {f}" for f in rv[-1].get("findings") or []))
     if row:
         w = why_not(row)
