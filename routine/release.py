@@ -160,6 +160,24 @@ def version() -> str:
         return "0.0.0"
 
 
+def released() -> str:
+    """H320: the version main is at. VERSION, unless a build set it ahead for the release it waits on (the newest version tag
+    is older and VERSION has no tag of its own): then that tag's version."""
+    v = version()
+    if not git("rev-parse", "-q", "--verify", f"refs/tags/v{v}").returncode:
+        return v
+    tag = out("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", push.WORK_BRANCH)
+    nums = lambda x: tuple(int(n) for n in re.findall(r"\d+", x)[:3])
+    return tag[1:] if tag and nums(tag) and nums(tag) < nums(v) else v
+
+
+def release_version(want: str | None) -> tuple[str, str]:
+    """(old, new): the version main is at and the one this release makes: the named one, else a VERSION set ahead by a
+    build (H320: "1.0.2 tonight"), else the next patch."""
+    old = released()
+    return old, want or (version() if version() != old else next_version(old))
+
+
 def next_version(v: str) -> str:
     parts = [int(x) for x in re.findall(r"\d+", v)] or [0]
     while len(parts) < 3:
@@ -202,12 +220,12 @@ def cmd_nightly(why: str) -> int:
         print(f"Nothing pushed: {no}.")
         return 0 if "isn't the main" in no else 2
     if not ahead(push.WORK_BRANCH, push.NIGHTLY_BRANCH):  # F112: a second run does nothing, and says so
-        print(f"Nothing to do: {push.WORK_BRANCH} is already on {push.NIGHTLY_BRANCH}; main stays at {version()}.")
+        print(f"Nothing to do: {push.WORK_BRANCH} is already on {push.NIGHTLY_BRANCH}; main stays at {released()}.")
         return 0
     r = to_nightly()
     if r:
         return r
-    print(f"Held back from main: {why}. The night's work is on {push.NIGHTLY_BRANCH}; main stays at {version()}. "
+    print(f"Held back from main: {why}. The night's work is on {push.NIGHTLY_BRANCH}; main stays at {released()}. "
           f"To put it out anyway: release.py main (his say-so on a call).")
     return 0
 
@@ -353,9 +371,9 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
               f"{before['said']} Nothing has changed since, so nothing was pushed or sent.")
         return 0
     if not ahead(push.WORK_BRANCH, push.RELEASE_BRANCH):
-        print(f"Nothing to do: nothing new on {push.WORK_BRANCH} since {version()}.")
+        print(f"Nothing to do: nothing new on {push.WORK_BRANCH} since {released()}.")
         return 0
-    no = wanted_refuses(want, version())
+    no = wanted_refuses(want, released())
     if no:
         print(f"No release: {no}.")
         return 2
@@ -363,7 +381,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
     night = night_refuses(None if without_qa else _target(h))
     if night:
         if not red_night:
-            print(f"No release: {night}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}.")
+            print(f"No release: {night}. It stays on {push.NIGHTLY_BRANCH}; main stays at {released()}.")
             return 2
         if not say_so(said, "a release past the night"):
             return 2
@@ -391,7 +409,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
                     + (". Goes out now: " + ", ".join(qa.title_of(l) or l for l in h["taken"]) if h["to"] else
                        ". Nothing new goes out this time."))
             if not h["to"]:
-                print(f"No release: nothing new has passed QA yet; it stays on {push.NIGHTLY_BRANCH}, main stays at {version()}.")
+                print(f"No release: nothing new has passed QA yet; it stays on {push.NIGHTLY_BRANCH}, main stays at {released()}.")
                 _keep("nothing new had passed QA, so it stayed on nightly.")
                 return 0
             return cmd_part(h, today, want)
@@ -405,8 +423,7 @@ def cmd_main(today: dt.date | None = None, without_qa: bool = False, red_night: 
             return 2
     today = today or dt.date.today()
     old_main = out("rev-parse", push.RELEASE_BRANCH)
-    old = version()
-    v = want or next_version(old)
+    old, v = release_version(want)
     tag = f"v{v}"
     if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
         print(f"No release: the tag {tag} is already here.")
@@ -469,14 +486,13 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
     lines = _coming(at_to)
     if not lines:
         print("No release: the work that passed QA has nothing in the changelog's Coming next; it stays on "
-              f"{push.NIGHTLY_BRANCH}, main stays at {version()}.")
+              f"{push.NIGHTLY_BRANCH}, main stays at {released()}.")
         return 0
     import datachange  # F104: its data changes are listed with it
     moved = data_lines(push.RELEASE_BRANCH, to)
     lines = lines + [x for x in moved.splitlines() if x.strip()]
     old_main, old_dev = out("rev-parse", push.RELEASE_BRANCH), out("rev-parse", push.WORK_BRANCH)
-    old = version()
-    v = want or next_version(old)
+    old, v = release_version(want)
     tag = f"v{v}"
     if not git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode:
         print(f"No release: the tag {tag} is already here.")
@@ -557,12 +573,12 @@ def data_refuses(base: str, tip: str) -> str | None:
     import datachange
     no = datachange.number_refuses(base, tip, ROOT)
     if no:
-        return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}."
+        return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {released()}."
     new = datachange.between(base, tip, ROOT)
     if not new:
         return None
     no = datachange.try_on_copy(new, root=ROOT)
-    return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {version()}." if no else None
+    return f"No release: {no}. It stays on {push.NIGHTLY_BRANCH}; main stays at {released()}." if no else None
 
 
 def data_lines(base: str, tip: str) -> str:

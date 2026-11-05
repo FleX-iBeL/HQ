@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The agents run themselves is a normal switch now: every HQ shows it in Settings, under What HQ helps you with, and it starts off. Turn it on and Donna, Pepper and Moneypenny each run their own cycles, which show as running on the status page. Turn it off and they stop. Each tap counts, every time. If you had it off before this update, it's still off (H320, H298).
+
 - The points held back under your stop lines for the agents and the team are no longer a fixed 15: they're the sum of the weekly shares set for Donna, Pepper and Moneypenny in Settings (3, 2 and 5 on a fresh HQ: 10), and they follow Settings when you change one. A share you never saved counts as the one Settings shows; a 0 counts as 0. The status page's reserve says the same sum. A reserve of your own, set from a call, still wins (F149).
 
 ## 1.0.1 · 5 November 2026

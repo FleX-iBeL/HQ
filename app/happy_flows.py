@@ -38055,7 +38055,7 @@ print("H88OUT " + json.dumps(out))
                     "--virtual-time-budget=30000"]
             args += [f"--screenshot={shot}"] if shot else ["--dump-dom"]
             return run(args + [pf.as_uri() + "#" + mode], timeout=120)
-        want = {"combos": "4096", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
+        want = {"combos": "8192", "dock": "ok", "row": "ok", "title": "What HQ helps you with", "page": "ok", "calendar off": "gone",
                 "weather waits": "ok", "tidy after taps": "ok", "back on": "ok", "back": "ok"}
         for name, size, app_ in (("the phone", "390,844", False), ("a small phone", "375,553", False), ("the desktop app", "1180,780", True)):
             tag = name.split()[-1] if not name.startswith("a small") else "small"
