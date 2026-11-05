@@ -493,12 +493,49 @@ def _picks(h: dict, old_main: str, start: str) -> list[tuple[str, str]]:
     for label in h["taken"]:
         for sha in rows.get(label, []):
             want.setdefault(out("rev-parse", sha), label)
-    marked = set(re.findall(r"\(cherry picked from commit ([0-9a-f]{40})\)", out("log", "--format=%B", old_main)))
-    same = {ln[2:] for ln in out("cherry", old_main, push.WORK_BRANCH).splitlines() if ln.startswith("- ")}
+    on_main = _on_main(old_main)
     new = set(out("rev-list", "--no-merges", push.WORK_BRANCH, f"^{start}").split())
     order = out("rev-list", "--reverse", "--topo-order", push.WORK_BRANCH, f"^{old_main}").split()
-    return [(sha, want[sha]) for sha in order if sha in want and sha in new and sha not in marked and sha not in same
+    return [(sha, want[sha]) for sha in order if sha in want and sha in new and sha not in on_main
             and not any(sha.startswith(x) or x.startswith(sha) for x in held)]
+
+
+def _on_main(old_main: str) -> set[str]:
+    """The commits of dev whose change is on main already: brought in before (their mark) or the same change."""
+    marked = set(re.findall(r"\(cherry picked from commit ([0-9a-f]{40})\)", out("log", "--format=%B", old_main)))
+    return marked | {ln[2:] for ln in out("cherry", old_main, push.WORK_BRANCH).splitlines() if ln.startswith("- ")}
+
+
+def _settled(sha: str, files: list[str], old_main: str, fine: set[str]) -> str | None:
+    """F152 (QA, 5 November): a picked commit that clashes with work already on main, where dev already holds the settled version:
+    the first commit on dev after sha whose files have all of main's changes to them and, beyond main, only changes of commits that
+    go out (fine: on main already, or picked for a row not held). Its files are then the settled version; None when nothing on dev settles it that way."""
+    marks = {}
+    for entry in out("log", "--format=%H%x00%B%x01", old_main).split("\x01"):
+        c, _, body = entry.strip().partition("\0")
+        m = re.search(r"\(cherry picked from commit ([0-9a-f]{40})\)", body)
+        if m:
+            marks[c] = m.group(1)
+    for x in out("rev-list", "--reverse", "--ancestry-path", f"{sha}..{push.WORK_BRANCH}").split():
+        main_side = out("rev-list", "--no-merges", old_main, f"^{x}", "--", *files).split()
+        if any(git("merge-base", "--is-ancestor", marks.get(c, c), x).returncode for c in main_side):
+            continue
+        if set(out("rev-list", "--no-merges", x, f"^{old_main}", "--", *files).split()) <= fine:
+            return x
+    return None
+
+
+def _clash_why(sha: str, row: str, files: list[str], old_main: str, fine: set[str], rows: dict, held: list[dict]) -> str:
+    """F152: why a checked commit doesn't go on main: the held row (or the unchecked work) it needs, or a clash with main itself."""
+    name = qa.title_of(row) or row or sha[:7]
+    need = [c for c in out("rev-list", "--no-merges", f"{sha}^", f"^{old_main}", "--", *files).split() if c not in fine]
+    named = list(dict.fromkeys(x["label"] for c in need for x in held
+                               if any(c.startswith(s) or s.startswith(c) for s in rows.get(x["label"], []) + [x.get("sha") or "-"])))
+    if named:
+        return f"{name} ({sha[:7]} doesn't go on main without {', '.join(named)}, which is held)"
+    if need:
+        return f"{name} ({sha[:7]} doesn't go on main without work that hasn't passed QA)"
+    return f"{name} ({sha[:7]} clashes with what's on main in {', '.join(files)}, and nothing on dev settles it)"
 
 
 def _added_lines(sha: str) -> list[str]:
@@ -561,7 +598,7 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
     def w(*a, env=None):
         return subprocess.run(["git", "-C", str(wt), *a], text=True, capture_output=True, env=env)
     mine = [f for f in RELEASE_FILES if (wt / f).exists()]
-    brought, stuck, row_at = [], {}, {}
+    brought, stuck, row_at, done = [], {}, {}, _on_main(old_main)
     for sha, row in picks:
         if row in stuck:
             continue
@@ -573,20 +610,29 @@ def cmd_part(h: dict, today: dt.date | None = None, want: str | None = None) -> 
             if f not in mine and (wt / f).exists():
                 w("rm", "-q", "-f", "--cached", "--", f)
                 (wt / f).unlink()
-        if w("diff", "--name-only", "--diff-filter=U").stdout.strip():
-            w("cherry-pick", "--quit")
-            w("reset", "-q", "--hard", row_at[row])
-            stuck[row] = sha
-            brought = [b for b in brought if b[1] != row]
-            continue
+        clash = w("diff", "--name-only", "--diff-filter=U").stdout.split()
+        if clash:  # F152: a clash with work on main that dev already settled takes the settled version; else it stays held
+            fine = done | {p for p, r in picks if r not in stuck}
+            x = _settled(sha, clash, old_main, fine)
+            for f in clash if x else []:
+                if git("cat-file", "-e", f"{x}:{f}").returncode:
+                    w("rm", "-q", "-f", "--", f)
+                else:
+                    w("checkout", x, "--", f)
+                    w("add", "--", f)
+            if not x or w("diff", "--name-only", "--diff-filter=U").stdout.strip():
+                w("cherry-pick", "--quit")
+                w("reset", "-q", "--hard", row_at[row])
+                stuck[row] = _clash_why(sha, row, clash, old_main, fine, h.get("commits") or {}, h["held"])
+                brought = [b for b in brought if b[1] != row]
+                continue
         a = out("log", "-1", "--format=%an%x00%ae%x00%aI", sha).split("\0")
         env = {**os.environ, "GIT_AUTHOR_NAME": a[0], "GIT_AUTHOR_EMAIL": a[1], "GIT_AUTHOR_DATE": a[2]} if len(a) == 3 else None
         body = out("log", "-1", "--format=%B", sha)
         if w("commit", "-q", "--allow-empty", "--no-verify", "-m", f"{body}\n\n(cherry picked from commit {sha})", env=env).returncode:
             return back(f"git couldn't bring in {sha[:7]}.")
         brought.append((sha, row))
-    why_stuck = "; ".join(f"{qa.title_of(r) or r or s[:7]} ({s[:7]} doesn't go on main without work that hasn't passed QA)"
-                          for r, s in stuck.items())
+    why_stuck = "; ".join(stuck.values())
     if why_stuck:
         print("Held: " + why_stuck + ".")
     if not brought and start == old_main:
