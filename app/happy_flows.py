@@ -18227,7 +18227,7 @@ print(json.dumps(release.on_the_record(old, 'v9.9.9', '9.9.9')))
         # a text and an incident about it, given the id
         r = _sp.run([sys.executable, str(ROOT / "app/direct_line.py"), "text", "down", "the made-up part went quiet", "--item", item], capture_output=True, text=True, env=env)
         need(r.returncode == 0, f"the text: {r.stderr[-300:]}")
-        last = json.loads((ws / "HQ/direct-line/thread.jsonl").read_text().splitlines()[-1])
+        last = json.loads((ws / "HQ/team-line/thread.jsonl").read_text().splitlines()[-1])  # F146: a "down" text is Moneypenny's
         need(last.get("item") == item, f"the text doesn't carry the id: {last}")
         code = "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import incidents; incidents.down('jobs', 'a made-up stop', item=sys.argv[2])"
         r = _sp.run([sys.executable, "-c", code, str(ROOT), item], capture_output=True, text=True, env=env)
@@ -21778,6 +21778,8 @@ print(pol.decide('Bash', {'command': 'python3 "' + str(P._APP) + '/rules.py" tod
                 e = dict(env, HQ_DIRECT_DIR=str(line))
                 if name == "team":  # direct_line.team_env, with no list of agents to read
                     e.update({"HQ_DIRECT_AGENT": "moneypenny", "HQ_DIRECT_TEAM": "1", "HQ_DIRECT_PUSH_DIR": str(t / "direct-line")})
+                else:  # F146: a "down" text is Moneypenny's now; on Donna's line it's hers only as the backup, her line off
+                    e["HQ_TEAM_LINE"] = "0"
                 said = []
                 for i in (1, 2, 3):
                     ps = [_sp.Popen([sys.executable, tool, "text", "down", f"the server went quiet, round {i}"], env=e, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True),
@@ -38715,7 +38717,8 @@ G="git -c user.name=hq-test -c user.email=hq-test@example.invalid"
 $G clone -q "$T/origin.git" "$T/B/HQ/workspace" || fail "couldn't clone B's workspace"
 for X in A B; do (cd "$T/$X/HQ/workspace" && git config user.name hq-test && git config user.email hq-test@example.invalid); done
 WA="$T/A/HQ/workspace"; WB="$T/B/HQ/workspace"
-COMMON="HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_DIRECT_PLAIN=1 HQ_SYNC_GIT=0 HQ_ROLE_ONLINE=1 HQ_CLAUDE_CLI=/bin/false"
+# F146: a "down" text is Moneypenny's now; with her line off it stays on Donna's, the one thread this flow shares
+COMMON="HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_DIRECT_PLAIN=1 HQ_SYNC_GIT=0 HQ_ROLE_ONLINE=1 HQ_CLAUDE_CLI=/bin/false HQ_TEAM_LINE=0"
 ENVA="HQ_SUPPORT=$T/A/state HQ_SYNCTHING_HOME=$T/A/st HQ_STATUS_PORT=4796 HQ_PORT=7894 HQ_UNIT=@TAG@-a $COMMON"
 ENVB="HQ_SUPPORT=$T/B/state HQ_SYNCTHING_HOME=$T/B/st HQ_STATUS_PORT=4795 HQ_PORT=7893 HQ_UNIT=@TAG@-b $COMMON"
 ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
