@@ -93,6 +93,12 @@ def _review_waiting(row):
 def next_step(row, g, jobs, now=None):
     """(what, detail) the line does for ROW with switches G: wait, send, mark, prep, rerun, hold, or none."""
     label = row["label"]
+    try:  # passed her check: the line is through with it, the release takes it (a second send built it twice, 5 November 22:54)
+        import qa
+        if qa.state(label) == "passed":
+            return "passed", "passed her check; the release takes it from here"
+    except Exception:
+        pass
     j = q.with_team(jobs, label)
     if j:
         if j["state"].startswith("paused: ended, no record"):
@@ -217,6 +223,11 @@ def tick(now=None):
             st[label] = e = {"row": fp_row, "go": json.dumps(g, sort_keys=True)}
         what, detail = next_step(row, g, jobs, now)
         e["seen"] = f"{what}: {detail}"[:300]
+        if what == "passed":  # its switches go: nothing more for the line to do
+            with q.locked():
+                S.set_go(label, "both", False)
+            done.append(f"{label}: passed her check, its switches off")
+            continue
         if what in ("send", "mark", "rerun", "prep"):
             line = act(label, what, detail, row, st, jobs)
             if line:
