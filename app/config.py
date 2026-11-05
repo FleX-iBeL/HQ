@@ -951,8 +951,8 @@ another agent on this call (you got it wrong, did what he didn't ask, kept askin
 per correction, with his exact words: python3 "@HQ@/routine/mistakes.py" add correction --call {transcript} --said "HIS WORDS" \
 (add --handoff "X to Y" when it was a hand-off between two of you, --item LABEL when it's about one item). The program checks the \
 quote and takes the agent from the transcript; a line it already has stays one line. Praise or a plain "no" to a question isn't a correction.
-3. Then commit and push, as CLAUDE.md says: git add every file you changed plus the transcript, \
-each by name (never -A or a dot), then one plain command: git commit -q -m "Call {start_short}: <a short description>", then git push. \
+3. Then commit and push, as CLAUDE.md says: git add only coaching/log.md, challenges.md and HQ/notes.md when they changed, the \
+about-herself lists git shows as changed, and the transcript, each by name (never -A or a dot; HQ commits its own other files, F154), then one plain command: git commit -q -m "Call {start_short}: <a short description>", then git push. \
 One line per command, no here-documents.
 Nobody can answer questions now: if something needs his yes, leave it, and note it in the log as a follow-up. \
 Don't start new work here, because nobody can be asked.

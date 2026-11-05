@@ -301,7 +301,7 @@ _SHELL_LEDGER = r"(?:ledger/(?!{a}[.-])[^\s\"'|;&/]+|(?<![\w-])notes-(?!{a}\.md|
 
 # F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
 AFTER_CALL_EDIT = "coaching/log.md"
-AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")
+AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/notes\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")  # F154: his quick notes too
 AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py", "mistakes.py", "rules.py"}  # sprint.py, review.py and jobs.py only to read (AFTER_CALL_READS)
 AFTER_CALL_READS = {"sprint.py": {"list", "json", "show", "open", "fields", "check"}, "review.py": {"list", "flags"},
                     "jobs.py": {"list"}, "schedule.py": {"list"}}
@@ -1326,7 +1326,11 @@ class Policy:
             if any(self.rel(a).parts[:1] and self.rel(a).parts[0] in self.protected for a in files):
                 return Decision(DENY, "that folder never goes to GitHub")
             if self.after_call and not all(AFTER_CALL_ADD.match(self.rel(a).as_posix().casefold()) for a in files):
-                return Decision(DENY, "after a call only the log, the lists and the transcript are committed")
+                # F154 (5 November 2026): one file the call changed through HQ's own scripts (the planning, a calendar note) refused the
+                # whole add, so the log wasn't committed either and the notes looked lost. Say which, so the run adds the rest again.
+                other = [a for a in files if not AFTER_CALL_ADD.match(self.rel(a).as_posix().casefold())]
+                return Decision(DENY, f"after a call only the log, the lists, the notes and the transcript are committed, not {', '.join(other)}: "
+                                      "run git add again without them (HQ commits its own files), then commit", retry=True)
             return Decision(ALLOW, "git add, files by name")
         if sub in ("commit", "push") and is_backup():
             # H56.3: only the main one commits; on the backup the notes go over with the sync.
