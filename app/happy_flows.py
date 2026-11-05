@@ -14866,10 +14866,12 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                      + said("cat HQ/agents/handbook.md", "the handbook") + said("cat HQ/agents/agents.json", "{}") + said("grep -n 'git push' routine/x.py", "git push") + said("python3 routine/sprint.py ready F9301", "F9301 isn't ready: refused"))
             many = "for _ in range(65):\n    out({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'x'}]}})\n"
             b.flag("F9301", "no size named")
+            cap = _night_rounds()  # H318: the rounds before the last three seeded
+            _seed_rounds(b.sj, "F9301", cap - 3)
             before, led = b.texts(), b.ledger()
             for i, code in enumerate((noise + many, many, noise + many)):  # boxed three times in a row
                 b.minute()
-                need(b.items() == [f"F9301 round {i + 1}"], f"round {i + 1}: {b.items()}")
+                need(b.items() == [f"F9301 round {cap - 2 + i}"], f"round {cap - 2 + i}: {b.items()}")
                 s = b.go(code)
                 need(s["note"] and s["note"]["boxed"] == "turns", f"not boxed: {s['note']}")
             need(b.texts() == before, f"a text from a round's own noise: {b.texts()[len(before):][-400:]}")
