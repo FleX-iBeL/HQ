@@ -599,15 +599,22 @@ function part(name, data) {
 }
 /**
  * F149 (5 November 2026): the agents' share of the week is the sum of the weekly shares set for Donna, Pepper and Moneypenny in
- * the settings (routine/cycles.py's SETTINGS_REL), not a fixed 15. A share that's missing, unset or not a number counts as 0
- * (Moneypenny's choice: nothing is selected for her), so with all three unset it's 0; no settings file at all is 0 too.
+ * the settings, read the way Settings and the agents' gate read them (routine/cycles.py's settings): the template's
+ * HQ/agents/cycles.json under the workspace's own, an agent in neither gets DEFAULT_AGENT's 2 (job 513, QA of job 512: a fresh
+ * HQ showed 0 while Settings showed 3, 2 and 5). A share that isn't a number above 0 counts as 0, so all three at 0 shows 0.
  */
 const AGENTS = ['donna', 'pepper', 'moneypenny'];
+const DEFAULT_WEEKLY = 2;  // cycles.py DEFAULT_AGENT's weekly_share
+const CYCLES_REL = join('HQ', 'agents', 'cycles.json');  // cycles.py SETTINGS_REL
+async function agentsOf(file) {
+  try { return JSON.parse(await readFile(file, 'utf8'))?.agents ?? {}; } catch { return {}; }
+}
 async function agentsWeekly() {
-  let own = {};
-  try { own = JSON.parse(await readFile(join(FOLDER, 'HQ', 'agents', 'cycles.json'), 'utf8'))?.agents ?? {}; } catch {}
+  const tpl = await agentsOf(join(root, 'template', CYCLES_REL));
+  const own = await agentsOf(join(process.env.HQ_CYCLES_FOLDER || FOLDER, CYCLES_REL));  // cycles.py folder()
   const shares = Object.fromEntries(AGENTS.map((a) => {
-    const n = Number(own?.[a]?.weekly_share);
+    const merged = { weekly_share: DEFAULT_WEEKLY, ...(tpl?.[a] ?? {}), ...(own?.[a] ?? {}) };
+    const n = Number(merged.weekly_share);
     return [a, Number.isFinite(n) && n > 0 ? n : 0];
   }));
   return { shares, total: Math.round(10 * Object.values(shares).reduce((x, y) => x + y, 0)) / 10 };

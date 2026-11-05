@@ -15941,6 +15941,73 @@ print("OK")
         need("plan" in role.WRITES["usagecost"] and "HQ/usage-plan.json" in role.ONE_WRITER, "the backup doesn't hand the plan to the main")
         return "the tag, the switch, the estimate, the learning and the way back on a made-up history"
 
+    async def flow483(self) -> str:
+        """F149, no Claude: the status page's agents' share of the week is the sum of Donna's, Pepper's and Moneypenny's weekly
+        shares the way Settings and the agents' gate take them (cycles.settings: the template's under the workspace's own). On a
+        stand-in site with the template: a fresh HQ (no own file) shows 3, 2 and 5 = 10; a saved entry without a weekly share
+        keeps the template's; 4, 1.5 and 7 shows 12.5, Pepper to 6 shows 17, all three at 0 shows 0; each time the same as
+        cycles.settings, and the page says the sum with each share."""
+        import json as js
+        import subprocess as _sp
+        import urllib.request
+        sys.path.insert(0, str(ROOT / "routine"))
+        import cycles
+        node = shutil.which("node") or "/opt/homebrew/bin/node"
+        d = self.tmp / "F149"
+        shutil.rmtree(d, ignore_errors=True)
+        site, ws = d / "site", d / "workspace"
+        shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        (site / ".status").mkdir()
+        (site / "template/HQ/agents").mkdir(parents=True)
+        shutil.copy(ROOT / "template/HQ/agents/cycles.json", site / "template/HQ/agents/cycles.json")
+        for dname in ("routine", "app"):
+            (site / dname).symlink_to(ROOT / dname)
+        (ws / "HQ/agents").mkdir(parents=True)
+        shutil.copy(ROOT / "template/HQ/roadmap.md", ws / "HQ/roadmap.md")
+        own = ws / "HQ/agents/cycles.json"
+        port = 4803
+        env = {**os.environ, "HQ_STATUS_PORT": str(port), "HQ_WORKSPACE": str(ws), "HQ_ROADMAP": str(ws / "HQ/roadmap.md")}
+        for k in ("HQ_ROLE_HERE", "HQ_CYCLES_FOLDER"):
+            env.pop(k, None)
+        srv = _sp.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=env, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+
+        def shares():
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/page.json", timeout=30) as x_:
+                return js.loads(x_.read())["parts"]["head"]["data"]["agentsWeekly"]
+
+        def settings_say():
+            a = cycles.settings(ws)["agents"]
+            return {k: float(a[k]["weekly_share"]) for k in ("donna", "pepper", "moneypenny")}
+        try:
+            for _ in range(50):
+                try:
+                    shares()
+                    break
+                except Exception:
+                    await asyncio.sleep(0.2)
+            seen = []
+            for agents, want in ((None, 10), ({"pepper": {"on": True}}, 10), ({"donna": {"weekly_share": 4}, "pepper": {"weekly_share": 1.5},
+                                 "moneypenny": {"weekly_share": 7}}, 12.5), ({"donna": {"weekly_share": 4}, "pepper": {"weekly_share": 6},
+                                 "moneypenny": {"weekly_share": 7}}, 17), ({a: {"weekly_share": 0} for a in ("donna", "pepper", "moneypenny")}, 0)):
+                if agents is None:
+                    own.unlink(missing_ok=True)
+                else:
+                    own.write_text(js.dumps({"agents": agents}))
+                got = await asyncio.to_thread(shares)
+                need(got["total"] == want, f"F149: with {agents} the page says {got['total']}, not {want}")
+                need({k: float(v) for k, v in got["shares"].items()} == settings_say(),
+                     f"F149: with {agents} the page's shares {got['shares']} aren't what Settings shows {settings_say()}")
+                seen.append(f"{got['total']:g}")
+        finally:
+            srv.terminate()
+        page = (ROOT / "status/index.html").read_text()
+        need("s.agentsWeekly" in page and "the sum of the weekly shares set for Donna (${agents.shares.donna})" in page,
+             "F149: the page doesn't say the agents' sum with each share")
+        need("(F149)" in (ROOT / "CHANGELOG.md").read_text(), "F149: not in the changelog")
+        tour = js.loads((APP / "web/tour.json").read_text())
+        need(any("the agents' share of the week" in s_["text"] for p_ in tour["pieces"] for s_ in p_["steps"]), "F149: no tutorial line on the agents' share")
+        return f"fresh HQ, an entry without a share, three changes: the page says {', '.join(seen)}, each the same as Settings"
+
     async def flow482(self) -> str:
         """F146, no Claude: the build's messages come from Moneypenny, Donna keeps to secretary work, on every HQ. On a fresh HQ
         (the template's workspace) and this one, with her on: HQ acting up (the look at the incidents) and its all-clear, news on
@@ -38826,6 +38893,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now of today starts it with the open points, an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set", False, "flow483"),
     482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
     478: ("F141: a switch still built in pieces gets its settings boxes on the maker's HQ: agents_run its line per agent (cycles) with on as switched, driving its maps key; another HQ hides both with neither; shipped still gives cycles", False, "flow478"),
     477: ("F140: a field label with a short aside in brackets before its colon (His words (date, time): ...) reads as the label; the aside's date and time are no quote or source, a bare time stays with its source; written, reviewed and marked ready on a copy, a made-up quote still refused", False, "flow477"),

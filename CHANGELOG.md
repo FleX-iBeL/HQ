@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The status page's usage part says the agents' share of the week as the sum of the weekly shares set for Donna, Pepper and Moneypenny in Settings, each share next to it, instead of a fixed 15, and it follows Settings when you change one. It reads them the way Settings does, so a fresh HQ shows the shares it starts with (3, 2 and 5, so 10) and never a 0 that Settings doesn't show (F149).
+
 - The status page has a search box at the top: type a number like F86 or a few words like "talk button" and it shows just those items with where they stand, opening the folded parts they sit in; clearing it brings the page back as it was. A switch next to it picks open items only (where it starts) or all of them, and a search with no hits says nothing found. Cmd+F still finds every item on the page, finished ones too, whatever the switch says.
 
 - The happy flows are the 17 you asked for, and only those: a call from the phone, typing on a call, asking before a yes, a dropped call's notes, a text answered within a minute, a reminder on time, the to-do list, today's calendar, a very important mail, an idea on the planning, your "now", the team's build, closing a job, the agents' check-ins, the usage line at night, the game's reminder and a fresh install. They run for real, with the real model, after every fix and every feature, and a build isn't done until they pass: `python3 routine/happy.py run`. HQ's hundreds of other tests are now called the detailed flows and run every night.
