@@ -16229,6 +16229,82 @@ print("OK")
         need(real == "True", "a test wrote the real ledger")
         return "the row's words stand once, reword stays in the ask, 004 and its undo; add from a text; the re-review settles; his now never sends it flagged (F151), and once it passes his now of today starts it; no test line on his ledger"
 
+    async def flow485(self) -> str:
+        """F147, no Claude: she answers from the item's record, not from memory. On a throwaway HQ a made-up item has two
+        review rounds (flagged, then passed) and no ready mark; her real reply runs with a stand-in model that writes
+        planted drafts. A wrong count (one round) is held back, she gets the record and one rewrite, and the true count
+        goes out in one text; a wrong ready state twice gives the record's own words (not ready), no second rewrite; a
+        wrong count twice gives the record's rounds. Each miss is on the mistakes ledger as from-memory, naming the item;
+        a right draft goes out as written with nothing logged. The record itself never reaches him."""
+        import subprocess as _sp
+        ws, env = self._h298_ws("f147")
+        lab = "F900"
+        now = int(time.time())
+        planning = self.tmp / "f147-planning.json"
+        planning.write_text(json.dumps({"review": {lab: {"verdict": "pass", "findings": [], "now_rounds": [
+            {"fp": "f147aaaaaaa1", "at": now - 7200, "verdict": "flag", "n": 0},
+            {"fp": "f147aaaaaaa2", "at": now - 3600, "verdict": "pass", "n": 1}]}}, "ready": {}}, indent=1))
+        env["HQ_SPRINT"] = str(planning)
+        child = self.tmp / "f147-child.py"
+        child.write_text(F147_CHILD)
+        ledger = self.tmp / "f147-mistakes.jsonl"
+
+        def ask(question, drafts, k):
+            line = self.tmp / f"f147-line-{k}"
+            line.mkdir()
+            ledger.write_text("")
+            out = self.tmp / f"f147-out-{k}.json"
+            e = {**env, "HQ_DIRECT_DIR": str(line), "HQ_TEAM_LINE_DIR": str(line), "HQ_DIRECT_TEAM": "1",
+                 "HQ_DIRECT_AGENT": "moneypenny", "HQ_DIRECT_PUSH_DIR": str(self.tmp / f"f147-nopush-{k}"),
+                 "HQ_MISTAKES": str(ledger)}
+            e.pop("HQ_DIRECT_DRY", None)
+            r = _sp.run([sys.executable, str(child), str(ROOT), json.dumps(drafts), str(out), question], env=e,
+                        cwd=str(ROOT), capture_output=True, text=True, timeout=300)
+            need(out.exists(), f"her reply didn't run: {r.stderr[-800:]}")
+            o = json.loads(out.read_text())
+            o["texts"] = [m.get("text", "") for m in o["thread"] if m.get("from") == "agent"]
+            o["ledger"] = [json.loads(x) for x in ledger.read_text().splitlines() if x.strip()]
+            return o
+
+        import item_record
+
+        def from_memory(o):
+            return [x for x in o["ledger"] if lab in json.dumps(x) and re.search(r"from.memory", json.dumps(x))]
+
+        q = f"how many review rounds did {lab} take?"
+        right = f"{lab} took two review rounds: flagged the first time, passed the second."
+        # 1. A wrong count, then a right rewrite: held back, rewritten once from the record, logged, one text.
+        a = ask(q, [f"{lab} took one review round, and it passed straight away.", right], 1)
+        first = a["prompts"][0] if a["prompts"] else ""
+        need(lab in first and re.search(r"flag", first, re.I) and re.search(r"pass", first, re.I),
+             f"the record didn't reach her first: {first[-600:]!r}")
+        need(len(a["texts"]) == 1, f"he got {len(a['texts'])} texts, not one: {a['texts']!r}")
+        need(item_record.counts_in(a["texts"][0]) == {2}, f"the wrong count wasn't held back: {a['texts']!r}")
+        need(len(a["prompts"]) == 2 and re.search(r"\btwo\b|\b2\b", a["prompts"][-1]),
+             f"she wasn't asked once to write it again from the record: {a['prompts'][1:]!r}")
+        need(from_memory(a), f"the miss isn't on the ledger as from-memory naming {lab}: {a['ledger']!r}")
+        need(not re.search(r"now_rounds|verdict|\bfp\b|f147aaaaaaa|\b1[789]\d{8}\b", a["texts"][0]),
+             f"the record itself was shown to him: {a['texts'][0]!r}")
+        # 2. A wrong ready state twice: the record's own words go out, no second rewrite, both misses logged.
+        b = ask(f"is {lab} ready?", [f"Yes, {lab} is ready.", f"Yes, {lab} is marked ready now."], 2)
+        need(len(b["texts"]) == 1 and len(b["prompts"]) == 2,
+             f"not one text after one rewrite: {b['texts']!r}, {len(b['prompts'])} turns")
+        need(re.search(r"not\s+(yet\s+)?(marked\s+)?ready|isn.t\s+(yet\s+)?(marked\s+)?ready", b["texts"][0], re.I),
+             f"the record's own words (not ready) didn't go out: {b['texts']!r}")
+        need(len(from_memory(b)) >= 2, f"the draft's and the rewrite's misses aren't both on the ledger: {b['ledger']!r}")
+        # 3. A wrong count twice: the record's rounds go out instead of her line.
+        c = ask(q, [f"{lab} took one review round.", f"Just one round for {lab}."], 3)
+        need(len(c["texts"]) == 1 and len(c["prompts"]) == 2 and item_record.counts_in(c["texts"][0]) <= {2}
+             and re.search(r"\btwo\b|\b2\b|round 2", c["texts"][0]),
+             f"the record's rounds didn't go out after a still-wrong rewrite: {c['texts']!r}")
+        need(len(from_memory(c)) >= 2, f"the still-wrong misses aren't on the ledger: {c['ledger']!r}")
+        # 4. A right draft goes out as she wrote it, nothing logged.
+        d = ask(q, [right], 4)
+        need(d["texts"] == [right] and not d["ledger"] and len(d["prompts"]) == 1,
+             f"a right draft didn't go out untouched: {d['texts']!r}, ledger {d['ledger']!r}")
+        return ("a wrong count and a wrong ready state are held back, rewritten once from the record, else the "
+                "record's words; each miss logged as from-memory, a right draft untouched")
+
     async def flow484(self) -> str:
         """F151, no Claude: a fix QA finds goes the road of a new item. On a throwaway HQ, a made-up row with her sealed and reviewed tests is
         built (a marker file stands in for the build), and QA fails it: no job appears, the finding is an open point in the row, the ready
@@ -38451,6 +38527,30 @@ print(json.dumps(o))
         need(re.search(r"urgent|important|square|matrix", reply, re.I), f"she didn't explain it from the tutorial: {reply[:200]!r}")
         return f"a demo call answers about HQ from the tutorial on {c.brain.model}, no tools: {reply.strip()[:80]}"
 
+# F147, flow 485: one run of her real reply with a stand-in model that writes the planted drafts in turn.
+F147_CHILD = r"""
+import json, sys
+root, drafts, out, question = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3], sys.argv[4]
+sys.path[:0] = [root + "/app", root + "/routine"]
+import brain
+seen = []
+class Stand:
+    def __init__(self, *a, **k):
+        self.session_id = None; self.last_turn = None
+    async def ask(self, prompt):
+        seen.append(prompt)
+        yield drafts[min(len(seen) - 1, len(drafts) - 1)]
+    async def stop(self):
+        pass
+brain.ClaudeBrain = Stand
+brain.call_session_options = lambda **k: {}
+import direct_line as dl
+dl.push = lambda *a, **k: []
+dl.add("me", question, "")
+dl.reply()
+json.dump({"prompts": seen, "thread": dl.thread()}, open(out, "w"))
+"""
+
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
@@ -38998,6 +39098,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    485: ("F147: she answers from the item's record, not from memory: a planted wrong count and a wrong ready state in her reply are held back, rewritten once from the record, else the record's own words go out, one text, each miss on the mistakes ledger as from-memory naming the item; a right draft untouched", False, "flow485"),
     484: ("F151: a fix QA finds goes the road of a new item: no job by itself, the finding an open point in the row, her new test failing on the build and sealed, its own review and the item's again (round 1 of 20 each), then send-row; QA's pass needs the new test and the 17, and closes the row it replaces", False, "flow484"),
     483: ("F149: the status page's agents' share of the week is the sum of their weekly shares as Settings takes them (the template's under the own file): a fresh HQ 10, an entry without a share the template's, 12.5, 17 and 0 as set; the reserve behind the page and under the stop lines the same sum", False, "flow483"),
     482: ("F146: the build's messages (HQ acting up and back, feedback news, the call lines' restart heads-up) come from Moneypenny on a fresh HQ and this one, the night's held ones too; switched off or not set up, all four from Donna", False, "flow482"),
