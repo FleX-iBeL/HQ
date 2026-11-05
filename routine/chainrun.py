@@ -179,6 +179,11 @@ def run(name, *a, stdin=None):
     r = subprocess.run([PY, f"{HQ}/routine/{name}", *a], capture_output=True, text=True, input=stdin, cwd=HQ)
     open(os.environ["HQ_CHAIN_LOG"], "a").write(f"{name} {' '.join(a)[:120]}: {r.returncode} {(r.stdout + r.stderr)[-200:]}\n")
     return r
+if "--system-prompt" in sys.argv and sys.argv[sys.argv.index("--system-prompt") + 1].startswith("You review the QA tests"):
+    # real QA: the review of her QA tests reads one JSON answer (--output-format json), no stream
+    out({"type": "result", "subtype": "success", "is_error": False, "result": json.dumps(
+        {"sentences": [{"his": "", "checked": True, "why": "the page's words"}] * 40, "pass": True, "findings": []})})
+    sys.exit(0)
 out({"type": "system", "subtype": "init", "session_id": "s-chain"})
 n = (re.search(r"This is job (\d+)", prompt) or [0, "0"])[1]
 words = os.environ["HQ_CHAIN_WORDS"]
@@ -196,6 +201,20 @@ elif re.search(r"This run: round \d+ of at most", prompt):
     run("review.py", "add", label, stdin="FILLED: which card.\n")
 elif "your mark comes second" in prompt:
     label = re.search(r"This run: one row, (\S+?)\.", prompt)[1]
+    # real QA (4 November 2026): her own QA tests first, written, checked and reviewed, or the Ready mark is refused
+    run("qatests.py", "new", label)
+    d = subprocess.run([PY, "-c", "import sys; sys.path.insert(0, sys.argv[1] + '/routine'); import qatests; print(qatests.folder(sys.argv[2]))",
+                        HQ, label], capture_output=True, text=True, cwd=HQ).stdout.strip()
+    t = json.load(open(f"{d}/tests.json", encoding="utf8"))
+    for x in t["sentences"]:
+        x["tests"] = ["page_says_it"]
+    t["tests"] = {"page_says_it": "the page says it better"}
+    json.dump(t, open(f"{d}/tests.json", "w", encoding="utf8"))
+    open(f"{d}/test.py", "w", encoding="utf8").write(
+        "import sys, pathlib\nok = %r in (pathlib.Path(sys.argv[1]) / %r).read_text(encoding='utf8')\n"
+        "print('PASS page_says_it' if ok else 'FAIL page_says_it: the old words')\n" % (os.environ["HQ_CHAIN_NEW"], os.environ["HQ_CHAIN_PAGE"]))
+    run("qatests.py", "check", label)
+    run("qatests.py", "review", label)
     run("sprint.py", "ready", label)
 elif "planned for the team at the sprint planning" in prompt:
     label = re.search(r"(?:^|\s)([FH]\d+) on the HQ roadmap", prompt)[1]
