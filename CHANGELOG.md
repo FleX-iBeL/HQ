@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 1.0.2 · 6 November 2026
+
 - The night review of items without your now goes up to 20 rounds an item instead of 3, the same as your now and her tests: only after the 20th flagged round does an item go on your Friday list. The rounds count per item across nights, and a night that stops partway picks up at the round it stopped. Moneypenny's Friday estimates text now also says how many rounds that week's items cost (the average, the highest and the lowest), says so when 20% or more of them needed more than 6, and says no items this week when there were none. Moneypenny's own instructions say the same 20 rounds, counted across nights, so asked on a call she gives you 20, not the old 3 (H318).
 
 - Moneypenny answers from the item's record now, not from memory: when your text asks about an item, she gets its review rounds, whether it's ready and its job before she writes, and a round count or a ready state of hers that the record contradicts, or a line saying the item isn't on the planning, had no rounds or has no ready mark when the record says otherwise, is held back, written again once from the record, and noted on the mistakes ledger. You only ever get her one normal reply; when she can't check an item she says so and gives no number. What she says about the item's job or its work (it stopped partway, she hasn't checked yet what landed) is no longer taken for a claim about its rounds, and when the record's own words do go out they take the place of the wrong line, so you never get the rounds told twice (F147).
