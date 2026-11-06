@@ -352,7 +352,7 @@ def send(aid: str, text: str, why: str = "cycle", base: Path | None = None) -> d
     env = _line_env(aid, base)
     code = ("import sys, json; sys.path.insert(0, %r); import direct_line as D\n"
             "m = D.add('agent', sys.argv[1], sys.argv[2])\n"
-            "try:\n    m['pushed'] = D.push(m['text']) if D.on() else []\nexcept Exception as e:\n    m['pushed'] = [repr(e)]\n"
+            "try:\n    m['pushed'] = D.push(m['text']) if D.on() and D.written(m) else []\nexcept Exception as e:\n    m['pushed'] = [repr(e)]\n"
             "print(json.dumps(m))") % str(ROOT / "app")
     r = subprocess.run([PY, "-c", code, text, why], capture_output=True, text=True, env=env, timeout=120)
     try:

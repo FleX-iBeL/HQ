@@ -367,6 +367,10 @@ def line_dir(name: str) -> Path | None:
 def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", quiet: bool = False) -> dict:
     m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": mid or secrets.token_hex(8),
          **({"item": item} if item else {}), **({"quiet": True} if quiet else {})}  # F103: the id of the work it's about, carried as an argument
+    import outbox  # H338: the style filter, the claim check, no question already answered, one text per topic, her batches
+    m = outbox.check(m, folder(), read_lines(folder()), agent()["id"])
+    if not written(m):
+        return m
     where = folder()
     if _backup():
         try:
@@ -380,6 +384,17 @@ def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", qu
             return m
     put(where, m)
     return m
+
+
+def written(m: dict) -> bool:
+    """H338: the outbox let this line through (not refused, not the same topic again, not kept for her batch)."""
+    return not any(k in m for k in ("refused", "same", "queued"))
+
+
+def wrote_calendar(what: str = "") -> None:
+    """H338: a calendar write that really happened, so the claim check lets her "it's in your calendar" through."""
+    import outbox
+    outbox.wrote_calendar(folder(), what)
 
 
 def unanswered() -> list[dict]:
@@ -1101,6 +1116,9 @@ def text(why: str, facts: str, item: str = "", once: str = "") -> dict:
         m["line"] = "team"
         return m
     msg = add("agent", compose(why, facts), why, item, once)
+    if not written(msg):
+        _on_record(item, why, next(k for k in ("refused", "same", "queued") if k in msg))
+        return msg
     msg["pushed"] = push(msg["text"])
     _on_record(item, why, "sent", msg.get("id", ""))
     return msg
@@ -1188,6 +1206,8 @@ def initiative() -> dict | None:
         print(time.strftime("%Y-%m-%d %H:%M:%S"), "initiative: quiet")
         return None
     msg = add("agent", words, "initiative")
+    if not written(msg):
+        return msg
     msg["pushed"] = push(msg["text"])
     _harvest(words)
     pings.initiative_sent()
@@ -1217,10 +1237,9 @@ _PROMISE = re.compile(r"\b(I'll|I will|I'm going to|next I|then I|I can now|so I
 
 
 def _promises(text: str) -> bool:
-    """Her text ends on a step she says she'll take herself, not on a question for him."""
-    tail = (text or "").strip().split("\n\n")[-1]
-    waits = re.search(r"\b(once you|until you|your call|waiting on you|when you answer|if you|no change|nothing'?s moved)\b", text or "", re.I)
-    return bool(_PROMISE.search(text or "")) and "?" not in tail and not waits
+    """Her text ends on a step she says she'll take herself, not on a question for him (outbox.promises, as on calls)."""
+    import outbox
+    return outbox.promises(text)
 
 
 def reply() -> str | None:
@@ -1251,15 +1270,15 @@ def reply() -> str | None:
             words = "\n".join(m["text"] for m in mine)
             answer = _answer(words, [m.get("id") for m in mine])
             msg = add("agent", answer, "reply")
-            push(answer)
+            push(msg["text"])
             _harvest(answer)
             last = msg["text"]
-            for _k in range(CARRY_MOST if os.environ.get("HQ_DIRECT_TEAM") == "1" else 0):
+            for _k in range(CARRY_MOST):  # H338: on every agent's line, not only Moneypenny's
                 if unanswered() or not _promises(answer):
                     break
                 answer = _answer(CARRY_NOTE, [])  # 4 November 2026: she said she'd do the next step, so she does it now
                 msg = add("agent", answer, "reply")
-                push(answer)
+                push(msg["text"])
                 _harvest(answer)
                 last = msg["text"]
     finally:

@@ -411,6 +411,7 @@ class ClaudeSessionLLMService(LLMService):
                     if pending else ""))
                 mark, speech = Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks]), SpeechFilter()
                 await self._stream(reply, turn, t0, mark, speech)
+            await self._carry_on(turn, t0)
             await self._say_blocked(turn, decided)
             asked = [self.switch_marks[m] for m in self.switch_marks if mark.found(m)]
             if mark.found(config.CALLBACK_MARK) and not mark.found(config.HANGUP_MARK):
@@ -462,6 +463,37 @@ class ClaudeSessionLLMService(LLMService):
                 self.transcript.reply(turn["reply"], cut_off=turn["interrupted"])
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+
+    CARRY_MOST = 2  # H338: her own next steps in one turn after a reply that only promised one
+    CARRY_NUDGE = ("[Call system: you said you'd do a step yourself and nothing was done yet. Do it now, in this turn, then say "
+                   "in one short spoken sentence what you did. If it truly needs his yes, ask him now.]")
+
+    async def _carry_on(self, turn: dict, t0: float) -> None:
+        """H338 (Part C 2, F153): a reply that promises a step and does nothing gets one more ask in the same turn, as her text lines
+        do; a promise still open at the end is handed on in the call's record, naming what she promised."""
+        import outbox
+        if turn.get("cancelled") or turn.get("interrupted"):
+            return
+        start, tools, first = 0, 0, ""
+        for _ in range(self.CARRY_MOST + 1):
+            part = turn["reply"][start:]
+            if not outbox.promises(part) or len(turn["tools"]) > tools:
+                return
+            first = first or outbox.promised(part)
+            if _ == self.CARRY_MOST:
+                break
+            start, tools = len(turn["reply"]), len(turn["tools"])
+            if self.transcript:
+                self.transcript.note("her reply promised a step with nothing done; asked once more in the same turn")
+            reply = self.brain.ask(self.CARRY_NUDGE)
+            try:
+                await self._stream(reply, turn, t0, Marks([config.HANGUP_MARK, config.CALLBACK_MARK, *self.switch_marks]),
+                                   SpeechFilter())
+            finally:
+                await reply.aclose()
+        turn["open_promise"] = first
+        if self.transcript:
+            self.transcript.note(f"a promise still open, handed on: she promised \"{first}\" and it isn't done yet")
 
     SILENT_NUDGE = ("[Call system: your turn ended without a single word to {user}. He heard nothing, and the thinking "
                     "sound stopped. Say now, in one or two short spoken sentences, what you did or found and what comes "
@@ -741,10 +773,15 @@ class SpeechFilter:
             tail = s[cut + 1:]
             bare = tail.lstrip("([<*\"'").lower()
             if tail and ("[" in tail or "]" in tail or bare.startswith(self._OPEN)
-                         or any(o.startswith(bare) for o in self._OPEN)):
+                         or any(o.startswith(bare) for o in self._OPEN)
+                         or any(c in tail for c in "/_~") or "job".startswith(bare)):  # H338: could still be a path or a job number
                 s, self.word = s[:cut + 1], tail
+            before = re.search(r"\b[Jj]ob\s+$", s)
+            if before:  # "job" and its number can come in two pieces: held together
+                s, self.word = s[:before.start()], s[before.start():] + self.word
         s = self._LINK.sub("", s)
-        return s.replace("[", "").replace("]", "")
+        import outbox  # H338: a job number or a file path is never said (the texts get the same filter)
+        return outbox.style(s.replace("[", "").replace("]", ""))
 
     def feed(self, piece: str) -> str:
         return self._marks(self._unlinked(piece))
