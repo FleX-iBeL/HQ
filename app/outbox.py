@@ -59,8 +59,35 @@ def wrote_calendar(where: Path, what: str = "") -> None:
         f.write(json.dumps({"at": round(time.time(), 3), "what": what}, ensure_ascii=False) + "\n")
 
 
+def _hqpaths():
+    sys.path.insert(0, str(ROOT / "routine"))
+    import hqpaths
+    return hqpaths
+
+
+def writes_file() -> Path:
+    """Every calendar write that came back, from a call, a text or a cycle (policy.seen, cycles), in HQ's data folder."""
+    return Path(_hqpaths().DATA) / "direct-line" / "calendar-writes.jsonl"  # the line's folder: never synced or committed
+
+
+def calendar_written(what: str = "") -> None:
+    try:
+        f = writes_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        rows = [x for x in _jsonl(f) if time.time() - float(x.get("at") or 0) < 86400][-200:]
+        rows.append({"at": round(time.time(), 3), "what": what})
+        tmp = f.with_name(f.name + ".tmp")
+        tmp.write_text("".join(json.dumps(x) + "\n" for x in rows), encoding="utf8")
+        tmp.replace(f)
+    except Exception as e:
+        print(f"outbox: {e!r}", file=sys.stderr)
+
+
 def _wrote_lately(where: Path) -> bool:
-    return any(time.time() - float(x.get("at") or 0) < CLAIM_MINUTES * 60 for x in _jsonl(where / "calendar-writes.jsonl"))
+    rows = _jsonl(where / "calendar-writes.jsonl")
+    if not _hqpaths().under_test():  # a test's throwaway line has only its own writes
+        rows += _jsonl(writes_file())
+    return any(time.time() - float(x.get("at") or 0) < CLAIM_MINUTES * 60 for x in rows)
 
 
 def _rewrite_claim(text: str) -> str:

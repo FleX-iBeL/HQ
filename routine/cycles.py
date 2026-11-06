@@ -1718,6 +1718,12 @@ def calendar_result(aid: str, name: str, inp: dict, txt: str, ok: bool, job: int
                 rec["why"] = _short_why(txt)
             return
         ledger.note(aid, f"{now:%Y-%m-%d %H:%M} {cyclehook.calendar_line(name, inp, str(base) if base else None, st_['mine'])}")
+        try:  # H338: a write behind her "it's in your calendar", for the outbox's claim check
+            sys.path.insert(0, str(ROOT / "app"))
+            import outbox
+            outbox.calendar_written(last)
+        except Exception:
+            pass
         eid = str(inp.get("eventId") or "")
         if last == "create_event":
             m = re.search(r"\"(?:id|eventId|event_id)\"\s*:\s*\"([^\"]+)\"", txt) or re.search(r"\b(?:id|eventId)\W{1,3}([\w-]{6,})", txt)

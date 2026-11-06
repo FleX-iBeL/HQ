@@ -588,6 +588,11 @@ class Policy:
         if "calendar" in server.lower() and name in CALENDAR_ADD | CALENDAR_CHANGE | {"respond_to_event"}:
             # H153: a write in the calendar (a call, Donna's chat, an appointment's note): HQ's calendar reads it again
             if not self.dry_run:
+                try:  # H338: a write behind her "it's in your calendar", for the outbox's claim check
+                    import outbox
+                    outbox.calendar_written(name)
+                except Exception:
+                    pass
                 try:
                     import agenda
                     agenda.changed(name)

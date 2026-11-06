@@ -276,6 +276,8 @@ def restore(note_id: str, notes: Path | None = None) -> dict | None:
 def seen_file(notes: Path | None = None) -> Path:
     """H338: the notes a look has had already, next to the notes (notes.md → notes-seen.json)."""
     notes = notes or NOTES
+    if notes == Path(str(config.DATA / "notes.md")):  # his own notes: the mark is this computer's, in the line's folder (never committed)
+        return config.DATA / "direct-line" / "notes-seen.json"
     return notes.with_name(notes.stem + "-seen.json")
 
 
