@@ -16367,6 +16367,79 @@ print("OK")
         need(three not in g, f"a done row kept its switches: {g}")
         return f"the line: his switch, one prep job, marked and sent by the program, her build at night, stuck after {made}, paused, cleared"
 
+    async def flow489(self) -> str:
+        """H321 (6 November 2026), no Claude: his now on a call held on the backup counts, typed or spoken, during the call. On a throwaway pair (a
+        backup and a main, each its own memory and workspace; the main's forward door a loopback stand-in running its own role.py serve forward),
+        a made-up call on the backup written by the call's own transcript writer: before any hand-over (the transcript reaches the main only at
+        the call's end), send-row X1 --now --said with his typed now is taken on the main, the same now said aloud too; words that aren't his
+        line on that call, and her own line, a call note and the log holding the same words, are refused there with no line of his. The backup
+        checks his words at its own door and hands them over with the request (role.checked_env), as the line's switch does."""
+        import http.server, shutil as _sh, subprocess as _sp, tempfile, threading
+        now = "Yes, X1 to the team now."
+        def env_of(ws, **more):
+            e = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+            e.update(HQ_SUPPORT=str(ws.parent / "support"), HQ_WORKSPACE=str(ws), HQ_ROADMAP=str(ws / "HQ" / "roadmap.md"), HQ_UNDER_TEST="1",
+                     HQ_PROOF_ON="1", HQ_LOOK="0", HQ_USER_NAME="Tester", HQ_REVIEW_FAKE="auto", PYTHONDONTWRITEBYTECODE="1", **more)
+            return e
+        def fresh():
+            ws = Path(tempfile.mkdtemp(prefix="h321-")) / "workspace"
+            _sh.copytree(ROOT / "template" / "HQ", ws / "HQ")
+            (ws / "me.md").write_text("Name: Tester\n")
+            (ws.parent / "support").mkdir()
+            road = ws / "HQ" / "roadmap.md"
+            road.write_text(road.read_text().replace("## Phase F · Bugs\n", "## Phase F · Bugs\n\n| ⬜ | X1 A made-up bug | 5 November 2026 (on a call): a "
+                                                     "made-up bug for a flow, nothing of his. | |\n", 1))
+            _sp.run([sys.executable, "routine/review.py", "now", "X1"], cwd=str(ROOT), env=env_of(ws), capture_output=True, text=True, timeout=300)
+            return ws
+        write = ("import sys, json; sys.path.insert(0, sys.argv[1] + '/app'); import transcript\n"
+                 "t = transcript.CallTranscript(agent='Moneypenny', model='opus')\n"
+                 "for who, words, typed in json.loads(sys.argv[2]):\n"
+                 "    t.reply(words) if who == 'her' else t.note(words) if who == 'note' else t.user(words, typed=typed)\n"
+                 "print(t.path)\n")
+        def during_call(lines, log=False):
+            wsb, wsa = fresh(), fresh()
+            main_env = env_of(wsa)
+            class Door(http.server.BaseHTTPRequestHandler):
+                def log_message(self, *a): pass
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers.get("content-length") or 0))
+                    r = _sp.run([sys.executable, str(ROOT / "routine" / "role.py"), "serve", "forward"], input=body.decode(), cwd=str(ROOT),
+                                env=main_env, capture_output=True, text=True, timeout=300)
+                    out = (r.stdout.strip().splitlines() or ["{}"])[-1].encode()
+                    self.send_response(200); self.send_header("content-type", "application/json"); self.end_headers(); self.wfile.write(out)
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Door)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                for ws, name, peer in ((wsa, "main", "http://127.0.0.1:9"), (wsb, "backup", f"http://127.0.0.1:{srv.server_address[1]}")):
+                    (ws.parent / "support" / "role.json").write_text(json.dumps({"name": name, "peer": peer, "main": "main", "chosen_at": 1,
+                                                                                 "peer_name": "other", "takeover": 300}))
+                r = _sp.run([sys.executable, "-c", write, str(ROOT), json.dumps(lines)], cwd=str(ROOT), env=env_of(wsb), capture_output=True, text=True, timeout=120)
+                path = Path((r.stdout.strip().splitlines() or [""])[-1])
+                need(path.is_file(), f"the call's transcript wasn't written: {r.stderr[-300:]}")
+                need(not (wsa / path.relative_to(wsb)).exists(), "the call was on the main before its hand-over")
+                if log:
+                    for ws in (wsa, wsb):
+                        (ws / "HQ" / "log.md").write_text(f"- {now}\n")
+                r = _sp.run([sys.executable, "routine/jobs.py", "send-row", "X1", "--now", "--said", now], cwd=str(ROOT),
+                            env=env_of(wsb, HQ_WORDS_FROM=str(path)), capture_output=True, text=True, timeout=300)
+                out = (r.stdout + r.stderr).strip()
+                taken = r.returncode == 0 and "X1 on the HQ roadmap, sent to the team" in (wsa / "HQ" / "roadmap.md").read_text()
+                return taken, out[-300:]
+            finally:
+                srv.shutdown()
+        ask = ("her", "Shall X1 go to the team?", False)
+        for what, lines in (("typed", [ask, ("him", now, True)]), ("spoken", [ask, ("him", now, False)])):
+            taken, out = await asyncio.to_thread(during_call, lines)
+            need(taken, f"his {what} now on the backup's call wasn't taken on the main: {out}")
+        taken, out = await asyncio.to_thread(during_call, [ask, ("him", "Yes, let's talk about lunch.", False)])
+        need(not taken and re.search(r"no line of his|aren't his words|now takes his", out, re.I), f"words that aren't his line on that call: {out}")
+        mixed = [("her", now, False), ("note", "Summary: " + now, False)]
+        taken, out = await asyncio.to_thread(during_call, mixed, True)
+        need(not taken, f"her line, a summary and the log counted as his now: {out}")
+        taken, out = await asyncio.to_thread(during_call, mixed + [("him", now, True)], True)
+        need(taken, f"with his one line beside hers, a summary and the log, the send wasn't taken: {out}")
+        return "a backup's call, before its hand-over: his typed now and his spoken now taken on the main; words not his line, her line, a summary and the log refused"
+
     async def flow488(self) -> str:
         """H324 (6 November 2026), no Claude: the night run's failures go through the whole rotation, never a quick patch. On a throwaway HQ with
         the full run stood in: a red round started by the routine makes one row per failing flow, each held against the item its flow belongs to,
@@ -39461,6 +39534,7 @@ FLOWS = {
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
+    489: ("H321: his now on a call held on the backup counts during the call, typed or spoken: the backup checks his words at its own door and hands them to the main with the send; words not his line, her line, a summary and the log still refused", False, "flow489"),
     488: ("H324: the night run's failures go through the whole rotation, never a quick patch: a row per failing flow held against its item, the night's own switches, no team job; the release waits for the night; the next full run once every failure passed her check; paused after the third red run; his pause holds the night", False, "flow488"),
     486: ("the line: his two switches on an item (prepare, build); the routine carries it from the record: one prep job for Moneypenny, the Ready mark and the send by the program, his switch the say-so by day, hers at night, stuck after three tries, held by his pause, cleared when the row closes", False, "flow486"),
     487: ("F147: a true draft about her item's paused job (stopped partway, left no record, its work not checked yet) goes out untouched and unlogged; a wrong line's fallback replaces it and tells the rounds and the ready mark once", False, "flow487"),

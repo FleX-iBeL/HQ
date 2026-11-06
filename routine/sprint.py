@@ -767,6 +767,9 @@ def _spoken(ws):
         yield rel, rows
 
 
+_NOTED_HANDED = []  # H321: the handed words go in the main's log once a run
+
+
 def his_said(parts, ws, real_only=False):
     """F104: every line of his that holds a quote, oldest first by the time it was said, whichever place it's in: {"where", "at", "line", "turn" (the agent's
     lines right before it, none when he spoke last), "before" (what was said just before, each line named)}. A quote of a word or two has to stand
@@ -775,6 +778,13 @@ def his_said(parts, ws, real_only=False):
     short = sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS
     has = (lambda p, b: re.search(rf"(?<!\w){re.escape(p)}(?!\w)", b)) if short else (lambda p, b: p in b)
     out = []
+    import role
+    h = role.handed_words()  # H321: on the main, a handed request: his line as the backup checked it in its own call or chat, not here yet
+    if h and h.get("line") and all(has(p, _bare(h["line"])) for p in parts):
+        if not _NOTED_HANDED:
+            _NOTED_HANDED.append(role.note_handed("his words", h))
+        out.append({"where": h.get("where") or f"checked on {h.get('by')}", "at": float(h.get("at") or 0), "line": h["line"],
+                    "turn": h.get("turn") or "", "before": ""})
     for where, rows in _spoken(ws):
         if real_only and not where.startswith(("HQ/calls/", "HQ/direct-line", "HQ/coaching-line", "HQ/team-line")):
             continue

@@ -887,7 +887,15 @@ def main(argv):
     if cmd == "now" and "--ticket" in argv and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
         sys.exit("A tap counts on the main HQ's own page. Tap it there, or say it on a call.")  # F100: its server made the ticket
     if (cmd in role.WRITES["jobs"] or (cmd == "done" and "--at" in argv)) and not os.environ.get("HQ_ROLE_HERE") and role.is_backup():
-        sys.exit(role.forward("jobs", list(argv)))
+        env = None
+        if cmd in ("add", "send-row") and "--said" in argv and argv.index("--said") + 1 < len(argv):
+            # H321: his words are checked here, at the backup's own door (this call's transcript reaches the main only at its end),
+            # and go to the main with the request, as the line's switch does; words that aren't his line here go on unchecked
+            import sprint as sp_
+            said = argv[argv.index("--said") + 1]
+            hits = sp_.his_said_now(said, places=sp_.words_from_env())
+            env = role.checked_env(said, hits) if hits else None
+        sys.exit(role.forward("jobs", list(argv), env))
     now = time.strftime("%H:%M")
     with locked():
         text, jobs, on = read()
