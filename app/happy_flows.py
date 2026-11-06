@@ -25934,6 +25934,12 @@ print(json.dumps({'m': m, 'grew': len(direct_line.thread()) - n, 'held': (pings.
         if site.exists():
             shutil.rmtree(site)
         shutil.copytree(ROOT / "status", site / "status", ignore=shutil.ignore_patterns("icons"))
+        # F162: the agents' weekly shares, as a real HQ carries them: F149's reserve (usage.mjs agentsShareSum) reads them from the
+        # template, and without it each agent fell back to 2, so the reserve came out smaller than HQ's and the gate went on.
+        shares = ROOT / "template/HQ/agents/cycles.json"
+        if shares.exists():
+            (site / "template/HQ/agents").mkdir(parents=True)
+            shutil.copy(shares, site / "template/HQ/agents/cycles.json")
         (site / ".status").mkdir()
         (site / "support").mkdir()
         self._f116_road(site)
@@ -26446,7 +26452,7 @@ print(json.dumps(o))
         (site / ".status/usage.json").write_text(json.dumps({"checkedAt": now.isoformat(), "by": "a test", "readable": True, "plan": "Max",
                                                               "limits": [{"label": "Weekly · all models", "percent": 60, "resetsAt": (now + timedelta(days=2)).isoformat()}]}))
         node = shutil.which("node") or "/opt/homebrew/bin/node"
-        env = {k: v for k, v in os.environ.items() if k not in ("HQ_NO_WALL", "HQ_ROADMAP", "HQ_WORKSPACE", "HQ_USAGE")}
+        env = {k: v for k, v in os.environ.items() if k not in ("HQ_NO_WALL", "HQ_ROADMAP", "HQ_WORKSPACE", "HQ_USAGE", "HQ_CYCLES_FOLDER")}  # F162: the shares the page reads
         r = await asyncio.to_thread(subprocess.run, [node, str(site / "status/save-usage.mjs"), "--gate", "--reserve"], capture_output=True, text=True, env=env, timeout=60)
         m = re.search(r"its stop line is ([\d.]+)%", r.stdout)
         need(m, f"the gate didn't stop at its line: {r.stdout.strip()} {r.stderr[-300:]}")
@@ -26464,7 +26470,8 @@ print(json.dumps(o))
         iso = lambda x: x.isoformat()  # noqa: E731
         cases = [("14 hours into a week at 6%", [{"label": "Weekly · all models", "percent": 6, "resetsAt": iso(now + timedelta(hours=154))}], ["15"]),
                  ("a 5-hour plan at minute 10", [{"label": "5-hour limit", "percent": 1, "resetsAt": iso(now + timedelta(minutes=290))},
-                                                 {"label": "Weekly · all models", "percent": 10, "resetsAt": iso(now + timedelta(hours=68))}], ["10", "44.5"])]
+                                                 # F162: the week at 54.5% of its time, less the agents' shares (10) is 44.5
+                                                 {"label": "Weekly · all models", "percent": 10, "resetsAt": iso(now + timedelta(minutes=4587))}], ["10", "44.5"])]
         for what, limits, want in cases:
             self._f116_road(site, extra=moving)
             (site / ".status/usage.json").write_text(json.dumps({"checkedAt": datetime.now(timezone.utc).isoformat(), "by": "a test", "readable": True,
