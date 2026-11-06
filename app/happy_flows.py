@@ -14875,8 +14875,10 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 s = b.go(code)
                 need(s["note"] and s["note"]["boxed"] == "turns", f"not boxed: {s['note']}")
             need(b.texts() == before, f"a text from a round's own noise: {b.texts()[len(before):][-400:]}")
-            need("tripwire (" not in b.ledger() and "tripwire" not in led, f"a tripwire from a round's own noise: {b.ledger()[-600:]}")
+            new = lambda: b.ledger()[len(led):] if b.ledger().startswith(led) else b.ledger()  # noqa: E731  (F161: the ledger's own header names the word)
+            need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise: {new()[-600:]}")
             b.minute()
+            need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise, the minute after the cap: {new()[-600:]}")
             got = b.texts()[len(before):]
             need(got.count("If you tell me what F9301 should say") == 1 and "tripwire" not in got.lower(), f"the one text: {got[-300:]}")
             mist = b.ws / "HQ/mistakes.jsonl"
