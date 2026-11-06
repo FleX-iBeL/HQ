@@ -819,18 +819,16 @@ def _rules(aid: str, parsed: dict, a: dict, b: dict) -> str:
              "The same question is never asked twice in a day.",
              f"- Went stale (what it was for has already happened, or its input no longer holds): python3 \"{cy}\" stale {aid} K \"why\", and end. That's no failure; the goal goes on.",
              "- Writes to a shared file (the planning, the to-do list, the log, the mail list, the calendar) only through HQ's own scripts "
-             f"(todo.py, sprint.py, jobs.py, pings.py, python3 \"{ROOT / 'routine' / 'handover.py'}\" edit REL JSON for the log and the mail list), never with an Edit or Write on the file itself: "
-             "that's the one place that serializes them (each takes the file's lock); a direct write is refused by this run's hook before it lands, and is a tripwire. Your ledger and your line you write freely.",
+             f"(todo.py, sprint.py, jobs.py, pings.py, python3 \"{ROOT / 'routine' / 'handover.py'}\" edit REL JSON for the log and the mail list), (each takes the file's lock). Your ledger and your line you write freely.",
              "- Never send mail (a draft at the most), never a calendar change with another person in it, never anything he must say yes to first, never a change to the handbook, "
              "your section, his vision, his rules or the settings: those are his (an if-then question instead). Never start another run, plan team work, or plan more than this run's plan.",
-             "- Nothing in what you write goes outside this workspace: no curl, gh or git push; this run's hook refuses them. A refused try is logged; a repeat counts against you.",
              "- A text reaches him only through cycles.py batch, ask or text: they wait for his sleep. Other files of the workspace aren't yours to write: your ledger, your notes and your line are."]
     if aid == "donna":
         lines.append("- His calendar is yours to keep: add, move and remove his own events in Google Calendar by yourself; HQ logs each one in your ledger with what and when, so write nothing extra. "
                      "An event you made yourself is yours at once. An event with guests, on someone else's calendar, or a whole series, HQ holds and asks him first: when a change comes back as held, that's done, leave it and go on.")
     if a.get("batches") and aid == "donna":
-        lines.append(f"- His low-information diet: your texts come in batches at {' and '.join(a['batches'])}: python3 \"{cy}\" batch {aid} \"…\" queues one for the next batch. "
-                     "A queued text has a date: it goes out today or not at all, unless you add --until \"friday 12:15\", the moment it stops being true. Only an appointment ping he asked for, a travel delay, a very important mail with a date inside 48 hours, the game reminder and a tripwire break through on their own.")
+        lines.append(f"- A text that can wait: python3 \"{cy}\" batch {aid} \"…\" (it goes out at {' or '.join(a['batches'])}). "
+                     "A queued text has a date: it goes out today or not at all, unless you add --until \"friday 12:15\", the moment it stops being true. What can't wait, the line lets through by itself.")
     return "\n".join(lines)
 
 

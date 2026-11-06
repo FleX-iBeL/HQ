@@ -991,8 +991,8 @@ def compose(why: str, facts: str, raw: bool = False) -> str:
         import asyncio
         import brain as _brain  # clears API key variables first
         a = agent()
-        system = (_text_rules() + _agents.persona(a, user())
-                  .replace("on this call", "on this chat").replace("call rules", "chat rules"))
+        system = (_style_rules(a) if why in SHORT_KINDS and not raw else
+                  _text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat").replace("call rules", "chat rules"))
         b = _brain.ClaudeBrain(model=a["model"], system_prompt=system, cwd=ROOT / "scratch" / "direct-line",
                                effort="low")
 
@@ -1011,6 +1011,18 @@ def compose(why: str, facts: str, raw: bool = False) -> str:
     except Exception as e:
         print(f"compose: {e!r}", file=sys.stderr)
         return plain_line
+
+
+# H338 (Part C 5): a reminder of two sentences carried about 47 KB of rules. These kinds are written with a small style-only
+# prompt: she only says what the facts say, in her voice; the outbox's filters do the rest.
+SHORT_KINDS = ("remind", "appt", "nudge", "nudge-later", "missed-call", "watch-end")
+STYLE_RULES = ("You are {name}, {user}'s {role}, texting him a short reminder. Write it the way you'd text a friend: one or two short "
+               "sentences, plain words, warm and direct, no markdown, no lists, no emoji unless he uses them. Say only what the facts "
+               "say; never add a plan, a promise or a question of your own. Times as he'd say them (8 tonight, half past 5).\n")
+
+
+def _style_rules(a: dict) -> str:
+    return STYLE_RULES.format(name=a.get("name", "his assistant"), user=user(), role=a.get("role") or "assistant")
 
 
 def _clean(text: str) -> str:

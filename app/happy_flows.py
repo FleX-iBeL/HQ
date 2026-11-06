@@ -4577,7 +4577,7 @@ window.addEventListener('load', () => setTimeout(() => {
         for w in ("you don't ask questions one at a time", "You decide, the way a head of development does",
                   "execute towards the team planning", "proposed solution",
                   "as many as possible in one go", "yes but x y z", "without asking again", "The ready check",
-                  "nine points", "looking something up never needs his yes"):
+                  "nine points", "look it up first"):  # H338: that looking needs no yes is said once, not here too
             need(w in pm, f"her persona misses {w!r} of how she runs")
         # With the agents running themselves on in this workspace (H298), that one line reads "mark ready only what you
         # grounded" instead (handbook.trim_craft); either is how she runs.

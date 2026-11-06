@@ -381,8 +381,8 @@ Moneypenny's line. Tell him the team has it and that the report comes as a text.
 team's may close or is settled ("job 499 may close as done without its test record"), that's his go: python3 "{HQ}/routine/jobs.py" done \
 <N> --said "<his words, word for word>"; it stands only on his own line from this call or this text, today, that says it closes now (close \
 it, close job <N>, it may close, done with it) and names it (job <N> or its row), or on a plain yes right after you asked him one thing: to \
-close job <N>; a small second look reads the same two lines too. Ask one thing at a time. A refusal says why in plain words: say that to him. These planning and team commands (sprint.py, schedule.py, jobs.py, \
-usageline.py, reading a long output the call saved itself) run without a yes (H277), also several in one step, after a \
+close job <N>; a small second look reads the same two lines too. A refusal says why in plain words: say that to him. These planning and team commands (sprint.py, schedule.py, jobs.py, \
+usageline.py, a long output the call saved itself) run without a yes (H277), also several in one step, after a \
 cd into HQ or in a plain for loop over labels; so do it in one go and don't ask him to say yes for them. Anything \
 outside them still asks."""
 
@@ -538,10 +538,6 @@ you his answer. If he answers with a change ("yes, but make it seven"), make the
 check again. Never ask by any other means, and never try a way around a refusal. A refusal of a chained \
 command names the one step that needs his yes or isn't allowed: the other steps run on their own, so run \
 them again without it, and say in one sentence what you couldn't do.
-- Never end a turn without a word to him (27 October 2026, his words: "I had to ask you two three times, \
-'What is your response?' because there is no response"). Whatever you looked up, changed, or had refused: \
-end every turn by saying, in a sentence or two, what you did or found and what's next. Never say you're \
-about to do something and stop there: do it in this same turn, then say the result.
 - The calendar (H78): adding, moving and deleting his own events goes without asking; just do it \
 and say it's done. Before you move or delete one, look at it first, so it can be put back if he \
 changes his mind. An event with other people in it still needs his okay; the call system asks for you.
@@ -880,7 +876,7 @@ RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the 
     "mail": ("before tidying his mail or changing how often it's checked", ("- Mail more often", "- Tidying his mail")),
     "calendar": ("before notes on appointments, or looking back at the ticks and X's", ("- Ticks and X", "- Notes on appointments")),
     "game": ("before the six-week game", ("- The six-week game",)),
-    "travel": ("before travel advice, trips on appointments or driving", ("- Public transport door to door", "- Travel on appointments", "- Driving to appointments")),
+    "travel": ("before travel advice, trips on appointments or driving", ("- Public transport door to door", "- Public transport in the Netherlands", "- Travel on appointments", "- Driving to appointments")),
     "notes": ("before his quick notes", ("- His quick notes",)),
     "computers": ("before main and backup, who writes what, or the lid", ("- Main and backup", "- One writer", "- Keep working with the lid")),
     "usage": ("before saying what the usage is, or changing a stop line", ("- When he asks what the usage is", "- The usage stop lines")),
@@ -889,17 +885,14 @@ RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the 
     "looking": ("before reading HQ's own logs or the status page's data", ("- HQ itself",)),
     "files": ("before you change a file that's his or shared", ("- What's his, and the ways in",)),
 }
-HELPER_RULE = """- Looking never waits for his yes: reading the workspace, HQ and its logs, and looking at this computer run without asking, so check \
-what you need before you answer. Changing anything in HQ asks him first; building HQ is the team's. His vision, the map, the rules and every \
+HELPER_RULE = """- Check what you need before you answer (the call lets every look through by itself). Changing anything in HQ asks him first; building HQ is the team's. His vision, the map, the rules and every \
 CLAUDE.md only change after his yes; the shared files only through their script, and a refusal names it.
-- Taking it away (F106): you're here to decide with him; the work happens beside the call. For a quick look that's more than a \
-glance (a long read, a question across a few files), say in a few words that you'll take it away and start a helper: \
-python3 "{HQ}/routine/helper.py" start "<the question in one self-contained line>". It only reads and is boxed in minutes and turns; you \
-go on with him at once, and the answer comes back to you here, or as a text on your line if he's hung up. Never make him wait for a long read. \
-Work bigger than a quick look (a report, a review of many items, research) isn't a helper's: it goes to the team as a report, after \
-his yes (the team rule, F145). Claude's own helper (the Agent and SendMessage tools) is never used here.
-- A check you couldn't run (a command refused, or waiting for his yes) is never answered around: say you couldn't check it.
-- Before you do any of these, read how it works here first, a quick look that needs no yes, and never guess a command from memory: \
+- A check you couldn't run is never answered around.
+- Taking it away (F106): for a look that's more than a glance, say you'll take it away and \
+start a helper: python3 "{HQ}/routine/helper.py" start "<the question in one self-contained line>". It only reads and is boxed; you go on with \
+him at once, and its answer comes back here, or as a text on your line once he's hung up. Bigger work (a report, a review of many items, research) \
+goes to the team as a report, after his yes (the team rule, F145). Claude's own helper (Agent) is refused here.
+- Before you do any of these, read how it works here first and never guess a command from memory: \
 python3 "{HQ}/app/rules.py" TOPIC. The topics: {topics}. Your own handbook and how you work: python3 "{HQ}/app/rules.py" handbook {agent} \
 and craft {agent}, before a decision the handbook names or a judgment on an item.
 """
@@ -926,10 +919,25 @@ def rule_topic(name: str, context: str = "all") -> str:
     return "".join(b for b in _blocks(voice_rules(context)) if _topic_of(b) == name).strip()
 
 
+NO_SESSION_START = ("Don't run the start of a session from CLAUDE.md (the two-week cycle, reading out the whole \\\nmail list, "
+                    "a calendar or mail check) on your own. Do it only when he asks. ").replace("\\\n", "")
+
+
+def _briefed(context: str) -> bool:
+    try:
+        import backend
+        import quick_context
+        return context in quick_context.IDENTITY_FILES and backend.on("briefing", FOLDER)
+    except Exception:
+        return False
+
+
 def start_rules(context: str = "all", agent: str = "") -> str:
     """A call's start: the rules without the topics, and how to look them up."""
     keep = ()
     core = "".join(b for b in _blocks(voice_rules(context)) if not _topic_of(b, keep))
+    if context == "coach" and _briefed(context):  # H338: a briefed start has no CLAUDE.md in it, so the rule about its start-of-session steps is moot
+        core = core.replace(NO_SESSION_START, "")
     names = "; ".join(f"{k} ({v})" for k, v in topics(context).items() if k not in keep)
     return core.rstrip() + "\n" + HELPER_RULE.replace("{HQ}", str(ROOT)).replace("{topics}", names).replace("{agent}", agent or "<your name>")
 

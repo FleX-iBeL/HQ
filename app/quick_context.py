@@ -228,17 +228,11 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
     parts = []
     if context == "coach":
         head = ["# This is a coaching call",
-                f"You start with a briefing, not the whole folder: what's current today, the open things, and the map's "
-                f"status lines; {config.USER}'s vision of the day he's building towards (day-in-the-life.md) is loaded whole. The rest is the "
-                "library, opened when a turn needs it: what goes where is where-things-go.md, where he stands is current-situation.md, "
-                "a layer of the map is python3 \""
-                f"{config.ROOT / 'routine' / 'briefing.py'}\" layer N (1 the vision, 2 the year, 3 the six-week game, "
-                "4 the ideal week, 5 the real week, 6 looking back); his answers to the vision questions are my-answers.md (grep -n '^## ' "
-                "for the questions, sed -n for one); a to-do item with its details is python3 \""
-                f"{config.ROOT / 'app' / 'todo.py'}\" show \"a few words of it\"; the whole mail list is inbox.md; "
-                "earlier notes are coaching/log-archive.md (grep for a day or a word). Nothing from building HQ is here "
-                "(the planning, the team, the build notes): that's Moneypenny's. When he wants something built or put "
-                "on the planning, put her on or bring her in."]
+                f"You start with a briefing (today, the open things, the map's status lines) and {config.USER}'s vision of the day "
+                "(day-in-the-life.md) whole. The rest is the library, opened when a turn needs it: where-things-go.md, current-situation.md, "
+                f"a map layer with python3 \"{config.ROOT / 'routine' / 'briefing.py'}\" layer N (1 to 6), my-answers.md, "
+                f"a to-do item with python3 \"{config.ROOT / 'app' / 'todo.py'}\" show \"words\", inbox.md, coaching/log-archive.md. "
+                "Building HQ is Moneypenny's: put her on or bring her in."]
     elif context == "build":
         head = ["# This is a call about building HQ",
                 "You start with a briefing, not the folder: the roadmap's status block, the team's open jobs and the open "
