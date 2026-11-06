@@ -145,6 +145,44 @@ def _jobs(*args: str) -> str:
     return (r.stdout + r.stderr).strip()
 
 
+PARKED = "paused: ended, no record"
+
+
+def _no_record_why(n: int, out: str) -> str:
+    """F155: why the record isn't green, in one line: the record's own failures for this commit, else the test run's last words."""
+    why = []
+    try:
+        rec = json.loads(subprocess.run([PY, os.path.join(HERE, "proof.py"), "show", str(n)], capture_output=True, text=True,
+                                        timeout=120).stdout or "{}")
+        head = subprocess.run(["git", "-C", os.environ.get("HQ_PROOF_ROOT") or hqpaths.HQ, "rev-parse", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        if rec and rec.get("head") == head and not rec.get("green"):
+            why = list(rec.get("failed") or []) + list(rec.get("not_tried") or [])
+    except (ValueError, OSError, subprocess.SubprocessError):
+        pass
+    if not why:  # no record written (the copy couldn't be made, the run broke or was stopped): what the run itself said
+        last = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        why = [last[-1] if last else "the test run said nothing"]
+    return " ".join("; ".join(why).replace("·", "-").replace("|", "/").split())[:LINE_MOST * 2]
+
+
+def _record_step(n: int, lg) -> bool:
+    """F101, F155: the record step, safe to run again. The program runs the job's tests on a copy, then the done mark (which
+    queues its QA, F56); still refused, the job is parked with the reason on its line, so a call or the line sees why."""
+    _log(lg, f"job {n}: no green record yet; the program runs its tests on a copy")
+    r = subprocess.run([PY, os.path.join(HERE, "proof.py"), "run", str(n)], capture_output=True, text=True)
+    out = (r.stdout or "") + (r.stderr or "")
+    lg.write(out)
+    lg.flush()
+    said = _jobs("done", str(n))
+    _log(lg, said)
+    if not said.startswith("Refused"):
+        return True
+    why = _no_record_why(n, out)
+    _log(lg, _jobs("mark", str(n), f"{PARKED}: {why}"))
+    return False
+
+
 def _box_args(argv: list[str]) -> tuple[list[str], dict]:
     """H298: the box's options taken out of the chat arguments: {"minutes", "turns", "note"}."""
     box, rest, i = {"minutes": None, "turns": None, "note": None, "state": False, "round": None, "agent": None, "allow": None}, [], 0
@@ -245,6 +283,10 @@ def main(argv: list[str]) -> int:
     pfile = os.path.join(RUN, f"job-{n}.prompt")
     stream_log = os.path.join(RUN, f"job-{n}.stream.log")
     os.makedirs(RUN, exist_ok=True)
+    if _state(n).startswith(PARKED):  # F155: its work is done, only its record is missing: the record step again, not the chat
+        with open(stream_log, "a") as lg:
+            _log(lg, f"job {n}: parked with no record ({_state(n)}); its record step runs again")
+            return 0 if _record_step(n, lg) else 1
     perm = ["--permission-mode", "default", "--allowedTools", box["allow"]] if box["allow"] else ["--permission-mode", "auto"]
     cmd = [CLAUDE, "-p", "--no-chrome", *perm, "--output-format", "stream-json", "--verbose",
            *hqpaths.job_flags(box["agent"]), *chat]  # F99: no project settings, the never-send list; tick gives --settings in `chat`
@@ -420,12 +462,7 @@ def main(argv: list[str]) -> int:
                 said = _jobs("done", str(n))
                 _log(lg, said)
                 if said.startswith("Refused"):  # F101: a clean exit isn't done: a program runs its tests, then done again
-                    _log(lg, f"job {n}: no green record yet; the program runs its tests on a copy")
-                    subprocess.run([PY, os.path.join(HERE, "proof.py"), "run", str(n)], stdout=lg, stderr=subprocess.STDOUT)
-                    said = _jobs("done", str(n))
-                    _log(lg, said)
-                    if said.startswith("Refused"):
-                        _log(lg, _jobs("mark", str(n), "paused: ended, no record"))
+                    _record_step(n, lg)
             else:
                 _log(lg, f"job {n}: ended without finishing (exit {code}{', error' if is_error else ''}); left as it is "
                          "for the routine (it notes a chat that closed without a done mark)")

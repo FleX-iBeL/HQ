@@ -353,6 +353,12 @@ def skipped_flows(out: str) -> list[int]:
     return sorted({int(x) for x in re.findall(r"^\s*(\d+): skipped \(--quick\)", tail, re.M)})
 
 
+def _last_words(out: str) -> str:
+    """F155: a run that broke without a failing flow says why in its last line; kept on the record, so the job's line can say it."""
+    last = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    return f": {last[-1][:200]}" if last else ""
+
+
 def run(n: int) -> int:
     was = _on_stop()
     try:
@@ -401,13 +407,13 @@ def _run(n: int) -> int:
                 p, r_ = nightly.summary(out)
                 rec["ran"], rec["passed"] = r_, p
                 rec["skipped"] = [x for x in skipped_flows(out) if x in named]
-                rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}"])
+                rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}{_last_words(out)}"])
             if not rec["failed"]:
                 code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real; the quick set is the night's
                 p, r_ = nightly.summary(out)
                 rec["ran"] += r_
                 rec["passed"] += p
-                rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}"])
+                rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"])
         rec["green"] = (not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
                         and ("qa_tests" not in rec or bool(rec["qa_tests"].get("green"))))
     finally:
@@ -546,7 +552,7 @@ def _run_rows(labels: list[str]) -> int:
                 code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real
                 p, r_ = nightly.summary(out)
                 shared.update(ran=r_, passed=p, not_tried=_not_tried(), failed=nightly.failures(out)
-                              or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}"]))
+                              or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"]))
                 for label, row in rows.items():
                     row.update(ran=0, passed=0, failed=[], skipped=[])
                     if row["named"]:

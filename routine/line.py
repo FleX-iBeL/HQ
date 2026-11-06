@@ -174,7 +174,7 @@ def act(label, what, detail, row, st, jobs):
             return None
         runs[str(j["n"])] = {"at": time.strftime("%Y-%m-%d %H:%M")}
         lock = os.path.expanduser("~/hq-fullrun.lock")
-        cmd = f'python3 routine/proof.py run {j["n"]} && python3 routine/jobs.py done {j["n"]}'
+        cmd = f'python3 routine/runjob.py {j["n"]}'  # F155: the record step: its tests, the done mark, else parked with why
         if shutil.which("flock"):
             cmd = f'flock {lock} sh -c "{cmd}"'
         subprocess.Popen(["sh", "-c", cmd], cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
