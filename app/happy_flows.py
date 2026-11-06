@@ -29329,19 +29329,30 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         pol = Policy(ws)
         need(pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} friday"}).verdict == ALLOW
              and pol.decide("Bash", {"command": f"python3 {ROOT / 'routine/cycles.py'} tick"}).verdict == DENY, "the policy on the cycles script")
-        # on: the items planned once
+        # on: the items planned once, one per cycle in the workspace's plan (F160: the plan, never a fixed list, so a
+        # cycle added or moved there doesn't turn this red by itself)
+        plan = json.loads((ws / "HQ/agents/cycles.json").read_text())["agents"]
+        want = {}  # "Agent cycle: <agent>, <name>" -> (agent, every, at)
+        for a, v in plan.items():
+            if v.get("session"):
+                want[f"Agent cycle: {a}, bigger session"] = (a, v["session"]["every"], v["session"]["at"])
+            for lk in v.get("looks", []):
+                want[f"Agent cycle: {a}, {lk['name']}"] = (a, lk["every"], lk["at"])
+        cancelled = lambda rs: {"Agent cycle: " + m.group(1) for x in rs for m in [re.match(r"cancelled item \d+ \(([^)]*)\)", x)] if m}
         (ws / "HQ/features.json").write_text(AGENTS_ON)
         t = drive("tick")
-        need(t["on"] is True and len(t["reconciled"]) == 5 and all(x.startswith("planned") for x in t["reconciled"]), f"on, the first minute: {t['reconciled']}")
+        need(t["on"] is True and len(t["reconciled"]) == len(want) and all(x.startswith("planned") for x in t["reconciled"]),
+             f"on, the first minute planned {len(t['reconciled'])} for the plan's {len(want)} cycles: {t['reconciled']}")
         need(len(t.get("reviews", [])) == 3 and all("monthly review planned for Friday" in x for x in t["reviews"]), f"the monthly reviews (piece 9): {t.get('reviews')}")
         rm = (ws / "HQ/roadmap.md").read_text()
-        items = re.findall(r"^- Item (\d+) · waiting, every (\w+), priority · at (\S+ \S+) · added \S+ \S+ · (Agent cycle: .*)$", rm, re.M)
-        need(len(items) == 5 and {i[3] for i in items} == {"Agent cycle: donna, bigger session", "Agent cycle: pepper, bigger session", "Agent cycle: pepper, midweek look",
-                                                               "Agent cycle: moneypenny, bigger session", "Agent cycle: moneypenny, morning look"}, f"the items: {items}")
-        need(all(i[1] == ("day" if "donna" in i[3] or "morning look" in i[3] else "thursday" if "bigger" in i[3] else "wednesday") for i in items), f"the items' days: {items}")
-        need(all(i[2].endswith(("08:30", "20:00", "12:30", "21:00", "09:00")) for i in items), f"the items' times: {items}")
+        items = {name: (n, every, at.split()[-1]) for n, every, at, name in
+                 re.findall(r"^- Item (\d+) · waiting, every (\w+), priority · at (\S+ \S+) · added \S+ \S+ · (Agent cycle: .*)$", rm, re.M)}
+        need(set(items) == set(want), f"the items: missing {sorted(set(want) - set(items))}, extra {sorted(set(items) - set(want))}")
         kinds = json.loads((ws / "HQ/roadmap-estimates/schedule-kinds.json").read_text()) if (ws / "HQ/roadmap-estimates/schedule-kinds.json").exists() else {}
-        need(kinds and all(v.get("kind", "").startswith("cycle-") for v in kinds.values()), f"the items' kinds: {kinds}")
+        for name, (a, every, at) in want.items():
+            n, e, at_ = items[name]
+            need((e, at_) == (every, at), f"{name} is planned every {e} at {at_}, the plan says every {every} at {at}")
+            need(kinds.get(n, {}).get("kind") == f"cycle-{a}", f"{name} is of kind {kinds.get(n)}, not cycle-{a}")
         t2 = drive("tick")
         need(t2["reconciled"] == [] and t2.get("reviews") == [], f"the second minute planned again: {t2}")
         r = json.loads(self._h298_py(env, code))
@@ -29349,12 +29360,15 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         # an agent off: hers go; the feature off: all go
         need("pepper: on is now off." in _sp.run([sys.executable, str(ROOT / "routine/cycles.py"), "set", "pepper", "on", "off"], capture_output=True, text=True, env=env).stdout, "set on off")
         t3 = drive("tick")
-        need(len(t3["reconciled"]) == 3 and all("pepper" in x and "cancelled" in x for x in t3["reconciled"]), f"pepper off: {t3['reconciled']}")
+        peps = {k for k, v in want.items() if v[0] == "pepper"}
+        mine = cancelled(t3["reconciled"])  # her monthly review goes with hers
+        need(peps <= mine and all(x.startswith("Agent cycle: pepper,") for x in mine) and all("pepper" in x and "cancelled" in x for x in t3["reconciled"]),
+             f"pepper off, her cycles are {sorted(peps)}: {t3['reconciled']}")
         (ws / "HQ/features.json").write_text('{"off": [], "maker": true}\n')
         t4 = drive("tick")
         rm = (ws / "HQ/roadmap.md").read_text()
-        need(t4["on"] is False and len(t4["reconciled"]) == 5 and not re.search(r"^- Item \d+ · waiting", rm, re.M), f"off again: {t4['reconciled']}")
-        return "off: nothing planned, no rule, the roadmap untouched; on: five cycles planned once as repeating priority items of their own kinds; an agent off loses hers; off again cancels them all"
+        need(t4["on"] is False and set(want) - peps <= cancelled(t4["reconciled"]) and not re.search(r"^- Item \d+ · waiting", rm, re.M), f"off again: {t4['reconciled']}")
+        return f"off: nothing planned, no rule, the roadmap untouched; on: the plan's {len(want)} cycles planned once as repeating priority items of their own kinds; an agent off loses hers; off again cancels them all"
 
     async def flow191(self) -> str:
         """H298, piece 6, no Claude: a cycle runs. On the maker's throwaway workspace with the feature on: an order "start
