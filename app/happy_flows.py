@@ -40408,7 +40408,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(ROOT / "routine"))
     import testwall as _wall  # F111: the flows run behind the wall, whoever starts them; here is the side outside it
     if not _wall.inside(ROOT):
-        sys.exit(_wall.run(sys.argv[1:], ROOT, keep=a.keep))
+        sys.exit(_wall.run(sys.argv[1:], ROOT, keep=a.keep, script=Path(__file__).name))
     if a.verbose:
         from loguru import logger
         logger.remove()

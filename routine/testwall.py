@@ -720,8 +720,9 @@ def _projects_gone(wall: str) -> None:
             shutil.rmtree(os.path.join(base, "projects", nm), ignore_errors=True)
 
 
-def run(argv: list[str], root, keep: bool = False) -> int:
-    """The whole run: hash, copy, the flows inside, compare, clean up. Back to the exit code."""
+def run(argv: list[str], root, keep: bool = False, script: str = "happy_flows.py") -> int:
+    """The whole run: hash, copy, the flows inside, compare, clean up. Back to the exit code. script: the flows file that was started, from
+    app/ (F161: a copy of the flows under another name runs itself inside, not happy_flows.py)."""
     root = os.path.realpath(str(root))
     real_hq = os.path.realpath(os.environ.get("HQ_REAL_HQ") or root)
     real_ws = os.path.realpath(os.environ.get("HQ_WORKSPACE") or os.path.join(root, "workspace"))
@@ -775,7 +776,7 @@ def run(argv: list[str], root, keep: bool = False) -> int:
         build(wall, places, parent, os.path.join(root, ".venv"))
         copy_hq(root, real_hq, real_ws, os.path.join(wall, "hq"))
         env = wall_env(wall, [real_hq, real_ws, hqpaths.SUPPORT])
-        inner = os.path.join(wall, "hq", "app", "happy_flows.py")
+        inner = os.path.join(wall, "hq", "app", os.path.basename(script))
         py = os.path.join(wall, "hq", ".venv", "bin", "python")
         p = subprocess.Popen([py if os.path.exists(py) else sys.executable, inner, *argv], cwd=os.path.join(wall, "hq"), env=env)
 
