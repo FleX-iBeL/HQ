@@ -26,6 +26,10 @@ failure opens a fix road (fix_why): a new test of hers that fails on the build, 
 
     python3 routine/qatests.py new LABEL       start her folder: his sentences in tests.json, a test.py to fill in
     python3 routine/qatests.py check LABEL     the two hard checks; seals them when they hold
+    python3 routine/qatests.py check LABEL --before COMMIT
+                                               F157: for an item already built before its tests were sealed: the same checks, run
+                                               on a throwaway copy of COMMIT (HQ's code from before the build, in its history before
+                                               the code as it is) instead; every test must fail there, and the seal names it
     python3 routine/qatests.py review LABEL    one round of their own review (the real reviewer), ROUNDS at most
     python3 routine/qatests.py show LABEL      where they stand
     python3 routine/qatests.py run LABEL HQDIR the sealed tests on HQDIR (what proof.py does at the end)
@@ -310,8 +314,23 @@ def _head() -> str:
     return subprocess.run(["git", "-C", str(proof.ROOT), "rev-parse", "HEAD"], text=True, capture_output=True).stdout.strip()
 
 
-def check(label: str) -> tuple[bool, str]:
-    """The two hard checks on her tests as they stand; sealed when both hold. (ok, what to say)."""
+def _before_commit(before: str) -> tuple[str | None, str]:
+    """F157: the named commit as a full hash, when it's in HQ's history before the code as it is; else (None, why)."""
+    import proof
+    full = subprocess.run(["git", "-C", str(proof.ROOT), "rev-parse", "--verify", "--quiet", f"{before}^{{commit}}"], text=True,
+                          capture_output=True).stdout.strip()
+    if not full:
+        return None, f"the commit {before} isn't in HQ's history"
+    head = _head()
+    if full == head or subprocess.run(["git", "-C", str(proof.ROOT), "merge-base", "--is-ancestor", full, head],
+                                      capture_output=True).returncode:
+        return None, f"the commit {before} ({full[:7]}) isn't before HQ's code as it is ({head[:7]})"
+    return full, ""
+
+
+def check(label: str, before: str | None = None) -> tuple[bool, str]:
+    """The two hard checks on her tests as they stand; sealed when both hold. (ok, what to say). before (F157): a commit from before the
+    item's build, for an item built before its tests were sealed: the tests then run on a copy of that commit, not the code as it is."""
     label = label.strip().upper()
     row = _row(label)
     if not row:
@@ -322,10 +341,15 @@ def check(label: str) -> tuple[bool, str]:
         return False, (f"Refused: {label} has no QA tests of hers: HQ/qa-tests/{label}/test.py and tests.json "
                        f"(python3 routine/qatests.py new {label} starts them).")
     _, js, _ = q.read()
-    j = q.with_team(js, label)
+    j = q.with_team(js, label) if gate_on() else None  # F157: part of her gate, so off in a test copy as the rest (its queue is a copy of the live one)
     if j and (state(label).get("sealed") or {}).get("fp"):  # the team builds to them: no new seal while it does, by anyone
         return False, (f"Refused: {label} is with the team (job {j['n']}, {j['state']}): its QA tests stay as they were sealed while it builds. "
                        "A change to them waits until the job is done or stopped.")
+    named = None
+    if before is not None:
+        named, why = _before_commit(before)
+        if not named:
+            return False, f"Refused: {why}. Nothing sealed."
     t, why = read_list(d)
     if t is None:
         return False, f"Refused: {label}'s QA tests: {why}."
@@ -334,7 +358,8 @@ def check(label: str) -> tuple[bool, str]:
         return False, f"Refused: {label}'s QA tests don't cover his words: " + "; ".join(miss) + ". Nothing sealed."
     names = named_tests(t)
     import proof
-    head = _head()
+    head = named or _head()
+    where = f"the commit {head[:7]} from before the build" if named else f"HQ's code as it is ({head[:7]})"
     wt = proof._copy(head)
     try:
         got, out = run_on(d, wt)
@@ -351,7 +376,7 @@ def check(label: str) -> tuple[bool, str]:
         passing = [n for n in fresh if got.get(n)]
         if not fresh or passing:
             why = (f"no new test for the QA finding (her tests are the ones sealed before it)" if not fresh else
-                   f"the new test(s) {', '.join(passing)} already pass on HQ's code as it is ({head[:7]}), so they don't catch the fault QA found")
+                   f"the new test(s) {', '.join(passing)} already pass on {where}, so they don't catch the fault QA found")
             tell(label, f"fix-test-{k}", f"QA failed {label}: {road.get('finding') or 'no finding written'}. Her new test for it doesn't hold: {why}. "
                  "The fix doesn't go to the team; it's an open point for you.")
             return False, (f"Refused: {label}'s QA tests: {why}: {road.get('finding')}. Nothing sealed, the fix doesn't go, and the finding goes to "
@@ -359,7 +384,10 @@ def check(label: str) -> tuple[bool, str]:
     else:
         passing = [n for n in names if got.get(n)]
     if passing:
-        return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on HQ's code as it is ({head[:7]}), before any "
+        if named:
+            return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where}, so they don't test what was "
+                           "built. Each test must fail there and pass on the build. Nothing sealed.")
+        return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where}, before any "
                        "build, so they don't test what he asked for. Each test must fail now and pass once it's built. Nothing sealed.")
     keep = os.path.join(seal_root(), label, fp[:16])
     shutil.rmtree(keep, ignore_errors=True)
@@ -367,7 +395,7 @@ def check(label: str) -> tuple[bool, str]:
     for f in ("test.py", "tests.json"):
         shutil.copy2(os.path.join(d, f), os.path.join(keep, f))
     sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names, "cycle": k,
-              "before": {"head": head, "results": {n: got[n] for n in names}}}
+              "before": {"head": head, "results": {n: got[n] for n in names}, **({"named": True} if named else {})}}
     _put(label, lambda e: e.update({"sealed": sealed}))
     try:
         import trail
@@ -375,10 +403,10 @@ def check(label: str) -> tuple[bool, str]:
     except Exception:
         pass
     if road:
-        return True, (f"{label}'s QA tests are sealed: {len(names)} test(s), the new one(s) for the QA finding failing on {head[:7]} as they "
+        return True, (f"{label}'s QA tests are sealed: {len(names)} test(s), the new one(s) for the QA finding failing on {where} as they "
                       f"should. Next, this version's own review: python3 routine/qatests.py review {label} (round 1 of {ROUNDS}).")
     return True, (f"{label}'s QA tests are sealed: {len(names)} test(s) for his {sealed['his']} sentence(s), every one failing on "
-                  f"{head[:7]} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
+                  f"{where} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
 
 
 def why_not(row, now: bool = False) -> str | None:
@@ -687,6 +715,10 @@ def show(label: str) -> str:
     rv = e.get("reviews") or []
     lines = [f"{label}: QA tests " + ("there" if fp else "not written") + (", sealed as they stand" if fp and s.get("fp") == fp else
                                                                              (", changed since sealed" if s.get("fp") else ", not sealed"))]
+    if s.get("fp"):
+        b = s.get("before") or {}
+        lines.append(f"- sealed on {(b.get('head') or '?')[:7]}" + (", the commit named as from before the build" if b.get("named") else
+                                                                    ", HQ's code as it was"))
     if rv:
         lines.append(f"- their review: round {len(in_road(rv, label))} of {ROUNDS}, {rv[-1].get('verdict')}" + ("" if rv[-1].get("fp") == fp else " (on an earlier wording)")
                      + "".join(f"\n  - {f}" for f in rv[-1].get("findings") or []))
@@ -700,7 +732,10 @@ def main(argv) -> int:
     if len(argv) >= 2 and argv[0] in ("check", "review", "new", "show"):
         lab = argv[1]
         if argv[0] == "check":
-            ok, words = check(lab)
+            if "--before" in argv and (argv.index("--before") + 1 >= len(argv) or not argv[argv.index("--before") + 1].strip()):
+                print("Refused: --before needs a commit. Nothing sealed.")
+                return 1
+            ok, words = check(lab, before=argv[argv.index("--before") + 1] if "--before" in argv else None)
             print(words)
             return 0 if ok else 1
         if argv[0] == "review":
