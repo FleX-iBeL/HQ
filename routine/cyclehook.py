@@ -759,6 +759,17 @@ def _job_what(rel: str) -> str:
             else "a job writes his lists only through their own scripts")
 
 
+def big_read(path: str, inp: dict) -> str | None:
+    """A whole read of a file too big for one read: cut to a part, the way a call's is (policy._too_big)."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
+        import policy
+        why = policy._too_big(path, inp)
+    except Exception:
+        return None
+    return why.replace(" on a call", " in one read") if why else None
+
+
 def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tuple | None = None) -> tuple[int, str]:
     import hqpaths
     name, inp = str(ask.get("tool_name", "")), ask.get("tool_input") or {}
@@ -793,6 +804,10 @@ def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tu
     why = cycle_tool(name, inp, aid, kind, ask.get("cwd")) if aid and not never_mail(name) else None
     if why:
         return 2, why
+    if aid and name == "Read" and inp.get("file_path"):  # H338 (Part C 7): the big-file guard calls have, in the cycles too
+        why = big_read(str(inp["file_path"]), inp)
+        if why:
+            return 2, "HQ: refused Read: " + why
     if name in EDITORS:
         s = shared_name(str(inp.get("file_path") or inp.get("notebook_path") or ""))
         if s:

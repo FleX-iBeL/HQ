@@ -15,6 +15,7 @@ bottom. The page shows Undo for a moment after a Clear; a call can bring any cle
     python3 app/notes.py clear WORDS     clear the one note with these words in it (kept, so it can come back)
     python3 app/notes.py cleared         the cleared notes, newest first, in plain lines
     python3 app/notes.py restore WORDS   bring back the newest cleared note with these words in it
+    python3 app/notes.py new             H338: only the notes added since the last look, then all marked as looked at
 
 F102 (31 October 2026): only the main writes the notes, like the text lines (F58). His quick note of 30 October never reached
 the server: on the backup a note goes to the main as a hand-over (`put`), kept in notes.here.md next to the notes (which never
@@ -272,6 +273,31 @@ def restore(note_id: str, notes: Path | None = None) -> dict | None:
     return None
 
 
+def seen_file(notes: Path | None = None) -> Path:
+    """H338: the notes a look has had already, next to the notes (notes.md → notes-seen.json)."""
+    notes = notes or NOTES
+    return notes.with_name(notes.stem + "-seen.json")
+
+
+def new(notes: Path | None = None) -> list[dict]:
+    """H338 (Part C 9): his notes marked as handled by the program, so a look gets only the ones added since the last look
+    (Pepper re-read all 26 on 6 November). The ones it gives are marked as looked at."""
+    notes = notes or NOTES
+    with _lock:
+        try:
+            seen = set(json.loads(seen_file(notes).read_text(encoding="utf8")))
+        except (OSError, ValueError, TypeError):
+            seen = set()
+        now = items(notes)
+        out = [i for i in now if i["id"] not in seen]
+        if out:
+            f = seen_file(notes)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(sorted(seen | {i["id"] for i in now})), encoding="utf8")
+            os.replace(tmp, f)
+    return out
+
+
 def _match(words: str, found: list[dict]) -> list[dict]:
     w = words.strip().lower()
     return [i for i in found if w and w in i["text"].lower()] if w else []
@@ -293,6 +319,10 @@ def _cli(args: list[str]) -> int:
         got = add(words)
         print(f"In the notes: {got['text']}" if got else "Nothing to add.")
         return 0 if got else 1
+    if what == "new":
+        got = new()
+        print("\n".join(f"- {i['when'][:16]} {i['text']}" for i in got) if got else "No new notes since the last look.")
+        return 0
     if what == "cleared":
         got = cleared()
         print("\n".join(f"- cleared {i['cleared'][:16]}: {i['text']}" for i in got) if got else "No cleared notes.")

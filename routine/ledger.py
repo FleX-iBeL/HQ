@@ -323,6 +323,31 @@ def words(agent_id: str, last: int = 12) -> str:
     return "\n\n".join(f"## {s['title']}\n{s['body']}" for s in keep).strip()
 
 
+DIGEST_MOST = 3000  # bytes of the digest in a bigger session's prompt
+
+
+def digest(agent_id: str, last: int = 10) -> str:
+    """H338 (Part C 7): her ledger for a bigger session, computed, not its last sections whole (Moneypenny's alone was 27 KB):
+    how the last cycles ended, counted, and one line per section, newest last. His open orders come on their own in the prompt."""
+    secs = [s for s in sections(agent_id) if s["at"]][-last:]
+    if not secs:
+        return f"{_name(agent_id)} has no ledger yet (it starts with her first cycle)."
+    ends = {}
+    for s in secs:
+        for k in re.findall(r"(?mi)^- (?:run|state|result): (\w+)", s["body"]):
+            ends[k.lower()] = ends.get(k.lower(), 0) + 1
+    out = [f"The last {len(secs)} sections, {secs[0]['at']:%d %b %H:%M} to {secs[-1]['at']:%d %b %H:%M}"
+           + (": " + ", ".join(f"{v} {k}" for k, v in sorted(ends.items(), key=lambda x: -x[1])) if ends else "") + "."]
+    for s in secs:
+        first = next((l.strip(" -") for l in s["body"].splitlines() if l.strip(" -")), "")
+        out.append(f"- {s['title'][:90]}: {' '.join(first.split())[:110]}")
+    text = "\n".join(out)
+    while len(text.encode()) > DIGEST_MOST and len(out) > 2:
+        out.pop(1)
+        text = "\n".join(out)
+    return text + f"\n(The whole ledger, when a decision needs it: python3 \"{Path(__file__).resolve()}\" {agent_id} show.)"
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # -- the style filter: a job number or a file path never reaches him (the call's SpeechFilter does the same on a call) ---------
 _JOBNO = re.compile(r"\b(?:the )?job (?:no\.? ?|number )?#?\d{2,}\b", re.I)
-_PATH = re.compile(r"(?:~|\.{1,2})?/(?:[\w.@-]+/)+[\w@-]+(?:\.\w+)?|\b[\w-]+\.(?:py|mjs|js|jsonl|json|md|sh|html|css)\b")
+_PATH = re.compile(r"(?<![:/\w.])(?:~|\.{1,2})?/(?:[\w.@-]+/)+[\w@-]+(?:\.\w+)?|(?<![/\w.])[\w-]+\.(?:py|mjs|js|jsonl|json|sh)\b")  # never a web link
 
 
 def style(text: str) -> str:
@@ -72,7 +72,12 @@ def _rewrite_claim(text: str) -> str:
 # -- one text per topic: the same topic from two senders on one day reaches him once -------------------------------------------
 _STOP = set("the and but for with your you his her its this that these those today tonight are was were been still just now "
             "than then from into onto about not yet reminder says say said has have had what when will can".split())
-ONE_PER_TOPIC_NOT = ("reply", "ask", "cycle-ask", "down")  # answers to him and an incident's own lines aren't repeats
+# Only reminders and nudges count: an answer to him, an ask, an incident's down and back are never taken for a repeat.
+REMINDING = ("game", "game-away", "cycle", "cycle-batch", "nudge", "nudge-later", "remind", "appt", "initiative", "loose-end", "checkin")
+
+
+def _reminding(why: str) -> bool:
+    return (why or "").split(":", 1)[0] in REMINDING
 
 
 def _words(text: str) -> set:
@@ -95,12 +100,12 @@ def _day(t: float) -> str:
 
 
 def _repeat(m: dict, msgs: list[dict]) -> dict | None:
-    if m.get("why") in ONE_PER_TOPIC_NOT:
+    if not _reminding(m.get("why")):
         return None
     for x in reversed(msgs):
         if _day(float(x.get("at") or 0)) != _day(m["at"]):
             break
-        if (x.get("from") == "agent" and not x.get("quiet") and x.get("why") not in ONE_PER_TOPIC_NOT
+        if (x.get("from") == "agent" and not x.get("quiet") and _reminding(x.get("why"))
                 and x.get("why") != m.get("why") and same_topic(x.get("text", ""), m["text"])):
             return x
     return None

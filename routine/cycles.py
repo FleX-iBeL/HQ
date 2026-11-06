@@ -863,7 +863,7 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
     parts = [head + agents.persona(ag, user).replace("on this call", "in this run").replace("call rules", "rules"),
              _rules(aid, parsed, a, b), _library(aid, ctx)]
     if parsed["kind"] in ("session", "review"):
-        parts.append("Your ledger (the last cycles first thing: what was boxed, stale, skipped, escalated or corrected, and your score):\n\n" + ledger.words(aid, 10))
+        parts.append("Your ledger, a digest HQ computed (what was boxed, stale, skipped, escalated or corrected; your score is below):\n\n" + ledger.digest(aid, 10))
         orders = ledger.orders(aid, ("open", "now"))
         if orders:
             parts.append("His orders waiting for you (take each up in this plan, or say in your ledger why not):\n" +

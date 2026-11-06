@@ -119,9 +119,14 @@ def next_step(row, g, jobs, now=None):
         return "mark", why
     if _review_waiting(row) and "review" in why and "QA tests" not in why:
         return "wait", "the review hasn't run on its new words yet"
+    if WAITS_ON_HIM.search(why):  # H338 (Part C 4): only his answer moves it; prepared again it changed nothing (H324, three times on 6 November)
+        return "wait", f"waits on his answer: {why}"
     if not g.get("prep"):
         return "none", f"not ready and prepare is off: {why}"
     return "prep", why
+
+
+WAITS_ON_HIM = re.compile(r"waits? on his (?:answer|decision|yes)|it's his decision now|on her sit-down list", re.I)
 
 
 def _fp(why):
