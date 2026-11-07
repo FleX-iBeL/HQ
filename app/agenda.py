@@ -642,9 +642,12 @@ def day_note(user: str = "the user", now: float | None = None) -> str:
             continue
         title = re.sub(r"\s+", " ", e.get("title", "")).strip()
         rows.append(f"{when}: {title}" + (f", at {e['where']}" if e.get("where") else ""))
-    looked = f" (read from Google at {datetime.fromtimestamp(s['looked']):%H:%M})" if s.get("looked") else ""
-    return (f"[Call system: {user}'s calendar today, {d:%A} {d.day} {d:%B}, from HQ's own copy of it{looked}: "
-            + ("; ".join(rows) if rows else "nothing") + ". When he asks what's on it today, answer from this; no tool needed.]")
+    looked = f", read from Google at {datetime.fromtimestamp(s['looked']):%H:%M}" if s.get("looked") else ""
+    # job 9211: the session works in a scratch folder, so a look for "HQ/calendar.json" itself missed it or asked for a yes
+    return (f"[Call system: HQ's own copy of {user}'s calendar (the file HQ/calendar.json in his folder{looked}) was just read "
+            f"for you. Today, {d:%A} {d.day} {d:%B}, it holds: " + ("; ".join(rows) if rows else "nothing")
+            + ". That is the whole of today in that file: when he asks what's on his calendar today, answer from this in your "
+            "reply right away. Don't open, search for or ask about the file, and use no tool for it.]")
 
 
 def call_note(e: dict, user: str = "the user") -> str:
