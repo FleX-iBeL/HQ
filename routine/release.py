@@ -350,10 +350,39 @@ def tag_words(v: str, h: dict | None) -> str:
     return f"HQ {v}" + (f"\n\n{before}" if before else "")
 
 
+def plan_not_yet(said: str | None, what: str) -> str | None:
+    """F166: his words that plan a release for a later moment are his say-so once that moment has come, never before and never past the
+    night: for after the night run, a green night (night_refuses says nothing) that ran after he said it; for tomorrow, a later day. Why not
+    yet, or None (also when the words plan nothing)."""
+    import sprint as S
+    plans = S.planned_lines(said)
+    if not plans:
+        return None
+    if "night" in what:
+        return "planned words wait for a green night and never go past it"
+    p = plans[-1]
+    at = dt.datetime.fromtimestamp(p["at"] or 0)
+    if p["moment"] == "night":
+        no = night_refuses()
+        if no:
+            return f"they plan it for after the night run, and {no}"
+        run_at = (last_run() or {}).get("at") or ""
+        if run_at[:16] <= at.strftime("%Y-%m-%dT%H:%M"):
+            return f"they plan it for after the night run, and the last run ({run_at}) was before he said it ({at:%d %B %H:%M})"
+        return None
+    if dt.date.today() <= at.date():
+        return f"they plan it for tomorrow, and he said it today ({at:%d %B %H:%M})"
+    return None
+
+
 def say_so(said: str | None, what: str) -> bool:
     """F101: going past a gate takes his own words, found in his lines and kept; a flag alone is nothing."""
     import sprint as S
     names = ("without qa", "skip qa", "skipping qa", "past qa") if "QA" in what else ("past the night", "red night")
+    no = plan_not_yet(said, what)
+    if no:
+        print(f"No release: {what} needs his say-so, and his planned words are no say-so yet: {no}.")
+        return False
     where, no = S.his_yes(said, f"releasing HQ to everyone: {what}", names=names)
     if not where:
         print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note, saying yes to it: {no}.")
