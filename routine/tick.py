@@ -1726,6 +1726,27 @@ def release_minute():
     return bool(said)
 
 
+def by_rank(line):
+    """F9175: of the waiting jobs, the one whose item ranks highest on the planning goes first (his order, bugs first as the
+    rank puts them); a ranked item before an unranked one, equals in the waiting list's order (the oldest made, or as a call
+    moved them, H39). Read fresh at every start: a rank changed while a job runs counts at the next one."""
+    try:
+        import qa
+        import sprint as sp_
+        place = {l: i for i, l in enumerate(sp_.order())}
+    except Exception as e:
+        log(f"by_rank: {e!r}")
+        return list(line)
+
+    def rank(j):
+        try:
+            label = (j.get("item") or {}).get("label") or qa.job_label(j.get("text") or "")
+        except Exception:
+            label = None
+        return place.get(label, len(place))
+    return sorted(line, key=rank)  # stable: equals keep their place
+
+
 def gone_back():
     """F104: on the maker's HQ the team waits while it stands on an older version: a build there would land on no branch. A friend
     who went back carries on, on that version."""
@@ -2000,6 +2021,7 @@ def tick():
         line = q.get("waiting") or []
     if not line:
         return
+    line = by_rank(line)
     # F100: the wall: the cycles before the team; his day hours, a held job at night and the items in progress; the gate then
     # looks at the first that may go, and a job that can't go now never blocks one behind it.
     job, first_why = None, None
