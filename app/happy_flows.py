@@ -29516,7 +29516,7 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         need(p.startswith(f"let's go. This is job {s2['n']} from the queue: Donna's own cycle, bigger session (H298)"), f"the session's prompt head: {p[:200]}")
         need("Your character:" in p and "The handbook: how you run yourself" in p and "## Your own section" in p and "### Donna" in p
              and "Your ledger" in p and "His orders waiting for you" in p and "put the plumber's bill in Friday's block" in p
-             and "cycles.py\" plan donna" in p and "batches at 12:00 and 17:00" in p and "briefing.py" in p
+             and "cycles.py\" plan donna" in p and "goes out at 12:00 or 17:00" in p and "briefing.py" in p  # H338 cut the diet line to this
              and "At most 3 picks, at most 6 steps" in p, "the session's prompt lacks a part")
         need("--max-minutes 10 --max-turns 30" in s2["script"], f"the session's box: {s2['script']}")
         need("the done mark is run for it" in s2["stream"], f"the session's run: {s2['stream'][-400:]}")
