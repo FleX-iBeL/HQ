@@ -2345,6 +2345,11 @@
           }
           now.append(ul);
         }
+        if (truth?.mustWaiting?.length) {  // F194: a Must left untouched past its hour, one line each, gone once prepare is on
+          const ul = el('ul', 'problems must-waiting');
+          for (const w of truth.mustWaiting) ul.append(el('li', '', w));
+          now.append(ul);
+        }
         if (s.problems.length) {
           const ul = el('ul', 'problems');
           ul.append(el('p', '', 'The status block at the top of the roadmap is not in the expected shape:'));

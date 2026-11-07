@@ -184,6 +184,19 @@ function sprint() {
   }));
 }
 
+// F194: a Must on the planning whose prepare is still off an hour after its first dated line, one line each
+// (routine/cycles.py waiting); asked at most every 20 seconds, like the planning.
+const mustWait = { at: 0, data: null, busy: null };
+function mustWaiting() {
+  return kept(mustWait, 20000, () => new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/cycles.py'), 'waiting'], { timeout: 30000 }, (err, out) => {
+      let data = [];
+      try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      resolve(Array.isArray(data) ? data : []);
+    });
+  }));
+}
+
 // H298, piece 7: the Friday screen of the agents running themselves (routine/cycles.py friday --json): three lines
 // per agent (what she picked, what moved on her score, what she escalated or let go) and her share used against her
 // line; asked at most every 20 seconds. Off (the switch) it answers {on: false} and the page shows nothing.
@@ -656,7 +669,7 @@ async function pageData(have) {
     phases,
     routines: part('routines', rest),
     usage: part('usage', await usage(false, u)),
-    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now, rest.routines) : null, cant: roadBroken, broken, his: h.his, running }),
+    truth: part('truth', { banner: p && !roadBroken ? banner(p, running, h.his, now, rest.routines) : null, cant: roadBroken, broken, his: h.his, running, mustWaiting: await mustWaiting() }),
   };
   const out = Object.entries(parts).map(([k, x]) => (have.get(k) === x.h ? `"${k}":{"h":"${x.h}"}` : `"${k}":{"h":"${x.h}","data":${x.json}}`));
   return `{"now":${now},"parts":{${out.join(',')}}}`;
