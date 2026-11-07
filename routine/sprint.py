@@ -834,7 +834,8 @@ def his_said(parts, ws, real_only=False):
                 turn.insert(0, rows[j]["text"])
                 j -= 1
             lines = [("He: " if x["who"] == "he" else "The agent: ") + x["text"] for x in rows[max(0, i - 4):i]]
-            out.append({"where": where, "at": r["at"], "line": r["text"], "turn": " ".join(turn), "before": "\n".join(lines)[-1500:]})
+            out.append({"where": where, "at": r["at"], "line": r["text"], "turn": " ".join(turn), "before": "\n".join(lines)[-1500:],
+                        "after": turn[-1] if turn else ""})  # F186: her one line right before his, none when he spoke last
     return sorted(out, key=lambda x: x["at"])
 
 
@@ -896,6 +897,7 @@ _A_HOLD = re.compile(r"(?<![\w'])(?:leave it|as it is|i'?m good|i'?m fine|i'?m o
                      r"wait|hold on|no need|nothing to change|let me think|never mind|skip|forget it|myself|noted|i know|i saw|question)(?![\w'])")
 
 
+_LABEL = re.compile(r"(?<![\w.])[FHL]\d+(?:\.\d+)?(?![\w.])", re.I)  # F186: an item's label in a line (F186, H340)
 NOT_HIS = "those words aren't in his own lines"
 NOT_A_YES = "those are his words, but they aren't a yes to this"
 NOT_ON_IT = "those are his words, but about something else"
@@ -917,6 +919,11 @@ def his_on(quote, about, ws=None):
     named = [h for h in hits if label and re.search(rf"(?<![\w.]){re.escape(label.group(1))}(?![\w.])", str(h["line"]), re.I)]
     if named:  # F167: a line of his naming the item by its label is about it, read by the program; one line naming two items is about each
         return named[-1]["where"], ""
+    if label:  # F186: a text of his naming no item, right after a line of hers naming this one (in her words or added by her text line), is about it; calls as before
+        asked = [h for h in hits if not str(h["where"]).startswith("HQ/calls/") and not _LABEL.search(str(h["line"])) and h.get("after")
+                 and re.search(rf"(?<![\w.]){re.escape(label.group(1))}(?![\w.])", str(h["after"]), re.I)]
+        if asked:
+            return asked[-1]["where"], ""
     hit = hits[-1]
     answer = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
     try:
