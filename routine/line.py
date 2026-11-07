@@ -13,8 +13,11 @@ The switches are on the item (sprint.py go): prepare and build. Every minute on 
 the record, never anyone's word, and does the next step:
 
   - The row isn't open any more (done, parked, gone): its switches go.
-  - It's with the team (a build, its QA, a fix): nothing, the queue has it. A build that ended red without a record gets its proof run
-    once more (red twice: one text to him, and the line leaves it).
+  - It's with the team (a build, its QA, a fix): nothing, the queue has it. A build that ended red without a green record (F164, 7 November
+    2026): the line reads its failing lines. A real failure (her tests, a flow the row names) goes back to the team by itself as a resume
+    of its own job, the failing lines in a note it reads first (at night; by day only on his switch), up to its two resumes (past them:
+    one text to him, and the line leaves it). A check unrelated to the item becomes its own row, both switches on as the night's own,
+    like the night run's failures, never resumed for. Nothing to read: its proof runs once more (red twice: one text, the line leaves it).
   - Ready: with build on, the program sends it to the team itself (by day only on his own switch, at night also on hers). Build off:
     nothing more; prepared.
   - Only the Ready mark is missing: the program sets it.
@@ -78,6 +81,8 @@ def prep_of(jobs, label):
 
 def _night(now=None):
     import wall
+    if hasattr(now, "timestamp"):  # a datetime as well as a timestamp
+        now = now.timestamp()
     return not wall.daytime(now)
 
 
@@ -102,6 +107,13 @@ def next_step(row, g, jobs, now=None):
     j = q.with_team(jobs, label)
     if j:
         if j["state"].startswith("paused: ended, no record"):
+            real, other = red_lines(j["state"], row)
+            if real:  # F164: a real failure goes back to the team as a resume of its own job, at night on the night's own switches
+                if (g.get("build") or {}).get("by") != "him" and not _night(now):
+                    return "hold", f"job {j['n']} is red on {len(real)} real failure(s); by her pick it goes back to the team at night"
+                return "resume", f"job {j['n']} is red on {len(real)} real failure(s)" + (f" and {len(other)} unrelated check(s)" if other else "")
+            if other:  # F164: red only on checks unrelated to the item: each its own item, the build not resumed for them
+                return "split", f"job {j['n']} is red only on {len(other)} check(s) unrelated to {label}"
             return "rerun", f"job {j['n']} ended without a green record"
         return "wait", f"with the team: job {j['n']} ({j['state']})"
     p = prep_of(jobs, label)
@@ -124,6 +136,68 @@ def next_step(row, g, jobs, now=None):
     if not g.get("prep"):
         return "none", f"not ready and prepare is off: {why}"
     return "prep", why
+
+
+# F164: the failing lines a red record gives (runjob._no_record_why): her QA tests ("FAIL name: ...", "her QA tests: ..."), flows
+# ("FAIL flow name: ...", "45: FAILED - ..."). A flow the row names is its own; any other flow is a check unrelated to the item.
+_RED = re.compile(r"(?:(?<=\s)|(?<=;)|^)(?=FAIL |her QA tests: |\d+: FAILED - )")
+_FLOW = re.compile(r"FAIL flow (\S+?):|(\d+): FAILED - ")
+
+
+def red_lines(state, row):
+    """([real failing lines], [(check, line) unrelated to the item]) from a parked job's state; both empty: nothing to read."""
+    why = state.split(":", 2)[2] if state.count(":") >= 2 else ""
+    real, other = [], []
+    try:
+        import proof
+        named = {str(x) for x in proof.named_flows(row.get("line") or "")}
+    except Exception:
+        named = set()
+    for part in _RED.split(why):
+        part = part.strip(" ;")
+        if not re.match(r"FAIL |her QA tests: |\d+: FAILED - ", part):
+            continue
+        m = _FLOW.match(part)
+        if m:
+            name = m.group(1) or m.group(2)
+            own = name in named or re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", row.get("line") or "")
+            if not own:
+                other.append(("flow " + name, part))
+                continue
+        real.append(part)
+    return real, other
+
+
+def _split(label, j, other, st):
+    """F164: each unrelated check of a red build on the planning as its own item, like the night run's failures (nightly.rotate):
+    both switches on as the night's own. The same check's open row is used again, so a second red never makes a second one."""
+    import jobs
+    done = st.setdefault("_reruns", {}).setdefault(str(j["n"]), {}).setdefault("split", [])
+    out = []
+    for check, ln in other:
+        if check in done:
+            continue
+        mark = f"(the line, {check})"
+        said = (f"{check[0].upper() + check[1:]} failed in the build of {label} (job {j['n']}), a check unrelated to {label}: {ln[:500]}. "
+                f"Split out by the line (F164) as its own item, like the night run's failures: fixed through the whole rotation, the row, "
+                f"the review, her test, the Ready mark, the team, her check. {mark}").replace("|", "/")
+        try:
+            with jobs.locked():
+                with open(jobs.ROADMAP, encoding="utf8") as f:
+                    text = f.read()
+                new = next((r["label"] for r in S.open_rows(text) if mark in r["line"]), None)
+                if not new:
+                    text, new = jobs.roadmap_row(text, said, True, by="the line")
+                    tmp = jobs.ROADMAP + ".tmp"
+                    with open(tmp, "w", encoding="utf8") as f:
+                        f.write(text)
+                    os.replace(tmp, jobs.ROADMAP)
+            S.set_go(new, "both", True, by="night")
+            done.append(check)
+            out.append(f"{check} is {new}")
+        except (Exception, SystemExit) as e:  # one check not written never stops the others
+            out.append(f"{check} not written: {e!r}"[:160])
+    return out
 
 
 WAITS_ON_HIM = re.compile(r"waits? on his (?:answer|decision|yes)|it's his decision now|on her sit-down list", re.I)
@@ -166,6 +240,42 @@ def act(label, what, detail, row, st, jobs):
     if what == "mark":
         code, out = _run([os.path.join(HERE, "sprint.py"), "ready", label, "on"])
         return f"{label}: marked ready by the line ({out[:120]})"
+    if what in ("resume", "split"):
+        j = q.with_team(jobs, label)
+        if not j:
+            return None
+        real, other = red_lines(j["state"], row)
+        said = _split(label, j, other, st)
+        run = st.setdefault("_reruns", {}).setdefault(str(j["n"]), {})
+        if what == "split":
+            return f"{label}: job {j['n']} red only on checks unrelated to it, each its own item ({'; '.join(said)})" if said else None
+        import wall
+        no = None if wall.off() else wall.no_resume(j["n"])
+        if no:  # past its two resumes: one text to him, and the line leaves it
+            if run.get("told"):
+                return None
+            run["told"] = True
+            _tell(label, f"red-{j['n']}", f"{label}: the team's build (job {j['n']}) is still red on a real failure ({real[0][:160]}), and "
+                  f"it has had its {wall.MOST_RESUMES} resumes. {wall.what_next(j['n'])} The line leaves it.")
+            return f"{label}: job {j['n']} red past its resumes; told him, the line leaves it"
+        note = ("Your build came back red on what your item owns, so the line (F164) sent it back to you as a resume: make these "
+                "green, then commit, push, write the result and end the run as before. The failing lines: " + " / ".join(real)
+                ).replace("⟪", "(").replace("⟫", ")")
+        with q.locked():
+            text, js, on = q.read()
+            jj = next((x for x in js if x["n"] == j["n"]), None)
+            if not jj or not jj["state"].startswith("paused: ended, no record"):
+                return None
+            jj["state"] = "held: resumed by the line"
+            jj.setdefault("notes", []).append({"at": time.strftime("%Y-%m-%d %H:%M"), "text": " ".join(note.split())[:2000]})
+            q.write(text, js, on)
+        try:
+            wall.raise_box(j["n"])
+        except Exception:
+            pass
+        run["resumed"] = run.get("resumed", 0) + 1
+        return (f"{label}: job {j['n']} red on {len(real)} real failure(s), back to the team as a resume with them"
+                + (f"; {'; '.join(said)}" if said else ""))
     if what == "rerun":
         j = q.with_team(jobs, label)
         if not j:
@@ -233,7 +343,7 @@ def tick(now=None):
                 S.set_go(label, "both", False)
             done.append(f"{label}: passed her check, its switches off")
             continue
-        if what in ("send", "mark", "rerun", "prep"):
+        if what in ("send", "mark", "rerun", "resume", "split", "prep"):
             line = act(label, what, detail, row, st, jobs)
             if line:
                 done.append(line)
