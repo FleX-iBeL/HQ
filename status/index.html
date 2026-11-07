@@ -553,6 +553,7 @@
       <div id="hqu-banner"></div>
     </div>
     <p id="for-you" hidden></p>
+    <p id="line-holds" hidden></p>
     <div id="search" role="search">
       <div class="bar">
         <input id="search-box" type="search" placeholder="Search an item: F86, or words" aria-label="Search the items" autocomplete="off" spellcheck="false">
@@ -1691,6 +1692,15 @@
         el.textContent = say.length ? `For you now: ${say.join(' · ')}` : '';
       }
 
+      // F197: an item the line holds on a wait that would never end, by label and why, for as long as it lasts.
+      function drawLineHolds(list) {
+        const el = document.getElementById('line-holds');
+        if (!el) return;
+        const say = (list ?? []).map((h) => `${h.label} is held and would wait forever: ${h.why}`);
+        el.hidden = !say.length;
+        el.textContent = say.length ? `The line holds: ${say.join(' · ')}. Lift its Waits on (Waits on: nothing) or change what it waits on.` : '';
+      }
+
       function drawRoutines(r, broken = []) {
         const box = el('section');
         const now = r?.now ?? Date.now() / 1000;
@@ -2721,6 +2731,7 @@
         const usage = parts.usage?.data ?? null;
         const truth = parts.truth?.data ?? null;
         drawForYou(routines?.forYou);  // F106
+        drawLineHolds(routines?.lineHolds);  // F197
         // Also once a minute, so "read 4 min ago" and "resets in" stay true.
         const minute = Math.floor(Date.now() / 60000);
         const key = `${Object.entries(parts).map(([k, x]) => `${k}:${x.h}`).join(',')}\n${minute}`;

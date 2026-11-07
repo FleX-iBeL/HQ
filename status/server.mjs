@@ -403,6 +403,21 @@ async function readStore(store, path, { must = false, shape = null, missing = nu
 }
 const isObject = (d) => d !== null && typeof d === 'object' && !Array.isArray(d);
 
+// F197: each item the line holds on a wait that would never end (it waits on an item that is Won't this time or parked), by label
+// and why, from the line's own state as routine/line.py keeps it (each item's "seen", rewritten every minute): shown while it lasts.
+const LINE_STATE = process.env.HQ_LINE_STATE || join(root, '.status/line.json');
+const FOREVER = 'it would wait forever: ';
+async function lineForever() {
+  const { data } = await readStore('line', LINE_STATE, { shape: isObject });
+  const out = [];
+  for (const [label, e] of Object.entries(data ?? {})) {
+    const seen = String(e?.seen ?? '');
+    if (label.startsWith('_') || !seen.startsWith('hold:') || !seen.includes(FOREVER)) continue;
+    out.push({ label, why: seen.split(FOREVER)[1].trim() });
+  }
+  return out.sort((x, y) => x.label.localeCompare(y.label, 'en', { numeric: true }));
+}
+
 // H19/H20: every routine's own line, plus the watchdog's, which lives outside the Documents folder.
 async function routines() {
   const broken = [];
@@ -433,9 +448,10 @@ async function routines() {
   // H45: whether the laptop keeps working with the lid closed (routine/lidsleep.py, every minute).
   const lidsleep = await read('lidsleep', join(root, '.status/lidsleep.json'));
   const forYou = await forYouNow();  // F106: what's being worked on for him right now
+  const lineHolds = await lineForever();  // F197: the line's holds that would never end, from its own state
   const [estimate, planning, feedback, agents] = await Promise.all([estimates(), sprint(), feedbackBox(['list'], 20000), cyclesFriday()]);
   const noLog = missing.has('incidents') && fresh;  // F116: a fresh install's first minutes: "No incident log yet", grey
-  return { broken, noLog, forYou, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
+  return { broken, noLog, forYou, lineHolds, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep, estimate, planning, feedback, agents };
 }
 
 // F116: what truly waits for him, from what's kept, never from the status block: a job parked on him (boxed, waiting for a
