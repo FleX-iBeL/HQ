@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- A research item that passes her tests in the team's own run now passes them in the proof too: the proof's throwaway copy gets the finished jobs' logs, which a research answer names as its source. When a test still passes in the team's run and fails only in the proof's copy, the proof's red line says so for that test, with the proof's own reason, and a plain fail gives her test's own reason.
+
 ## 1.0.2 · 6 November 2026
 
 - The night review of items without your now goes up to 20 rounds an item instead of 3, the same as your now and her tests: only after the 20th flagged round does an item go on your Friday list. The rounds count per item across nights, and a night that stops partway picks up at the round it stopped. Moneypenny's Friday estimates text now also says how many rounds that week's items cost (the average, the highest and the lowest), says so when 20% or more of them needed more than 6, and says no items this week when there were none. Moneypenny's own instructions say the same 20 rounds, counted across nights, so asked on a call she gives you 20, not the old 3 (H318).

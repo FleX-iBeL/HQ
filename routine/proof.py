@@ -296,7 +296,25 @@ def _copy(head: str = "HEAD") -> str:
         if os.path.lexists(src) and not os.path.lexists(os.path.join(wt, name)):
             os.symlink(os.path.realpath(src), os.path.join(wt, name))
     os.makedirs(os.path.join(wt, "scratch"), exist_ok=True)
+    _job_logs(wt)
     return wt
+
+
+def _job_logs(wt: str) -> None:
+    """F173: the finished jobs' logs, copied (not linked: the copy never writes his live files) from the working HQ, the one the
+    workspace is in. A research answer gives a job's log as its source, and her tests look it up there, as the team's run does."""
+    live = os.path.join(os.path.dirname(os.path.realpath(os.path.join(hqpaths.HQ, "workspace"))), "scratch", "routine")
+    dst = os.path.join(wt, "scratch", "routine")
+    try:
+        names = [n for n in os.listdir(live) if re.fullmatch(r"job-\d+\.stream\.log", n)]
+    except OSError:
+        return
+    os.makedirs(dst, exist_ok=True)
+    for n in names:
+        try:
+            shutil.copy2(os.path.join(live, n), os.path.join(dst, n))
+        except OSError:
+            pass
 
 
 def _uncopy(wt: str) -> None:

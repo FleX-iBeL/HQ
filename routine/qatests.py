@@ -659,9 +659,37 @@ def end_run(label: str | None, wt: str) -> dict:
     out["failed"] = [n for n in names if not got.get(n)]
     out["green"] = bool(names) and not out["failed"]
     if out["failed"]:
-        out["why"] = f"her QA tests {', '.join(out['failed'])} fail on the built code"
+        team = _team_run(kept, wt, out["failed"])
+        parts = []
+        for n in out["failed"]:
+            why = _why(log, n)
+            if team.get(n):  # F173: the team's run on the working HQ passed it; only the proof's copy fails it, named so
+                parts.append(f"{n} passes in the team's run, fails in the proof's copy: {why}")
+            else:
+                parts.append(f"{n}: {why}")
+        out["split"] = [n for n in out["failed"] if team.get(n)]
+        out["why"] = "her QA tests fail on the built code: " + "; ".join(parts)
         out["log"] = log[-800:]
     return out
+
+
+def _why(log: str, name: str) -> str:
+    """Her test's own why for a failed test, from its FAIL line."""
+    for ln in log.splitlines():
+        m = _LINE.match(ln)
+        if m and m.group(2) == name and m.group(1) == "FAIL":
+            return (m.group(3) or "no why given").strip()[:300]
+    return "it gave no line (it didn't run to it)"
+
+
+def _team_run(d: str, wt: str, failed: list) -> dict:
+    """F173: the same tests on the working HQ (the one the workspace is in), the team's own run, to tell a test that only fails in
+    the proof's copy from a real red. {} when the copy is the working HQ itself."""
+    live = os.path.dirname(os.path.realpath(os.path.join(hqpaths.HQ, "workspace")))
+    if not failed or os.path.realpath(wt) == live:
+        return {}
+    got, _ = run_on(d, live)
+    return got
 
 
 def done_refuses(j: dict) -> str | None:
