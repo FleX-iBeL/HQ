@@ -435,8 +435,10 @@ JT=$(tty)
 
 # F101 (C73): the night's test run is the routine's own, not a Claude job's: no usage, no line to wait behind, and a release
 # reads what it left. A failure is a job for the team.
-NIGHT_AT = (2, 0)  # the same time as the H169 item that ran it
-NIGHT_LATE = (5, 0)  # F112: a job still running by now no longer keeps the night waiting, or there'd be no night at all [Claude's choice]
+NIGHT_AT = (5, 0)  # the same time as the H169 item that ran it; H340: 05:00 in the morning, his ask of 7 November 2026
+NIGHT_END = 8  # H340: the window closes at 08:00, the agents' day and Donna's morning text
+SWEEP_DAY = 0  # H340: Monday at 05:00 the weekly sweep (H162) runs every flow in the nightly's place: no nightly that morning
+NIGHT_LATE = (6, 0)  # F112: a job still running by now no longer keeps the night waiting, or there'd be no night at all [Claude's choice]
 
 
 def _pid_there(pid) -> bool:
@@ -471,7 +473,7 @@ def nightly_minute(now=None, busy=False):
     already going is left alone, a run that finished (green or red) is done, a run that died without a record starts once more, and a second
     death is told once. A job that's running keeps the night waiting until NIGHT_LATE (busy): two runs at once go red by themselves."""
     now = now or time.localtime()
-    if (now.tm_hour, now.tm_min) < NIGHT_AT or now.tm_hour > 5:
+    if (now.tm_hour, now.tm_min) < NIGHT_AT or now.tm_hour >= NIGHT_END or now.tm_wday == SWEEP_DAY:
         return None
     import nightly
     if nightly.running():
@@ -507,7 +509,7 @@ def nightly_minute(now=None, busy=False):
 
 def night_step(q) -> None:
     """F112: the routine's own, before the team's switch and before a running job's branch: on the main of the maker's HQ only (a friend's HQ
-    doesn't release). A flow only gets here by asking for it (HQ_NIGHT_MINUTE): a copy between 2:00 and 6:00 would start a whole nightly of
+    doesn't release). A flow only gets here by asking for it (HQ_NIGHT_MINUTE): a copy between 5:00 and 8:00 would start a whole nightly of
     its own, and outlive the flow."""
     if hqpaths.under_test() and not os.environ.get("HQ_NIGHT_MINUTE"):
         return

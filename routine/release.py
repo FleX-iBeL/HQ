@@ -10,7 +10,7 @@ goes well they push always first to nightly and then to main as well".
 
 Three branches: dev (the work), nightly (the night's work, every night), main (a released version, with its tag).
 Friends' update bars only look at main's version tags (update.py remote_tags), so nightly never reaches them.
-The daily release (H178, a repeating planned item at 2:05) runs after the nightly run or the Sunday sweep:
+The daily release (H178, a repeating planned item at 5:05) runs after the nightly run or the Monday sweep:
 
   python3 "routine/release.py" status          tonight's run, what changed since it started (tests or HQ itself),
                                                dev against nightly and main, and the suggestion: sure, again or hesitate

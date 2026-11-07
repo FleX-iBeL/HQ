@@ -15418,7 +15418,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         for aid in ("donna", "pepper", "moneypenny"):
             a = c["agents"][aid]
             need(isinstance(a["weekly_share"], (int, float)) and a["session"]["minutes"] > 0 and a["session"]["turns"] > 0
-                 and a["hours"] == ["08:00", "22:00"], f"the template's cycle defaults for {aid} are off: {a}")
+                 and a["hours"] == {"donna": ["08:00", "17:00"], "pepper": ["17:00", "18:00"], "moneypenny": ["18:00", "08:00"]}[aid] and a["days"] == ["monday", "tuesday", "wednesday", "thursday", "friday"], f"the template's cycle defaults for {aid} are off: {a}")
         need(not _pv.scan_text(json.dumps(c), pat), "the template's cycle defaults carry something private")
         # H320 (1.0.2): shipped, a normal switch on every HQ, still off until they turn it on
         pieces = json.loads((ROOT / "app/features-in-pieces.json").read_text())["features"]
@@ -23723,26 +23723,26 @@ nightly.morning = lambda t: told.append(t)
 tick.routines.bad = lambda *a, **k: bad.append(a)
 at = lambda d, h, m: time.struct_time((2026, 10, d, h, m, 0, 5, 300, 0))
 o = {}
-tick.nightly_minute(at(1, 1, 59)); o['before'] = len(started)
-tick.nightly_minute(at(1, 6, 0)); o['after'] = len(started)
-tick.nightly_minute(at(1, 2, 0), busy=True); tick.nightly_minute(at(1, 4, 59), busy=True); o['busy'] = len(started)
+tick.nightly_minute(at(1, 4, 59)); o['before'] = len(started)
+tick.nightly_minute(at(1, 8, 0)); o['after'] = len(started)
+tick.nightly_minute(at(1, 5, 0), busy=True); tick.nightly_minute(at(1, 5, 59), busy=True); o['busy'] = len(started)
 go['r'] = {'pid': 1}
-tick.nightly_minute(at(1, 2, 0)); o['going'] = len(started)
+tick.nightly_minute(at(1, 5, 0)); o['going'] = len(started)
 go['r'] = None
-tick.nightly_minute(at(1, 5, 0), busy=True); o['late'] = len(started)
-tick.nightly_minute(at(1, 5, 1)); o['once'] = len(started)
+tick.nightly_minute(at(1, 6, 0), busy=True); o['late'] = len(started)
+tick.nightly_minute(at(1, 6, 1)); o['once'] = len(started)
 pids['next'] = dead.pid
-tick.nightly_minute(at(2, 2, 0)); a = len(started)
-rec['r'] = {'at': '2026-10-02 02:00', 'failed': ['1: FAILED - x']}
-tick.nightly_minute(at(2, 2, 1)); o['red_is_done'] = len(started) - a
+tick.nightly_minute(at(2, 5, 0)); a = len(started)
+rec['r'] = {'at': '2026-10-02 05:00', 'failed': ['1: FAILED - x']}
+tick.nightly_minute(at(2, 5, 1)); o['red_is_done'] = len(started) - a
 rec['r'] = {'at': '2026-10-01 05:00'}
 a = len(started)
-tick.nightly_minute(at(3, 2, 0)); tick.nightly_minute(at(3, 2, 1)); o['died_once'] = len(started) - a
+tick.nightly_minute(at(3, 5, 0)); tick.nightly_minute(at(3, 5, 1)); o['died_once'] = len(started) - a
 a = len(started)
-tick.nightly_minute(at(3, 2, 2)); tick.nightly_minute(at(3, 2, 3)); tick.nightly_minute(at(3, 2, 4)); o['died_twice'] = len(started) - a
+tick.nightly_minute(at(3, 5, 2)); tick.nightly_minute(at(3, 5, 3)); tick.nightly_minute(at(3, 5, 4)); o['died_twice'] = len(started) - a
 o['told'] = len(told); o['bad'] = len(bad); o['words'] = told[-1] if told else ''
 a = len(started)
-tick.nightly_minute(at(4, 2, 0)); o['next_night'] = len(started) - a
+tick.nightly_minute(at(4, 5, 0)); o['next_night'] = len(started) - a
 print(json.dumps(o))
 """
         r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=e, cwd=str(ROOT))
@@ -23783,7 +23783,7 @@ print(json.dumps(o))
                  "        return _s.Popen(cmd, *a, **k)\n"
                  "tick.subprocess = _Sub()\n"
                  "_real_nm = tick.nightly_minute\n"
-                 "tick.nightly_minute = lambda now=None, busy=False: caught.setdefault('night', []).append(_real_nm(now=_t.struct_time((2026, 10, 31, 2, 0, 0, 5, 304, 0)), busy=busy))\n")
+                 "tick.nightly_minute = lambda now=None, busy=False: caught.setdefault('night', []).append(_real_nm(now=_t.struct_time((2026, 10, 31, 5, 0, 0, 5, 304, 0)), busy=busy))\n")
         (d / "driver.py").write_text(drv.replace('for j in (sys.argv[4:] or ["1"]):', hook2 + 'for j in (sys.argv[4:] or ["1"]):'))
         n2 = new("Build the other thing on the made-up page")
         mark = d / "night-running.json"
@@ -26813,9 +26813,9 @@ tick.subprocess = type('S', (), {'Popen': staticmethod(lambda *a, **k: started.a
 tick.log = lambda m: None
 tick.RUN = os.environ['HQ_JOB_RUN']
 at = lambda h, m: time.struct_time((2026, 10, 31, h, m, 0, 5, 304, 0))
-tick.nightly_minute(at(1, 59)); a = len(started)
-tick.nightly_minute(at(2, 0)); b = len(started)
-tick.nightly_minute(at(2, 1)); c = len(started)
+tick.nightly_minute(at(4, 59)); a = len(started)
+tick.nightly_minute(at(5, 0)); b = len(started)
+tick.nightly_minute(at(5, 1)); c = len(started)
 print(json.dumps({'a': a, 'b': b, 'c': c, 'cmd': started[-1][-2:], 'skip': flowsets.MAC_ONLY.split(',')}))
 """
         r = _sp.run([sys.executable, "-c", code, str(ROOT)], capture_output=True, text=True, env=env, cwd=str(ROOT))
@@ -27785,7 +27785,7 @@ print("RESULT " + json.dumps(out))
         need(len(i) == 1 and i[0][1] == "tuesday" and datetime.strptime(i[0][2], "%Y-%m-%d").weekday() == 1, f"the new day didn't move it: {i}")
         d = b.py(f"out(cycles.reconcile(T('{b.thu} 09:03')))")
         need(d == [], f"it moved again: {d}")
-        for key, val, say in (("session_at", "23:30", "outside her hours"), ("session_at", "25:00", "is a time"), ("hours", "25:00-26:00", "from-to"), ("hours", "20:00-08:00", "from-to"), ("hours", "08:00-12:00", "it would never run"), ("session_every", "someday", "day or a weekday")):
+        for key, val, say in (("session_at", "23:30", "outside her hours"), ("session_at", "25:00", "is a time"), ("hours", "25:00-26:00", "from-to"), ("hours", "08:00-08:00", "from-to"), ("hours", "08:00-12:00", "it would never run"), ("session_every", "someday", "day or a weekday")):
             r = b.cy("set", "pepper", key, val)
             need(say in r.stdout and "is now" not in r.stdout, f"{key} {val}: {r.stdout}")
         need(b.py("out(cycles.agent_settings('pepper')['hours'])") == ["08:00", "22:00"], "a refused value changed something")

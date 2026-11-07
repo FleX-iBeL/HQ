@@ -216,6 +216,8 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
         if not _at_hour({"hours": [_hhmm(lo), _hhmm(hi)]}, a["session"]["at"]):
             return f"her session is at {a['session']['at']}, outside {_hhmm(lo)} to {_hhmm(hi)}: it would never run. Move it first."
         a["hours"] = [_hhmm(lo), _hhmm(hi)]
+        if a["hours"] == ["00:00", "23:59"]:  # H340: round the clock is every day too
+            a["days"] = list(DAYS)
     elif key == "days":  # H340: her working days, like monday-friday or monday,wednesday
         w = [x.strip().lower() for x in re.split(r"[,; ]+", v) if x.strip()]
         if len(w) == 1 and re.fullmatch(r"\w+-\w+", w[0]) and all(x in DAYS for x in w[0].split("-")):
