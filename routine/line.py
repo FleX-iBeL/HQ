@@ -246,6 +246,34 @@ def red_lines(state, row):
     return real, other
 
 
+_WHY = re.compile(r"test(?:'s| is) wrong|can'?t be done|cannot be done|can not be done|isn'?t possible|not possible", re.I)
+
+
+def stated_reason(real, row):
+    """F187: the build's written result in its row names a still-red test and why (the test is wrong, or it can't be done): that
+    sentence, or ''. A resumed build ends only on a green record or such a reason; any other stop is silent and resumed again."""
+    names = {m.group(1) for part in real for m in [re.match(r"FAIL ([\w.-]+)", part)] if m}
+    for s in re.split(r"(?<=[.!?])\s+|\s\|\s", row.get("line") or ""):
+        if re.search(r"\bresult\b", s, re.I) and _WHY.search(s) and any(
+                re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", s) for n in names):
+            return s.strip()
+    return ""
+
+
+def _to_sitdown(label, j, real, reason):
+    """F187: the red build on her sit-down list (review.py sitdown, quiet) and one if-then text to him naming the three ways, sent by
+    the line; False when the list refused it, so the caller texts as before."""
+    what = (f"The team's build (job {j['n']}) is still red on {real[0][:160] if real else 'its own test'}"
+            + (f", and it says why: {reason[:240]}" if reason else ", after both its times back with the team, the most a job gets") + ".")
+    ifthen = (f"If the test is wrong, I'll fix the test and send {label} back to the team; if not, either split {label} into "
+              f"smaller items, or say no to it.")
+    code, _ = _run([os.path.join(HERE, "review.py"), "sitdown", label, what, ifthen, "--quiet"])
+    if code:
+        return False
+    _tell(label, f"red-{j['n']}", f"{label}: {what} {ifthen}")
+    return True
+
+
 def _split(label, j, other, st):
     """F164: each unrelated check of a red build on the planning as its own item, like the night run's failures (nightly.rotate):
     both switches on as the night's own. The same check's open row is used again, so a second red never makes a second one."""
@@ -357,10 +385,14 @@ def act(label, what, detail, row, st, jobs):
             return f"{label}: job {j['n']} red only on checks unrelated to it, each its own item ({out})" if out else None
         import wall
         no = None if wall.off() else wall.no_resume(j["n"])
-        if no:  # past its two resumes: one text to him, and the line leaves it
+        reason = stated_reason(real, row)
+        if reason or no:  # F187: a stated reason, or past its two resumes: on her sit-down list with one text, the line leaves it
             if run.get("told"):
                 return None
             run["told"] = True
+            if _to_sitdown(label, j, real, reason):
+                return (f"{label}: job {j['n']} red " + ("with its reason written" if reason else "past its resumes")
+                        + "; on her sit-down list, one text to him, the line leaves it")
             _tell(label, f"red-{j['n']}", f"{label}: the team's build (job {j['n']}) is still red on a real failure ({real[0][:160]}), and "
                   f"it has had its {wall.MOST_RESUMES} resumes. {wall.what_next(j['n'])} The line leaves it.")
             return f"{label}: job {j['n']} red past its resumes; told him, the line leaves it"

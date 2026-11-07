@@ -1544,8 +1544,9 @@ def _rounds_left(log=None):
                 log(f"review: {said} (F86)")
 
 
-def sitdown(label, what, ifthen, now=None, kind="his", instead=""):
-    """A finding only he can answer: on her sit-down list, the loop stops for this row, one text in if-then shape. Her no goes the same way (no)."""
+def sitdown(label, what, ifthen, now=None, kind="his", instead="", quiet=False):
+    """A finding only he can answer: on her sit-down list, the loop stops for this row, one text in if-then shape. Her no goes the same way (no).
+    quiet: the caller sends the one text itself (the line, F187); this only puts the row on the list."""
     import cycles
     import ledger
     label, what, ifthen = label.strip().upper(), q.one_line(what or "").strip(), q.one_line(ifthen or "").strip()
@@ -1574,6 +1575,8 @@ def sitdown(label, what, ifthen, now=None, kind="his", instead=""):
     if had and had.get("kind") in ("his", "no"):
         return f"{label} was on the sit-down list already; no second text."
     ledger.note(cycles.FIX_AGENT, f"{label} on the sit-down list: " + (f"she says no: {what} Instead: {instead}" if kind == "no" else what))
+    if quiet:
+        return f"{label} is on the sit-down list; the caller texts him."
     return f"{label} is on the sit-down list. " + cycles.ask(cycles.FIX_AGENT, ifthen)
 
 
@@ -1708,8 +1711,8 @@ def main(argv):
         print(reword(argv[1], argv[2]))
     elif argv[0] == "add" and len(argv) == 3:
         print(addition(argv[1], argv[2]))
-    elif argv[0] == "sitdown" and len(argv) == 4:
-        print(sitdown(argv[1], argv[2], argv[3]))
+    elif argv[0] == "sitdown" and len(argv) in (4, 5) and argv[4:] in ([], ["--quiet"]):
+        print(sitdown(argv[1], argv[2], argv[3], quiet=bool(argv[4:])))
     elif argv[0] == "keep" and len(argv) in (1, 2):
         print(keep(int(argv[1]) if len(argv) == 2 else None))
     elif argv[0] == "round-before" and len(argv) == 4:
