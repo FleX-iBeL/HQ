@@ -7,6 +7,9 @@
 // H307 (folded in): the same timeline on the status page any time, from the jobs and the planning.
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseRoadmap } from './parse.mjs';
+import { ROADMAP } from './paths.mjs';
 import { FOLDER } from './paths.mjs';
 import { lineSettings } from './usage.mjs';
 
@@ -59,7 +62,11 @@ export function jobRows(jobs, now = Date.now()) {
       let start = local(day(new Date(now)), m[1]);
       if (start > now) start -= 864e5;
       out.push({ name, kind: 'running', start, end: Math.max(start + JOB_MIN * 6e4, now + 5 * 6e4) });
-    } else if (/^boxed|^held/.test(j.state)) {
+    } else if (/^boxed/.test(j.state)) {
+      // ran past its box: found broken, from its start to about where its box ran out (never past now)
+      const start = agreed ?? now - JOB_MIN * 6e4;
+      out.push({ name, kind: 'broken', start, end: Math.max(start + 6e4, Math.min(now, start + JOB_MIN * 6e4)) });
+    } else if (/^held/.test(j.state)) {
       out.push({ name, kind: 'you', start: agreed ?? now, end: Math.max(now + 60 * 6e4, (agreed ?? now) + 6e4) });
     } else if (/^ready/.test(j.state)) {
       // the earliest a waiting job starts is the routine's next whole-minute tick after this one
@@ -74,32 +81,91 @@ const overlaps = (r, [s, e]) => r.end >= s && r.start <= e;
 const fromFile = (r) => ({ name: String(r.name ?? ''), kind: KINDS.includes(r.kind) ? r.kind : 'done', start: ms(r.start), end: ms(r.end) });
 const toFile = (r) => ({ name: r.name, kind: r.kind, start: new Date(r.start).toISOString(), end: new Date(r.end).toISOString() });
 
+/** Takes one fresh row from HQ's records into a night's rows. What went wrong and then right keeps both: the found-broken row
+ * stays with its real time and a new row follows it, never one row overwritten to green. Running and expected rows move on. */
+export function takeRow(rows, r) {
+  let last = -1;
+  rows.forEach((x, i) => { if (x.name === r.name) last = i; });
+  if (last < 0) { rows.push(r); return true; }
+  const x = rows[last];
+  if (x.kind === 'broken' && r.kind !== 'broken') {
+    rows.push({ ...r, start: Math.max(r.start, x.end), end: Math.max(r.end, x.end + 6e4) });
+    return true;
+  }
+  if (x.kind === r.kind && x.end === r.end && x.start === r.start) return false;
+  rows[last] = x.kind === 'broken' ? { ...x, end: r.end } : r;
+  return true;
+}
+
+const readKept = (kept) => ({ title: kept?.title || 'The night', updated: ms(kept?.updated), running: kept ? kept.running !== false : true,
+  rows: (Array.isArray(kept?.rows) ? kept.rows : []).map(fromFile).filter((r) => r.name && r.start != null && r.end != null),
+  log: (Array.isArray(kept?.log) ? kept.log : []).filter((x) => x && x.text).map((x) => ({ at: ms(x.at), text: String(x.text) })),
+  usage: (Array.isArray(kept?.usage) ? kept.usage : []).map((u) => ({ at: ms(u.at), week: Number(u.week) })).filter((u) => u.at != null && Number.isFinite(u.week)),
+  reset: kept?.reset ?? null,
+  parts: Array.isArray(kept?.parts) ? kept.parts : [] });
+
+async function keep(key, kept, n) {
+  try {
+    await mkdir(NIGHTS, { recursive: true });
+    await writeFile(join(NIGHTS, `${key}.json`), `${JSON.stringify({ ...(kept ?? {}), title: n.title, running: n.running,
+      updated: kept?.updated ?? new Date().toISOString(), rows: n.rows.map(toFile), log: kept?.log ?? [], usage: kept?.usage ?? [] }, null, 1)}\n`);
+  } catch { /* a page that can't keep it still shows it */ }
+}
+
+/** A kept night that's over: its still-running rows get their real end and colour once the job's own record has one. That close,
+ * on the night the job started, is the only change a finished night ever gets; the night that runs now never writes onto it. */
+async function closeKept(key, kept, n, records) {
+  let changed = false;
+  for (const r of n.rows) {
+    if (r.kind !== 'running') continue;
+    const end = records.find((x) => x.name === r.name && ['done', 'broken'].includes(x.kind) && x.end >= r.start);
+    if (!end) continue;
+    r.kind = end.kind;
+    r.end = end.end;
+    changed = true;
+  }
+  if (changed) await keep(key, kept, n);
+  return n;
+}
+
 /** A night as the page shows it. The night that runs now takes in the queue's jobs and is kept with them, so it reads the same later. */
 async function theNight(key, parsed, now) {
   const kept = await readNight(key);
-  const n = { title: kept?.title || 'The night', updated: ms(kept?.updated), running: kept ? kept.running !== false : true,
-    rows: (Array.isArray(kept?.rows) ? kept.rows : []).map(fromFile).filter((r) => r.name && r.start != null && r.end != null),
-    log: (Array.isArray(kept?.log) ? kept.log : []).filter((x) => x && x.text).map((x) => ({ at: ms(x.at), text: String(x.text) })),
-    usage: (Array.isArray(kept?.usage) ? kept.usage : []).map((u) => ({ at: ms(u.at), week: Number(u.week) })).filter((u) => u.at != null && Number.isFinite(u.week)),
-    parts: Array.isArray(kept?.parts) ? kept.parts : [] };
-  if (key === nightOf(now)) {
-    const have = new Set(n.rows.map((r) => r.name));
-    const fresh = jobRows(parsed?.queue?.jobs, now).filter((r) => overlaps(r, windowOf(key)));
-    let changed = !kept && fresh.length > 0;
-    for (const r of fresh) {
-      const i = n.rows.findIndex((x) => x.name === r.name);
-      if (!have.has(r.name)) { n.rows.push(r); changed = true; }
-      else if (n.rows[i].kind !== r.kind || n.rows[i].end !== r.end) { n.rows[i] = r; changed = true; }
-    }
-    if (changed) {
-      try {
-        await mkdir(NIGHTS, { recursive: true });
-        await writeFile(join(NIGHTS, `${key}.json`), `${JSON.stringify({ ...(kept ?? {}), title: n.title, running: n.running,
-          updated: kept?.updated ?? new Date(now).toISOString(), rows: n.rows.map(toFile), log: kept?.log ?? [], usage: kept?.usage ?? [] }, null, 1)}\n`);
-      } catch { /* a page that can't keep it still shows it */ }
-    }
-  }
+  const n = readKept(kept);
+  const records = jobRows(parsed?.queue?.jobs, now);
+  if (key !== nightOf(now)) return closeKept(key, kept, n, records);
+  // a job a kept night already holds stays on the night it started
+  const older = new Set();
+  for (const k of (await nights()).filter((d) => d < key)) for (const r of (await readNight(k))?.rows ?? []) older.add(r.name);
+  let changed = false;
+  for (const r of records.filter((x) => overlaps(x, windowOf(key)) && !older.has(x.name))) changed = takeRow(n.rows, r) || changed;
+  if (changed || (!kept && n.rows.length)) await keep(key, kept, n);
   return n;
+}
+
+/** The routine's minute tick: the night that runs now written from HQ's records, and every kept night with a running row looked at. */
+export async function tick(parsed, now = Date.now()) {
+  const cur = nightOf(now);
+  for (const k of await nights()) if (k !== cur) {
+    const kept = await readNight(k);
+    if (kept?.rows?.some((r) => r.kind === 'running')) await theNight(k, parsed, now);
+  }
+  return theNight(cur, parsed, now);
+}
+
+/** A usage reading HQ saves, written into the night that runs as it comes in (part 4b): {at, week}, and the week's reset. */
+export async function addReading(week, at = Date.now(), reset = null) {
+  if (!Number.isFinite(week)) return;
+  const key = nightOf(at);
+  const kept = (await readNight(key)) ?? { title: 'The night', running: true, rows: [], log: [], usage: [] };
+  const usage = Array.isArray(kept.usage) ? kept.usage : [];
+  const iso = new Date(at).toISOString();
+  if (usage.some((u) => u.at === iso)) return;
+  usage.push({ at: iso, week });
+  try {
+    await mkdir(NIGHTS, { recursive: true });
+    await writeFile(join(NIGHTS, `${key}.json`), `${JSON.stringify({ ...kept, usage, ...(reset ? { reset } : {}) }, null, 1)}\n`);
+  } catch { /* the graph waits for the next reading */ }
 }
 
 /** What a row shows as: never running after its end in a night that still runs (its end wasn't recorded: found broken). */
@@ -130,7 +196,7 @@ function usageHtml(n, now, markdown, reset0) {
   const reads = [...n.usage].sort((a, b) => a.at - b.at);
   if (!reads.length) return '<p class="soft">No usage reading yet this week: the graph starts empty at the week\'s start.</p>';
   const last = reads[reads.length - 1];
-  let reset = ms(reset0);
+  let reset = ms(reset0) ?? ms(n.reset);
   if (reset == null) reset = reads[0].at + WEEK;
   while (reset <= last.at) reset += WEEK;
   while (reset - WEEK > last.at) reset -= WEEK;
@@ -142,7 +208,9 @@ function usageHtml(n, now, markdown, reset0) {
   const moving = (t) => Math.max(20, Math.round(100 * (t - ws) / WEEK));
   const real = [[ws, 0], ...week.map((r) => [r.at, r.week])].map(([t, p]) => `${x(t)},${y(p)}`).join(' ');
   const twelve = week.filter((r) => r.at >= last.at - 12 * 36e5);
-  const pace = twelve.length > 1 && last.at > twelve[0].at ? (last.week - twelve[0].week) / (last.at - twelve[0].at) : 0;
+  // the last twelve working hours' pace; with one reading in them, the week's own pace so far
+  const pace = twelve.length > 1 && last.at > twelve[0].at ? (last.week - twelve[0].week) / (last.at - twelve[0].at)
+    : last.at > ws ? last.week / (last.at - ws) : 0;
   const to = Math.min(reset, Math.max(now + 36e5, ...n.rows.map((r) => r.end)));
   const lands = Math.min(stop, last.week + pace * Math.max(0, to - last.at));
   const dots = week.map((r) => `<circle class="nr-reading" cx="${x(r.at)}" cy="${y(r.week)}" r="3"><title>${hm(r.at)}: the week at ${r.week}%, the moving line at ${moving(r.at)}%</title></circle>`).join('');
@@ -152,7 +220,8 @@ function usageHtml(n, now, markdown, reset0) {
     + `<polyline class="nr-moving" fill="none" stroke="#888" stroke-dasharray="2 4" points="${x(ws)},${y(20)} ${x(ws + 0.2 * WEEK)},${y(20)} ${x(reset)},${y(100)}"/>`
     + `<polyline class="nr-real" fill="none" stroke="#2a6" stroke-width="2" points="${real}"/>`
     + `<line class="nr-heading" x1="${x(last.at)}" y1="${y(last.week)}" x2="${x(to)}" y2="${y(lands)}" stroke="#2a6" stroke-dasharray="4 3"/>`
-    + `${dots}<text x="${Math.min(W - 70, x(last.at) + 6)}" y="${y(last.week) - 6}">now ${last.week}%</text></svg>`
+    + `${dots}<text x="${Math.min(W - 70, x(last.at) + 6)}" y="${y(last.week) - 6}">now ${last.week}%</text>`
+    + `<text x="${Math.min(W - 110, x(to) - 100)}" y="${Math.max(12, y(lands) - 6)}" class="nr-heading-label">heading for ${Math.round(lands)}%</text></svg>`
     + `<div class="nr-legend"><span class="nr-key"><i class="nr-ln real"></i>the week used</span><span class="nr-key"><i class="nr-ln moving"></i>the moving line</span>`
     + `<span class="nr-key"><i class="nr-ln stop"></i>the stop line (${stop}%)</span><span class="nr-key"><i class="nr-ln heading"></i>where it's heading (${Math.round(lands)}% by ${hm(to)})</span></div>`;
 }
@@ -218,7 +287,7 @@ export async function nightPage(key, parsed, { now = Date.now(), markdown = '', 
 <h2>The week's usage</h2>${usageHtml(n, now, markdown, reset)}
 <h2>Now</h2><ul>${going.map((r) => `<li>${esc(r.name)}, since ${hm(r.start)}</li>`).join('') || '<li>Nothing running.</li>'}</ul>
 ${parts ? `<h2>The parts of the night</h2><ul class="nr-parts">${parts}</ul>` : ''}
-<h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(x.text)}</li>`).join('') || '<li>Nothing logged yet.</li>'}</ul>
+<h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(x.text)}</li>`).join('') || (n.rows.length ? '<li>No words logged yet: the timeline above is what ran.</li>' : '<li>A quiet night: nothing to do.</li>')}</ul>
 <h2>The nights</h2><ul>${all.map((d) => `<li><a href="/night-road/${d}">${d}${d === key ? ' (this one)' : ''}</a></li>`).join('')}</ul>
 <script>(function(){var u=document.getElementById('nr-updated');if(!u||!u.dataset.at)return;function f(){var t=Number(u.dataset.at),m=Math.max(0,Math.floor((Date.now()-t)/6e4)),d=new Date(t);u.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' ('+m+' min ago)';if(u.dataset.live==='1'&&m>${STALE_MIN}&&!document.querySelector('.nr-warn')){var w=document.createElement('span');w.className='nr-warn';w.textContent=' Not updated for '+m+' min';u.after(w);}}setInterval(f,30000);if(u.dataset.live==='1')setInterval(function(){location.reload();},60000);})();</script>
 </body></html>`;
@@ -229,4 +298,11 @@ export async function statusTimeline(parsed, now = Date.now()) {
   const n = await theNight(nightOf(now), parsed, now);
   const rows = n.rows.length ? n.rows : jobRows(parsed?.queue?.jobs, now).filter((r) => r.end >= now - 12 * 36e5);
   return `<style>${CSS}</style>${timelineHtml(rows, now, (r) => shownKind(r, n, now))}`;
+}
+
+// The routine's minute tick (routine/tick.py): node status/night-road.mjs --tick
+if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes('--tick')) {
+  let text = '';
+  try { text = await readFile(ROADMAP, 'utf8'); } catch { /* no roadmap: the kept nights alone */ }
+  await tick(text ? parseRoadmap(text) : null);
 }

@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
+import { addReading } from './night-road.mjs';
 import { leastOf, lineKey, reserveOf, staleWords, stopLine, usageReading, usageVerdict, windowPassed } from './usage.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -146,6 +147,13 @@ if (process.argv.includes('--statusline') || !reading.readable) {
 }
 mkdirSync(join(root, '.status'), { recursive: true });
 writeFileSync(USAGE_FILE, `${JSON.stringify(reading, null, 2)}\n`);
+// H339 part 4b: each weekly reading goes into the night that runs as it comes in, so the night's road draws the week from HQ's own readings.
+{
+  const wk = reading.readable && reading.limits.find((l) => !l.kept && lineKey(l.label) === 'weekly');
+  if (wk && Number.isFinite(wk.percent)) {
+    try { await addReading(wk.percent, Date.parse(reading.checkedAt ?? '') || Date.now(), wk.resetsAt ?? null); } catch { /* a view only */ }
+  }
+}
 
 const { usageLines: lines } = parseRoadmap(readFileSync(ROADMAP, 'utf8'));
 const verdict = usageVerdict(reading, lines, new Date(), { weeklyOnly });

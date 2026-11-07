@@ -1495,6 +1495,18 @@ def data_minute():
         routines.bad("data", f"A data change failed: {e!r}", every=3600)
 
 
+def night_road_minute():
+    """H339: the night that runs is written from HQ's records every minute, not only when its page is opened, and each kept night
+    with a job still running closes that row on its own night once the job's record has an end. No model: a view of the records."""
+    try:
+        r = subprocess.run([NODE, os.path.join(JV, "status", "night-road.mjs"), "--tick"], cwd=JV, capture_output=True, text=True,
+                           timeout=60, stdin=subprocess.DEVNULL)
+        if r.returncode:
+            log(f"the night's road: {(r.stderr or r.stdout).strip()[-200:]}")
+    except Exception as e:
+        log(f"the night's road: {e!r}")
+
+
 def mistakes_minute():
     """F103: the ledger's own pass on the main (what's new in the transcripts and the threads), and each agent's weekly score,
     whatever the agents' switch says. Both no model."""
@@ -1827,6 +1839,8 @@ def tick():
         return
     if not hqpaths.under_test() or os.environ.get("HQ_DATA_MINUTE"):
         data_minute()
+    if not hqpaths.under_test() or os.environ.get("HQ_NIGHT_ROAD_MINUTE"):
+        night_road_minute()
     if (not hqpaths.under_test() and int(time.time() / 60) % MISTAKES_EVERY == 0) or os.environ.get("HQ_MISTAKES_MINUTE"):
         mistakes_minute()
     try:
