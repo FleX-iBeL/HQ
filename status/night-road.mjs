@@ -31,6 +31,14 @@ const local = (d, t) => ms(`${d}T${t}`);  // YYYY-MM-DD and HH:MM, local time
 export const nightOf = (t = Date.now()) => day(new Date(t - 12 * 36e5));
 const windowOf = (key) => { const s = local(key, '12:00'); return [s, s + 864e5]; };
 
+/** The night that runs now: the night of this moment, or, before noon, a night kept under today's own date (a night named by
+ * the calendar day after midnight is the same night), so it still reads as running, live and stale-checked. */
+export async function currentNight(now = Date.now()) {
+  const k = nightOf(now), d = day(new Date(now));
+  return d !== k && (await nights()).includes(d) ? d : k;
+}
+const windowNow = (key, now) => [Math.min(windowOf(key)[0], windowOf(nightOf(now))[0]), Math.max(windowOf(key)[1], windowOf(nightOf(now))[1])];
+
 export async function nights() {
   try {
     return (await readdir(NIGHTS)).map((f) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(f)?.[1]).filter(Boolean).sort().reverse();
@@ -51,11 +59,13 @@ export function jobRows(jobs, now = Date.now()) {
     const name = String(j.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
     if (!name) continue;
     const [ad, at] = String(j.agreed ?? '').split(' ');
-    const agreed = local(ad, at);
+    let agreed = local(ad, at);
+    if (agreed != null && agreed > now + 6e4 && !/^ready/.test(j.state)) agreed -= 864e5;  // agreed at a time to come: the day before
     let m;
     if ((m = /^done (\d\d:\d\d) on (\d{4}-\d{2}-\d{2})/.exec(j.state))) {
-      const end = local(m[2], m[1]);
+      let end = local(m[2], m[1]);
       if (end == null) continue;
+      if (end > now + 6e4) end -= 864e5;  // done at a time still to come on that date: that time the day before
       const start = agreed != null && agreed <= end && end - agreed < 12 * 36e5 ? agreed : end - JOB_MIN * 6e4;
       out.push({ name, kind: 'done', start, end });
     } else if ((m = /^(?:running|stop asked)(?: since)? (\d\d:\d\d)/.exec(j.state))) {
@@ -199,19 +209,19 @@ async function theNight(key, parsed, now) {
   const boxedNames = new Set(facts.filter((r) => r.boxed).map((r) => r.name));
   // a run ended at its box is its own found-broken row (the record's real end), so the job's own boxed state adds none
   const records = [...facts, ...jobRows(parsed?.queue?.jobs, now).filter((r) => !(r.kind === 'broken' && boxedNames.has(r.name)))];
-  if (key !== nightOf(now)) return closeKept(key, kept, n, records.filter((r) => !r.boxed));
+  if (key !== await currentNight(now)) return closeKept(key, kept, n, records.filter((r) => !r.boxed));
   // a job a kept night already holds stays on the night it started
   const older = new Set();
   for (const k of (await nights()).filter((d) => d < key)) for (const r of (await readNight(k))?.rows ?? []) older.add(r.name);
   let changed = false;
-  for (const r of records.filter((x) => overlaps(x, windowOf(key)) && !older.has(x.name))) changed = takeRow(n.rows, r) || changed;
+  for (const r of records.filter((x) => overlaps(x, windowNow(key, now)) && !older.has(x.name))) changed = takeRow(n.rows, r) || changed;
   if (changed || (!kept && n.rows.length)) await keep(key, kept, n);
   return n;
 }
 
 /** The routine's minute tick: the night that runs now written from HQ's records, and every kept night with a running row looked at. */
 export async function tick(parsed, now = Date.now()) {
-  const cur = nightOf(now);
+  const cur = await currentNight(now);
   for (const k of await nights()) if (k !== cur) {
     const kept = await readNight(k);
     if (kept?.rows?.some((r) => r.kind === 'running')) await theNight(k, parsed, now);
@@ -323,7 +333,7 @@ const PAGE_CSS = `body{font:15px/1.45 system-ui,sans-serif;max-width:960px;margi
 /** The night's page: /night-road (the night that's newest) and /night-road/YYYY-MM-DD (any kept night). */
 export async function nightPage(key, parsed, { now = Date.now(), markdown = '', reset = null } = {}) {
   const list = await nights();
-  const cur = nightOf(now);
+  const cur = await currentNight(now);
   if (!key) key = list[0] && list[0] > cur ? list[0] : (list.includes(cur) || parsed?.queue?.jobs?.length ? cur : list[0] ?? cur);
   const n = await theNight(key, parsed, now);
   const all = [...new Set([key, ...(await nights())])].sort().reverse();
@@ -361,7 +371,7 @@ ${parts ? `<h2>The parts of the night</h2><ul class="nr-parts">${parts}</ul>` : 
 
 /** H307: the timeline for the status page, any time: the night that runs now with the queue's jobs. */
 export async function statusTimeline(parsed, now = Date.now()) {
-  const n = await theNight(nightOf(now), parsed, now);
+  const n = await theNight(await currentNight(now), parsed, now);
   const rows = n.rows.length ? n.rows : jobRows(parsed?.queue?.jobs, now).filter((r) => r.end >= now - 12 * 36e5);
   return `<style>${CSS}</style>${timelineHtml(rows, now, (r) => shownKind(r, n, now))}`;
 }
