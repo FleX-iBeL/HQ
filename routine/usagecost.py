@@ -427,9 +427,38 @@ def agents_share_sum():
     return int(total) if total == int(total) else total
 
 
+def agents_room(now=None):
+    """F168 (7 November 2026): the room kept under his line for the agents is what's left of their weekly shares: for each of
+    Donna, Pepper and Moneypenny her weekly share (as agents_share_sum reads it) less what her own runs used in the last 7 days
+    (cycles.used, the figure her share wall reads: the measured weekly cost of her finished cycles and steps), never under 0,
+    added up. What they used is already inside the week's percent, so it isn't kept a second time. Worked out at every read;
+    with no readable history nothing counts as used (the whole shares). agentsRoom in status/usage.mjs gives the same."""
+    try:
+        import cycles
+        agents = cycles.settings()["agents"]
+    except Exception:
+        return RESERVE
+    since = (now or time.time()) - 7 * 86400
+    total = 0.0
+    for aid in AGENTS:
+        a = agents.get(aid) or cycles.DEFAULT_AGENT
+        try:
+            n = float(a.get("weekly_share", 0))
+        except (TypeError, ValueError):
+            n = 0.0
+        n = n if math.isfinite(n) and n > 0 else 0.0
+        try:
+            u = float(cycles.used(aid, since))
+        except Exception:
+            u = 0.0
+        total += max(0.0, n - (u if math.isfinite(u) and u > 0 else 0.0))
+    total = round(total, 1)
+    return int(total) if total == int(total) else total
+
+
 def reserve_points(markdown=None):
     """F100: the points taken off each stop line for the agents' cycles and the team. F149: the sum of the agents' weekly
-    shares in the settings (agents_share_sum), unless the roadmap names a reserve of his own ("**Usage reserve: N points.**",
+    shares in the settings (agents_share_sum); F168: what's left of them this week (agents_room), unless the roadmap names a reserve of his own ("**Usage reserve: N points.**",
     usageline.py reserve N); 0 under a test without the wall."""
     import wall
     if wall.off():
@@ -440,7 +469,7 @@ def reserve_points(markdown=None):
         except OSError:
             markdown = ""
     res = re.search(r"\*\*Usage reserve:\s*([0-9]{1,2})\b", markdown)
-    return min(50, int(res.group(1))) if res else min(50, agents_share_sum())  # F113: 0 to 50, as the command
+    return min(50, int(res.group(1))) if res else min(50, agents_room())  # F113: 0 to 50, as the command
 
 
 def least_points(markdown=None):
