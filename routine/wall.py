@@ -102,14 +102,18 @@ def planned_night(job) -> bool:
     return bool(m) and not DAY[0] <= int(m.group(1)) < DAY[1]
 
 
+PARKED_RED = "paused: ended, no record"  # the runner's mark for a build that ended red (runjob.PARKED)
+
+
 def in_progress(jobs, leave_out=None) -> set:
     """The items in progress: a QA or a fix waiting or running, and a build that started and isn't through (running,
-    held, paused or boxed). A build still waiting for its first start isn't in progress."""
+    held, paused or boxed). A build still waiting for its first start isn't in progress, and neither is one parked red
+    (its run ended without a green record, F164): nobody works on it until it's resumed or sent again (F9184)."""
     import jobs as q
     import qa
     out = set()
     for j in jobs:
-        if j["state"].startswith(q.FINISHED) or (leave_out and j["n"] == leave_out):
+        if j["state"].startswith(q.FINISHED + (PARKED_RED,)) or (leave_out and j["n"] == leave_out):
             continue
         t = j.get("text", "")
         started = not j["state"].startswith("ready")
