@@ -40276,6 +40276,181 @@ FLOW_LIMITS.update({601: 600, 602: 600, 608: 600})
 # == end of H313's block ==============================================================================================
 
 
+# == H339: the night's road, one detailed flow per done example (1) to (7) ==========================================================
+def _road(js, roadmap="# Roadmap\n\n## The queue\n\n## Features\n\n## Bugs\n", nights=None, trail=()):
+    """H339: a throwaway workspace with the given roadmap, kept nights and HQ records (trail lines), and the night's road module run
+    on it (status/night-road.mjs): js is the body of an async module with R (the module) and NOW (ms) in scope; what it prints back."""
+    import shutil as _sh, subprocess as _sp, tempfile
+    ws = Path(tempfile.mkdtemp(prefix="h339-flow-"))
+    try:
+        (ws / "HQ" / "night-road").mkdir(parents=True)
+        (ws / "HQ" / "roadmap.md").write_text(roadmap)
+        (ws / "HQ" / "trail.jsonl").write_text("".join(json.dumps(x) + "\n" for x in trail))
+        for k, n in (nights or {}).items():
+            (ws / "HQ" / "night-road" / f"{k}.json").write_text(json.dumps(n))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+        env.update(HQ_WORKSPACE=str(ws))
+        mod = (ROOT / "status" / "night-road.mjs").as_uri()
+        parse = (ROOT / "status" / "parse.mjs").as_uri()
+        r = _sp.run(["node", "--input-type=module", "-e", f"const R = await import({json.dumps(mod)}); const PR = (await import({json.dumps(parse)})).parseRoadmap;"
+                     f" const NOW = Date.now();\n{js}"], cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=120)
+        need(r.returncode == 0, f"the night's road module failed: {r.stderr[-300:]}")
+        return r.stdout
+    finally:
+        _sh.rmtree(ws, ignore_errors=True)
+
+
+def _road_bars(html, name):
+    """The kinds of a name's bars on the night's road, top to bottom."""
+    return re.findall(r'class="nr-bar k-(\w+)"[^>]*title="' + re.escape(name), html)
+
+
+def _road_md(*jobs, rows=""):
+    return ("# Roadmap\n\n## The queue\n\n" + "".join(f"- {j}\n" for j in jobs) + "\n## Phase Z · Features\n\n"
+            "| | Step | What you get | Result |\n|---|---|---|---|\n" + rows + "\n## Bugs\n")
+
+
+def _ymd(t):
+    return time.strftime("%Y-%m-%d", time.localtime(t))
+
+
+def _hm(t):
+    return time.strftime("%H:%M", time.localtime(t))
+
+
+def _iso(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t))
+
+
+async def _night_flow490(self) -> str:
+    """H339 done example (1), no Claude: the night's road from HQ's own records: a run that ended at its box is a found-broken row and
+    the run that is then done a green row after it, never one row overwritten to green; a QA failed in the item's row is a found-broken
+    row of its own at its real time; the release is a row of its own."""
+    now = time.time()
+    b0, box, done, qa = now - 3 * 3600, now - 2 * 3600, now - 1800, now - 900
+    name = "H901 on the HQ roadmap, sent to the team by the line: The Ibis page"
+    trail = [{"at": now - 4 * 3600, "id": "r-ibis", "step": "written", "label": "H901"},
+             {"at": box, "id": "r-ibis", "step": "job", "job": 71, "state": "boxed", "start": round(b0)},
+             {"at": now - 600, "id": "r-ibis", "step": "release", "version": "9.9.9"}]
+    lq = time.localtime(qa)
+    md = _road_md(f"Job 71 · done {_hm(done)} on {_ymd(done)} · agreed {_ymd(b0)} {_hm(b0)} · {name}",
+                  rows=f"| ⬜ | H901 The Ibis page | The Ibis page shows its parts. | Built (job 71). QA failed (job 72, "
+                       f"{lq.tm_mday} {time.strftime('%B %Y %H:%M', lq)}): a part is missing. |\n")
+    html = _road(f"process.stdout.write(await R.nightPage(null, PR({json.dumps(md)}), {{now: NOW}}));", md, trail=trail)
+    kinds = _road_bars(html, name)
+    need(kinds[:2] == ["broken", "done"], f"the boxed run isn't a found-broken row and then a done one: {kinds}")
+    need(_road_bars(html, f"H901 QA failed at {_hm(qa)}") == ["broken"], "QA's failed verdict isn't its own found-broken row at its time")
+    need(_road_bars(html, f"Release 9.9.9 out at {_hm(now - 600)}") == ["done"], "the release isn't a row of its own")
+    return "a boxed run then done is two rows, red then green; QA's verdict and the release are rows of their own"
+
+
+async def _night_flow491(self) -> str:
+    """H339 done example (2), no Claude: a job still running at the morning's end stays running on its finished night, and once its
+    record says done the minute tick closes it there with its real end and colour, never on the night that runs now."""
+    now = time.time()
+    prev = _ymd(now - 12 * 3600 - 86400)
+    start, end = now - 30 * 3600, now - 26 * 3600
+    kept = {"title": "The night", "updated": _iso(start + 600), "running": False,
+            "rows": [{"name": "Plover item building", "kind": "running", "start": _iso(start), "end": _iso(start + 1800)}],
+            "log": [], "usage": []}
+    md = _road_md(f"Job 81 · done {_hm(end)} on {_ymd(end)} · agreed {_ymd(start)} {_hm(start)} · Plover item building")
+    out = _road(f"const P = PR({json.dumps(md)}); await R.tick(P, NOW);"
+                f" const a = await R.nightPage({json.dumps(prev)}, P, {{now: NOW}}); const b = await R.nightPage({json.dumps(prev)}, P, {{now: NOW + 864e5}});"
+                " const c = await R.nightPage(null, P, {now: NOW}); process.stdout.write(JSON.stringify([a, b, c]));", md, nights={prev: kept})
+    a, b, c = json.loads(out)
+    need(_road_bars(a, "Plover item building") == ["done"], f"not closed done on its own night: {_road_bars(a, 'Plover item building')}")
+    need(f"–{_hm(end)}" in a, "not closed at its real end")
+    need(_road_bars(b, "Plover item building") == ["done"] and '<span class="nr-warn">' not in b, "opened again it reads differently")
+    need("Plover item building" not in c.split("<h2>The week's usage</h2>")[0], "the night that runs now took the job onto itself")
+    return "a job running at the morning's end is closed done at its real end on the night it started"
+
+
+async def _night_flow492(self) -> str:
+    """H339 done example (3), no Claude: a night with nothing to do shows one quiet line in its log and a complete page."""
+    key = _ymd(time.time() - 12 * 3600)
+    html = _road(f"process.stdout.write(await R.nightPage({json.dumps(key)}, null, {{now: NOW}}));",
+                 nights={key: {"title": "The night", "running": False, "rows": [], "log": [], "usage": []}})
+    log = html.split("<h2>The log</h2>", 1)[-1].split("</ul>", 1)[0]
+    need(log.count("<li>") == 1 and "quiet" in log.lower(), f"not one quiet line: {log[:200]}")
+    need("Nothing logged yet" not in html and "<h2>The timeline</h2>" in html and "<h2>The week's usage</h2>" in html, "the page isn't complete")
+    return "a quiet night has one quiet line in its log and a complete page"
+
+
+async def _night_flow493(self) -> str:
+    """H339 done example (4), no Claude: on a phone the timeline's names sit above the bars: each row's name comes before its lane, and
+    under a phone's width the row is one column (the name on its own line, then the bar)."""
+    now = time.time()
+    md = _road_md(f"Job 91 · running since {_hm(now - 600)} · agreed {_ymd(now - 900)} {_hm(now - 900)} · Curlew item building")
+    html = _road(f"process.stdout.write(await R.nightPage(null, PR({json.dumps(md)}), {{now: NOW}}));", md)
+    need(re.search(r'<div class="nr-name">Curlew item building.*?</div><div class="nr-lane"><div class="nr-bar k-running"', html),
+         "the name isn't before its own bar")
+    need(re.search(r"@media \(max-width:\s*640px\)\{\.nr-row\{display:block\}", html), "no phone layout putting the name above the bar")
+    return "on a phone the names sit above their bars"
+
+
+async def _night_flow494(self) -> str:
+    """H339 done example (5), no Claude: a finished night opened a week later shows exactly as it was: the same rows, times, colours,
+    facts and log, and no stale warning."""
+    now = time.time()
+    key = _ymd(now - 12 * 3600 - 7 * 86400)
+    t = lambda h: _iso(now - 7 * 86400 - h * 3600)
+    kept = {"title": "The night", "updated": t(1), "running": False,
+            "rows": [{"name": "Sanderling fix", "kind": "broken", "start": t(4), "end": t(3)},
+                     {"name": "Sanderling fix", "kind": "done", "start": t(3), "end": t(2)}],
+            "log": [{"at": t(1), "text": "Sanderling fixed after a red check."}], "usage": [{"at": t(2), "week": 30}]}
+    out = _road(f"const a = await R.nightPage({json.dumps(key)}, null, {{now: NOW}}); const b = await R.nightPage({json.dumps(key)}, null,"
+                " {now: NOW + 7 * 864e5}); process.stdout.write(JSON.stringify([a, b]));", nights={key: kept})
+    a, b = json.loads(out)
+    rows = lambda h: re.findall(r'<div class="nr-name">(.*?)</div>.*?class="nr-bar (k-\w+)"', h.split("<h2>The week's usage</h2>")[0])
+    log = lambda h: h.split("<h2>The log</h2>", 1)[-1].split("</ul>", 1)[0]
+    need(_road_bars(a, "Sanderling fix") == ["broken", "done"], "the kept rows aren't shown as kept")
+    need(rows(a) == rows(b) and log(a) == log(b) and '<span class="nr-warn">' not in b, "opened a week later it reads differently")
+    return "a kept night opened a week later shows exactly as it was"
+
+
+async def _night_flow495(self) -> str:
+    """H339 done example (6), H307, no Claude: during the day, with no night file, the status page's timeline draws the planning's jobs
+    live: a finished one at its real end, a running one, a coming one from earliest start to latest end, and a now line."""
+    now = time.time()
+    md = _road_md(f"Job 41 · done {_hm(now - 4800)} on {_ymd(now - 4800)} · agreed {_ymd(now - 7200)} {_hm(now - 7200)} · Kingfisher item built",
+                  f"Job 42 · running since {_hm(now - 1800)} · agreed {_ymd(now - 2100)} {_hm(now - 2100)} · Bittern fix building",
+                  f"Job 43 · ready · agreed {_ymd(now)} {_hm(now)} · Godwit release of the night")
+    html = _road(f"process.stdout.write(await R.statusTimeline(PR({json.dumps(md)}), NOW));", md)
+    need(_road_bars(html, "Kingfisher item built") == ["done"] and f"–{_hm(now - 4800)}" in html, "no finished bar at its real end")
+    need(_road_bars(html, "Bittern fix building") == ["running"], "no running bar")
+    need(_road_bars(html, "Godwit release of the night") == ["expected"] and "between " in html, "no coming bar from earliest to latest")
+    need('class="nr-now now"' in html, "no now line")
+    return "the status page's timeline shows the day's jobs live, done, running and coming, with a now line"
+
+
+async def _night_flow496(self) -> str:
+    """H339 done example (7), no Claude: a weekly usage reading HQ saves goes into the night that runs, and its graph draws the week
+    used, the moving line, the stop line and where it's heading, with a legend, and each reading's hover gives the time, the week and
+    the moving line."""
+    html = _road("await R.addReading(31, NOW - 3 * 36e5); await R.addReading(47, NOW - 6e4);"
+                 " process.stdout.write(await R.nightPage(null, null, {now: NOW}));")
+    g = html.split("<h2>The week's usage</h2>", 1)[-1].split("<h2>", 1)[0]
+    need("47%" in g, "the newest reading, 47%, isn't on the graph")
+    for w in ("the week used", "the moving line", "stop", "heading"):
+        need(w in g.lower(), f"the graph's legend doesn't name {w}")
+    need(re.search(r"<title>\d\d:\d\d: the week at 47%, the moving line at \d+%</title>", g), "hovering a reading gives no time, week and moving line")
+    return "the usage graph has its four lines, a legend and the numbers on hover, from HQ's own readings"
+
+
+for _n in range(490, 497):
+    setattr(Run, f"flow{_n}", globals()[f"_night_flow{_n}"])
+FLOWS.update({
+    490: ("H339 (1): the night's road from HQ's records: a boxed run then done is a found-broken row and a done one; QA's failed verdict and the release are rows of their own", False, "flow490"),
+    491: ("H339 (2): a job running at the morning's end is closed with its real end and colour on the night it started, never on the night that runs now", False, "flow491"),
+    492: ("H339 (3): a night with nothing to do shows one quiet line in its log and a complete page", False, "flow492"),
+    493: ("H339 (4): on a phone the night's road puts each name above its bar", False, "flow493"),
+    494: ("H339 (5): a kept night opened a week later shows exactly as it was", False, "flow494"),
+    495: ("H339 (6), H307: the status page's timeline shows the day's jobs live: done at its real end, running, coming from earliest to latest, a now line", False, "flow495"),
+    496: ("H339 (7): the night's usage graph from HQ's own readings: four lines, a legend, the numbers on hover", False, "flow496"),
+})
+# == end of H339's block ==
+
+
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
