@@ -2636,6 +2636,7 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
 
 NEW_RETRY = 5  # minutes between tries of a refused start [the builder's pick]
 NEW_UNTIL = 60  # minutes a look stays useful once planned [the builder's pick]
+OPEN_HOURS = 3  # a run or step of hers older than this isn't open any more: stuck, it holds no look [the builder's pick]
 _OPEN_ROW = re.compile(r"^\| (?:⬜|🔁|🔨|⏸) \| ([FHB]\d+(?:\.\d+)*) ")
 _LABEL = re.compile(r"\b([FHB]\d+(?:\.\d+)*)\b")
 
@@ -2678,12 +2679,21 @@ def _night_red() -> dict | None:
             "read its record and log, find why, and put the fix in your prep"}
 
 
+def _proving(n: int) -> bool:
+    """The build's proof is running: it's waiting on its record, not stuck."""
+    try:
+        import wall
+        return bool(wall._proof(n).get("since"))
+    except Exception:
+        return False
+
+
 def _stuck_builds(jobs_: list) -> list[dict]:
     """Builds that stopped with no record: {"key", "words"}."""
     out = []
     for j in jobs_:
         st = j.get("state", "")
-        if not (st.startswith("paused") and "no record" in st) or parse(j.get("text", "")):
+        if not (st.startswith("paused") and "no record" in st) or parse(j.get("text", "")) or _proving(j["n"]):
             continue
         m = _LABEL.search(j.get("text", ""))
         what = f"the build for {m.group(1)}" if m else "a build"
@@ -2697,19 +2707,22 @@ def _her_open(aid: str, text: str, jobs_: list, now: dt.datetime) -> str | None:
     import jobs as q
     import schedule
     seen = None
+    since = (now - dt.timedelta(hours=OPEN_HOURS)).strftime(FMT)
+    hm = now.strftime(FMT)
     for j in jobs_:
         p = parse(j.get("text", ""))
         if not p or p["agent"] != aid or j.get("state", "").startswith(tuple(q.FINISHED) + ("paused", "skipped")):
             continue
+        if not since <= (j.get("agreed") or "") <= hm:  # a run of hers "running" for hours is stuck, not open: it holds nothing
+            continue
         if p["kind"] == "session" or "night shift" in p.get("name", ""):
             return "night"
         seen = "look"
-    hm = now.strftime(FMT)
     for it in schedule.read(text):
         p = parse(it["text"])
         if p and p["kind"] in ("session", "look", "review"):
             continue  # a cycle that hasn't started yet isn't running; it reads the planning itself when it does
-        if it["state"].startswith("waiting") and it["at"] <= hm and ((p and p["agent"] == aid) or (not p and aid in it["text"].lower())):
+        if it["state"].startswith("waiting") and since <= it["at"] <= hm and ((p and p["agent"] == aid) or (not p and aid in it["text"].lower())):
             seen = seen or "look"
     return seen
 
@@ -2735,6 +2748,10 @@ def new_work(now: dt.datetime | None = None, base: Path | None = None, log=None)
             d["new_work"] = {"seen": {f["key"]: f["fp"] for f in found}, "waiting": []}
             return did
         seen, waiting = nw.setdefault("seen", {}), nw.setdefault("waiting", [])
+        here = {f["key"] for f in found}  # what's gone (a row done or no Must any more, last night's record) drops out
+        for k_ in [k_ for k_ in seen if k_ not in here]:
+            del seen[k_]
+        waiting[:] = [x for x in waiting if x["key"] in here]
         busy = _her_open(aid, text, jobs_, now)
         for f in found:
             if seen.get(f["key"]) == f["fp"]:
