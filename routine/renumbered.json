@@ -1,0 +1,7 @@
+{
+ "_why": "F191: each label a renumbering moved, old to new, so a commit still starting with the old label counts as the new one (qa.subject_labels). A later renumbering adds its own lines here; a label moved twice reads as its newest.",
+ "7 November 2026, job 9218": {
+  "F9175": "F176", "F9176": "F177", "F9177": "F178", "F9178": "F179", "F9179": "F180", "F9180": "F181", "F9181": "F182",
+  "F9182": "F183", "F9183": "F184", "F9184": "F185", "F9185": "F186", "F9186": "F187", "F9187": "F188", "F9188": "F189"
+ }
+}

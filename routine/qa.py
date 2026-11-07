@@ -44,7 +44,9 @@ usage:
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -490,7 +492,27 @@ def subject_labels(subject: str) -> list[str]:
     head, sep, _ = subject.partition(":")
     if not sep or len(head) > 60:
         return []
-    return [m.group(0) for m in re.finditer(r"(?<![\w.])[A-Z]\d+(?:\.\d+)*\b", head)]
+    out = []
+    for m in re.finditer(r"(?<![\w.])[A-Z]\d+(?:\.\d+)*\b", head):
+        if (l := renumbered(m.group(0))) not in out:
+            out.append(l)
+    return out
+
+
+def renumbered(label: str) -> str:
+    """F191: the label a renumbering gave an old one (routine/renumbered.json); a label moved twice reads as its newest, any other stays."""
+    moved = {}
+    try:
+        for batch in json.loads((pathlib.Path(__file__).parent / "renumbered.json").read_text()).values():
+            if isinstance(batch, dict):
+                moved.update(batch)
+    except (OSError, ValueError):
+        return label
+    seen = {label}
+    while label in moved and moved[label] not in seen:
+        label = moved[label]
+        seen.add(label)
+    return label
 
 
 # F101 (C73): a commit that names no item holds the release, unless it only touches the tests, the version or the changelog.
