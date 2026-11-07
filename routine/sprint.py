@@ -696,6 +696,8 @@ def yes_reading(line, turn, names):
     Clear yes: a yes word, no holding word, and the line or that turn names the thing: a bare "Ok" counts, it's tied to what she asked. Clear no: a
     holding word and no yes word, a yes taken back in the same line, or thanks. No model, so the same line reads the same every time."""
     low = " ".join(str(line).lower().replace("’", "'").split())
+    if planned_release(low) and (_names_it(low, names) or re.search(r"(?<![\w'])release(?![\w'])", low)):
+        return "yes"  # F166: a release planned for a later moment he names is his yes to it; the gate counts it once that moment has come
     if _TAKEN_BACK.search(low):
         return "no"
     yes = _YES_WORD.search(low)
@@ -706,6 +708,41 @@ def yes_reading(line, turn, names):
     if not yes or _NOT_SURE.search(low):
         return ""
     return "yes" if _names_it(low, names) or _names_it(" ".join(str(turn).lower().split()), names) else ""
+
+
+# F166: "not now" about when isn't a no. A line that plans a release ("Plan the 1.0.2 release for after tonight's night run, not now: …, only if
+# the night is green.") names a later moment for it; with that moment, the not-now and the night's own condition taken out, no hold word may
+# be left (wait, hold, hold on, leave it, think about it, later on its own …), or it stays a no, as before.
+_PLAN_WORD = re.compile(r"(?<![\w'])(?:plan|planned|schedule|scheduled)(?![\w'])")
+_PLAN_MOMENTS = (("night", re.compile(r"(?<![\w'])(?:for\s+)?after\s+(?:tonight'?s|the|this|the next)\s+night(?:'?s)?(?:\s+test)?\s+run(?![\w'])")),
+                 ("night", re.compile(r"(?<![\w'])(?:for\s+)?after\s+(?:tonight|the night)(?![\w'])")),
+                 ("tomorrow", re.compile(r"(?<![\w'])(?:for\s+)?tomorrow(?:\s+morning)?(?![\w'])")))
+_PLAN_NOT_NOW = re.compile(r"(?<![\w'])not (?:right )?now(?![\w'])")
+_PLAN_IF_GREEN = re.compile(r"(?<![\w'])(?:but\s+)?only\s+if\s+the\s+night(?:'?s)?(?:\s+run)?\s+is\s+(?:green|all green)(?![\w'])")
+
+
+def planned_release(line):
+    """F166: the later moment ("night" or "tomorrow") a line of his plans a release for, or None: a plan word, the release, a moment named,
+    and nothing else holding it back once that moment, a not-now and "only if the night is green" are taken out."""
+    low = " ".join(str(line).lower().replace("\u2019", "'").split())
+    if not _PLAN_WORD.search(low) or not re.search(r"(?<![\w'])release(?![\w'])", low):
+        return None
+    moment = next((k for k, m in _PLAN_MOMENTS if m.search(low)), None)
+    if not moment:
+        return None
+    rest = _PLAN_IF_GREEN.sub(" ", _PLAN_NOT_NOW.sub(" ", low))
+    for _, m in _PLAN_MOMENTS:
+        rest = m.sub(" ", rest)
+    if _TAKEN_BACK.search(rest) or _HOLD_WORD.search(rest) or _NOT_SURE.search(rest) or _A_HOLD.search(rest):
+        return None
+    return moment
+
+
+def planned_lines(quote, ws=None):
+    """F166: his lines holding QUOTE that plan a release, newest last: {"line", "at", "where", "moment"}."""
+    parts = [p for p in (_bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", quote or "")) if p]
+    hits = his_said(parts, ws or _ws()) if parts else []
+    return [dict(h, moment=planned_release(h["line"])) for h in hits if planned_release(h["line"])]
 
 
 def _call_time(name, clock):
