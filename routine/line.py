@@ -21,7 +21,8 @@ the record, never anyone's word, and does the next step:
     checks excused (F165, 7 November 2026: before, such a build stayed held until someone looked; tonight F155, job 623 and H338), so a
     build whose own tests pass closes. Nothing to read: its proof runs once more (red twice: one text, the line leaves it).
   - Held (F192, 7 November 2026): its Waits on names an item still open that hasn't passed her check: nothing, no build, prep or
-    resume, by day or at night, and show names what it waits on; she lifts it with "Waits on: nothing".
+    resume, by day or at night, and show names what it waits on; she lifts it with "Waits on: nothing". "Waits on: nothing" (or none,
+    no) holds nothing, whatever follows it (F197); a wait on a Won't or parked item says so and is texted to her once.
   - Ready: with build on, the program sends it to the team itself (by day only on his own switch, at night also on hers). Build off:
     nothing more; prepared.
   - Only the Ready mark is missing: the program sets it.
@@ -159,11 +160,29 @@ _WAITS = re.compile(rf"(?<!['\"‘“])Waits on(?:: ([^.|]*)| nothing\b()| ({_L}
 _LABEL = re.compile(r"(?<![\w-])([A-Z]\d+(?:\.\d+)*)(?![\w-])")
 
 
-def held_by(row):
-    """F192: why ROW is held behind another item (its Waits on names an open item that hasn't passed her check), or None."""
+# F197 (7 November 2026): "Waits on: nothing" (or none, no) holds nothing, whatever the sentence says after it (H339: "Waits on:
+# nothing; until H257 gives it its place, ..." was held on H257, a Won't item, for good). A wait on an item tagged Won't this time
+# or parked would never end: it still holds, but says so, on the line, its state the status page reads, and one text to her.
+_NONE = re.compile(r"\s*(?:nothing|none|no)\b", re.I)
+
+
+def _stuck_why(r):
+    """F197: "Won't this time" or "parked" for an item a wait on would never end, else None."""
+    if re.match(r"(?:## )?Phase P\b", str(r.get("phase_title") or r.get("phase") or "")) or r.get("parked"):
+        return "parked"
+    try:
+        if S.moscow_of().get(r["label"]) == "wont":
+            return "Won't this time"
+    except Exception:
+        pass
+    return None
+
+
+def waits_of(row):
+    """F192/F197: [(label, None or why it would never end)] the items ROW's last Waits on holds it behind."""
     said = ["".join(m) for m in _WAITS.findall(row.get("line") or "")]
-    if not said:
-        return None
+    if not said or _NONE.match(said[-1]) or not said[-1].strip():
+        return []
     try:
         import qa
     except Exception:
@@ -174,16 +193,27 @@ def held_by(row):
             continue
         r = S.row_of(other)
         if not r or r.get("state") not in ("⬜", "🔨"):
-            continue  # done, parked or gone: nothing to wait for
+            continue  # done or gone: nothing to wait for
         try:
             if qa and qa.state(other) == "passed":
                 continue
         except Exception:
             pass
-        waits.append(other)
+        waits.append((other, _stuck_why(r)))
+    return waits
+
+
+def held_by(row):
+    """F192: why ROW is held behind another item (its Waits on names an open item that hasn't passed her check), or None."""
+    waits = waits_of(row)
     if not waits:
         return None
-    return f"held: waits on {', '.join(waits)} until {'they have' if len(waits) > 1 else 'it has'} passed her check (its Waits on)"
+    stuck = [f"{l} is {w}" for l, w in waits if w]
+    labels = [l for l, _ in waits]
+    out = f"held: waits on {', '.join(labels)} until {'they have' if len(labels) > 1 else 'it has'} passed her check (its Waits on)"
+    if stuck:
+        out += f"; it would wait forever: {', '.join(stuck)}"
+    return out
 
 
 # F164: the failing lines a red record gives (runjob._no_record_why): her QA tests ("FAIL name: ...", "her QA tests: ..."), flows
@@ -413,6 +443,13 @@ def tick(now=None):
             st[label] = e = {"row": fp_row, "go": json.dumps(g, sort_keys=True)}
         what, detail = next_step(row, g, jobs, now)
         e["seen"] = f"{what}: {detail}"[:300]
+        if what == "hold" and "it would wait forever: " in detail:  # F197: once per hold, not every minute
+            stuck = detail.split("it would wait forever: ", 1)[1]
+            if e.get("told_stuck") != stuck:
+                e["told_stuck"] = stuck
+                _tell(label, "wait-stuck", f"{label} is held on its Waits on, and that wait would never end: {stuck}. "
+                      f"Lift it (Waits on: nothing) or change what it waits on.")
+                done.append(f"{label}: held on a wait that never ends ({stuck}); told her")
         if what == "passed":  # its switches go: nothing more for the line to do
             with q.locked():
                 S.set_go(label, "both", False)
