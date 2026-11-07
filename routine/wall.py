@@ -129,6 +129,9 @@ def why_not(job, jobs, now=None) -> str | None:
     day = daytime(now)
     if job["state"].startswith("held") and not day and not job["state"].startswith(("held: resumed", "held: paused")) and not planned_night(job):
         return "held, and a held job doesn't restart at night unless it was planned for the night; it can go on in the morning"
+    held = _held(job)
+    if held:
+        return held
     if not is_build(job):
         return None
     if day and not job.get("sayso"):
@@ -139,6 +142,22 @@ def why_not(job, jobs, now=None) -> str | None:
     if len(busy) >= WIP and label not in busy:
         return f"{len(busy)} items are in progress ({', '.join(sorted(busy))}), the most at once; it waits until one is through QA"
     return None
+
+
+def _held(job) -> str | None:
+    """F192: a job of an item held behind another (its Waits on, line.held_by) waits in its place in line, by day and at night,
+    also one queued before the hold (as H325's prep 9292); her QA of a built item isn't held."""
+    try:
+        import qa
+        import line as L
+        if kind_of(job) == "qa" or (job.get("text") or "").startswith(qa.QA_START):
+            return None
+        label = qa.job_label(job.get("text", ""))
+        row = L.S.row_of(label) if label else None
+        held = L.held_by(row) if row else None
+    except Exception:
+        return None
+    return f"{label} is {held}; it starts once that's through, or she lifts it" if held else None
 
 
 def order(line) -> list:

@@ -126,11 +126,11 @@ def next_step(row, g, jobs, now=None):
                 return "split", f"job {j['n']} is red only on {len(other)} check(s) unrelated to {label}"
             return "rerun", f"job {j['n']} ended without a green record"
         return "wait", f"with the team: job {j['n']} ({j['state']})"
+    if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted;
+        return "hold", held  # a prep of it queued before the hold doesn't hide it: wall.why_not keeps that one back
     p = prep_of(jobs, label)
     if p:
         return "wait", f"her prep job {p['n']} ({p['state']})"
-    if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted
-        return "hold", held
     why = S.not_ready_why(row)
     if why is None:
         b = g.get("build")
@@ -152,13 +152,16 @@ def next_step(row, g, jobs, now=None):
 
 # F192 (7 November 2026): a hold she gives is the item's own Waits on (point 8 of ready); she lifts it with "Waits on: nothing".
 # Its last Waits on counts; an item it names holds it while that item's row is open and hasn't passed her check.
-_WAITS = re.compile(r"Waits on: ([^.|]*)")
+# Rows write it three ways (QA, 7 November 2026 17:22): "Waits on: F175.", "Waits on F175: why ..." (F165's own row) and
+# "Waits on nothing."; one in quotes is only words about a hold (as in this row's own QA note), not a hold.
+_L = r"[A-Z]\d+(?:\.\d+)*"
+_WAITS = re.compile(rf"(?<!['\"‘“])Waits on(?:: ([^.|]*)| nothing\b()| ({_L}(?:(?:, | and | & ){_L})*):)")
 _LABEL = re.compile(r"(?<![\w-])([A-Z]\d+(?:\.\d+)*)(?![\w-])")
 
 
 def held_by(row):
     """F192: why ROW is held behind another item (its Waits on names an open item that hasn't passed her check), or None."""
-    said = _WAITS.findall(row.get("line") or "")
+    said = ["".join(m) for m in _WAITS.findall(row.get("line") or "")]
     if not said:
         return None
     try:
