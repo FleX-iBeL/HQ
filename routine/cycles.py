@@ -58,6 +58,7 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
     python3 routine/cycles.py text AGENT "TEXT"       a text on her line now (a run's own, inside the day's cap)
     python3 routine/cycles.py ledger AGENT            her ledger
     python3 routine/cycles.py score [AGENT]           the weekly score now (written to her ledger with --write)
+    python3 routine/cycles.py waiting                 F194: the Must rows whose prepare is still off past their hour, as JSON lines
     python3 routine/cycles.py friday [--json]         the Friday screen: three lines per agent, her share
     python3 routine/cycles.py tick                    the routine's minute (tick.py runs it on the main)
 """
@@ -2875,6 +2876,115 @@ def new_work(now: dt.datetime | None = None, base: Path | None = None, log=None)
     return did
 
 
+# -- a Must's prepare, switched on by itself (F194) ---------------------------------------------------------------------------
+# His words, 7 November 2026: "The bugs from today: F194, F192, F186, F187, F189, F190." Six Must bugs sat untouched: F174's look
+# only asked her to put a row in her prep, and rows there before its first minute never got one. Every minute the routine switches
+# prepare on, by Moneypenny, for each open Must row that is new or whose words changed, also the ones there before, so the line
+# takes it into her prep even while her look waits. A prepare already on (his or hers) is left as it is; one he switched off stays
+# off for the same wording. A switch that can't be written leaves the row as it was, her ledger says so, and it's tried the next
+# minute. A Must whose prepare is still off an hour after the row's first dated line shows on the status page (must_waiting).
+
+MUST_WAIT = 60  # minutes from the row's first dated line before the status page names it (his yes, 7 November 2026)
+_FIRST_DATED = re.compile(r"\b(\d{1,2}) (January|February|March|April|May|June|July|August|September|October|November|December) (\d{4})"
+                          r" \([^)]*?(\d{1,2}):(\d{2})\)")
+
+
+def _sprint_here(base: Path | None):
+    """routine/sprint.py, when its planning is this workspace's (a test's folder elsewhere gets no switch), else None."""
+    import sprint
+    try:
+        same = Path(sprint.RANKS).resolve() == ((base or folder()) / "HQ" / "sprint.json").resolve()
+    except OSError:
+        same = False
+    return sprint if same else None
+
+
+def must_go(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """F194: each open Must row that's new or changed gets its prepare on, by Moneypenny (see above)."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    aid = FIX_AGENT
+    did = []
+    sp = _sprint_here(base)
+    if not sp or not on(base) or not agent_settings(aid, base).get("on"):
+        return did
+    rows = _must_rows(base)
+    with held() as d:
+        mg = d.setdefault("must_go", {})
+        done, refused = mg.setdefault("done", {}), mg.setdefault("refused", {})
+        here = {r["label"] for r in rows}
+        for k_ in [k_ for k_ in done if k_ not in here]:
+            del done[k_]
+        for k_ in [k_ for k_ in refused if k_ not in here]:
+            del refused[k_]
+        for r in rows:
+            label = r["label"]
+            if done.get(label) == r["fp"]:
+                continue  # this wording had its switch (or his): one he switched off stays off
+            if sp.go_of(label).get("prep"):
+                done[label] = r["fp"]  # already on, his or hers: left as it is
+                refused.pop(label, None)
+                continue
+            try:
+                sp.set_go(label, "prep", True, by="moneypenny")
+                ok = bool(sp.go_of(label).get("prep"))
+                why = "" if ok else "the switch didn't stay on"
+            except (SystemExit, Exception) as e:
+                ok, why = False, " ".join(str(e).split())[:160] or type(e).__name__
+            if not ok:
+                if label not in refused:
+                    refused[label] = now.strftime(FMT)
+                    try:
+                        ledger.entry(aid, f"{label}: its prepare couldn't be switched on", [f"refused: {why}",
+                                     "its row stays as it was; the switch is tried again every minute"], now)
+                    except OSError:
+                        pass
+                did.append(f"{aid}: {label} prepare refused ({why[:80]})")
+                continue
+            done[label] = r["fp"]
+            if refused.pop(label, None):
+                try:
+                    ledger.entry(aid, f"{label}: its prepare is on now", ["the switch could be written again"], now)
+                except OSError:
+                    pass
+            did.append(f"{aid}: {label} prepare on")
+    if log:
+        for x in did:
+            log(f"cycles: {x} (F194)")
+    return did
+
+
+def must_waiting(now: dt.datetime | None = None, base: Path | None = None) -> list[str]:
+    """F194: one line per open Must row whose prepare is still off past MUST_WAIT minutes from its first dated line."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    ws = base or folder()
+    try:
+        text = (ws / "HQ" / "roadmap.md").read_text(encoding="utf8")
+        go = json.loads((ws / "HQ" / "sprint.json").read_text(encoding="utf8")).get("go") or {}
+    except (OSError, ValueError):
+        return []
+    musts = {r["label"] for r in _must_rows(base)}
+    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    out = []
+    for ln in text.splitlines():
+        m = _OPEN_ROW.match(ln)
+        if not m or m.group(1) not in musts or (go.get(m.group(1)) or {}).get("prep"):
+            continue
+        cells = ln.split(" | ")
+        f = _FIRST_DATED.search(cells[2] if len(cells) > 2 else ln)
+        if not f:
+            continue
+        try:
+            since = dt.datetime(int(f.group(3)), months.index(f.group(2)) + 1, int(f.group(1)), int(f.group(4)), int(f.group(5)))
+        except ValueError:
+            continue
+        mins = int((now - since).total_seconds() // 60)
+        if mins < MUST_WAIT:
+            continue
+        h, mm = divmod(mins, 60)
+        out.append(f"{m.group(1)} is a Must whose prepare is still off: it has waited {h} h {mm:02d} min since {since:%d %b %H:%M}")
+    return out
+
+
 def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> dict:
     """The routine's minute on the main: the items follow the settings, finished runs go into the ledgers, the
     batches go out, waiting runs are dropped at the hours' end, the reviews are planned, the weekly score written."""
@@ -2890,7 +3000,7 @@ def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> 
         out["processed"] = settle(now, base, log)
     except Exception as e:
         out["processed"] = [f"error: {e!r}"]
-    for name, fn in (("batches", send_batches), ("later", later), ("looks", list_looks), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds), ("new", new_work)):
+    for name, fn in (("batches", send_batches), ("later", later), ("looks", list_looks), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds), ("must", must_go), ("new", new_work)):
         try:
             out[name] = fn(now, base, log=log)
         except Exception as e:
@@ -3076,6 +3186,8 @@ def main(argv: list[str]) -> int:
             print(json.dumps(friday(), indent=1, ensure_ascii=False) if "--json" in rest else friday_words())
         elif cmd == "tick":
             print(json.dumps(tick(), ensure_ascii=False))
+        elif cmd == "waiting":
+            print(json.dumps(must_waiting(), ensure_ascii=False))
         else:
             print(__doc__)
             return 2
