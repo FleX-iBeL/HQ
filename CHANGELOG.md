@@ -4,6 +4,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- Your own words typed in a chat on your own computer now count as yours for an item's His words: the ready check also reads the lines you typed in that workspace's Claude Code chats, never the chat's replies, a tool's output, or a chat the routine started, so an item quoting your laptop chat no longer sits still on "not found". Its why now names everywhere it looked: the calls, the notes, the log, your texts and your laptop chats.
 - A research item that passes her tests in the team's own run now passes them in the proof too: the proof's throwaway copy gets the finished jobs' logs, which a research answer names as its source. When a test still passes in the team's run and fails only in the proof's copy, the proof's red line says so for that test, with the proof's own reason, and a plain fail gives her test's own reason.
 
 ## 1.0.2 · 6 November 2026

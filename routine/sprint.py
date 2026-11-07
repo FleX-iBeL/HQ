@@ -1120,7 +1120,8 @@ def field_texts(line):
 
 
 def _grep_texts(ws):
-    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive, his side of the text threads."""
+    """The texts a quote may be found in: the call transcripts, the quick notes, the log and its archive, his side of the text threads,
+    the lines he typed in a laptop chat (F171)."""
     out = []
     calls = os.path.join(ws, "HQ", "calls")
     try:
@@ -1151,7 +1152,58 @@ def _grep_texts(ws):
         except OSError:
             continue
         out.append((f"HQ/{line_name}/thread.jsonl", _norm("\n".join(said))))
+    said = _laptop_chat_lines(ws)
+    if said:
+        out.append(("his laptop chats", _norm("\n".join(said))))
     return out
+
+
+_CHAT_TAGS = re.compile(r"<(system-reminder|task-notification|user-prompt-submit-hook|bash-[a-z]+|command-[a-z]+|local-command-[a-z]+|pasted_content[^>]*)>.*?</\1[^>]*>", re.S)
+
+_ROUTINE_PROMPT = re.compile(r"let's go(?: again)?\. This is job \d+|You haven't marked job \d+ done", re.I)
+
+
+def _laptop_chat_lines(ws):
+    """F171: the lines he typed himself in a chat on his own computer: Claude Code's transcripts of this workspace
+    (~/.claude/projects/<its path, each non-letter-or-digit a dash>/*.jsonl), only the user turns he typed; never the
+    chat's replies, a tool's output, a meta or summary turn, a headless run (a job's prompt is the routine's) or a pasted block."""
+    proj = os.path.join(os.path.expanduser("~"), ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(ws)))
+    try:
+        names = sorted(n for n in os.listdir(proj) if n.endswith(".jsonl"))
+    except OSError:
+        return []
+    said = []
+    for nm in names:
+        try:
+            fh = open(os.path.join(proj, nm), encoding="utf8", errors="replace")
+        except OSError:
+            continue
+        mine = []
+        with fh:
+            for raw in fh:
+                if '"user"' not in raw:
+                    continue
+                try:
+                    d = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict) or d.get("type") != "user" or d.get("isMeta") or d.get("isCompactSummary") \
+                        or d.get("toolUseResult") is not None or str(d.get("entrypoint") or "").startswith("sdk") \
+                        or d.get("userType") not in (None, "external"):
+                    continue
+                msg = d.get("message") or {}
+                if not isinstance(msg, dict) or msg.get("role") != "user":
+                    continue
+                content = msg.get("content")
+                parts = [content] if isinstance(content, str) else [
+                    c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"] if isinstance(content, list) else []
+                for text in parts:
+                    text = _CHAT_TAGS.sub(" ", str(text or "")).strip()
+                    if text:
+                        mine.append(text)
+        if not any(_ROUTINE_PROMPT.match(t) for t in mine):  # a chat the routine started or nudged is a job's, never his
+            said.extend(mine)
+    return said
 
 
 def quote_found(quote, texts):
@@ -1288,7 +1340,7 @@ def ready_fields(row, ws=None):
         found_by = None
     out["his_words"] = {"ok": bool(found_by) or (bool(quotes) and not missing), "quotes": quotes, "found": found, "none": found_by.group(0) if found_by else "",
                         "why": ("" if found_by else no_way or ("no His words field" if not ft["his_words"] else "no quote in His words (put his words between quotes)"
-                                if not quotes else f"not found in the calls, the notes or the log: {missing[0][:60]!r}" if missing else ""))}
+                                if not quotes else f"not found in the calls, the notes, the log, his texts or his laptop chats: {missing[0][:60]!r}" if missing else ""))}
     # F81 (job 481): an addition of hers never goes into a row on her own say; it goes on the sit-down list, and only
     # with his yes is it written in, with the date. So the field may be left out or say "none"; when it says
     # something, it needs his yes with a date ("his yes, 29 October 2026"); an empty one still says nothing.
