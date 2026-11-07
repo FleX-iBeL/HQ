@@ -584,6 +584,15 @@ HUMAN = (
     "just said, and don't wrap up with a summary. Don't say that you're thinking or what you're about to look up: "
     "while you work the call page plays a soft thinking sound, so stay quiet and answer when you have it."
 )
+# H338: a call's start already says never like an AI, never the same line twice, no recap and no announcing the work (config.VOICE_RULES);
+# on a call the paragraph keeps only what those don't. Texts and runs have no call rules, so they keep HUMAN whole.
+HUMAN_CALL = (
+    "Sound like a real person on the phone, not a help desk: contractions, plain words, your own rhythm and little habits, and "
+    "stay in your character the whole call, also when you push back, say no or something goes wrong. No assistant phrases "
+    "(\"Great question\", \"I'd be happy to\", \"Certainly\", \"Absolutely\", \"Is there anything else\"), never \"honestly\" or "
+    "\"to be honest\" (just say the true thing), and don't wrap up with a summary. While you work the call page plays a soft "
+    "thinking sound, so stay quiet and answer when you have it."
+)
 
 
 def persona(agent: dict, user: str = "the user", light: bool = False) -> str:
@@ -603,7 +612,7 @@ def persona(agent: dict, user: str = "the user", light: bool = False) -> str:
         out += (f"How you sound when you push back, as an example of your voice (don't repeat it word for word): "
                 f"\"{agent['pushback']}\"\n")
     # H298: the handbook (part one and her own section) under her character, only while the feature is on.
-    return (out + about_self.block(agent, user) + ("" if light else handbook.block(agent, user)) + HUMAN
+    return (out + about_self.block(agent, user) + ("" if light else handbook.block(agent, user)) + (HUMAN_CALL if light else HUMAN)
             + "\nEverything else in the call rules above still holds.\n")
 
 
