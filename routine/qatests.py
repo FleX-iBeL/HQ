@@ -302,6 +302,8 @@ def run_on(d: str, hqdir: str) -> tuple[dict, str]:
     _relink(link, os.path.join(box, "workspace"))
     try:
         env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+        os.makedirs(os.path.join(box, "tmp"), exist_ok=True)  # F175: her test's own temp files go in the box, gone with it
+        env["TMPDIR"] = os.path.join(box, "tmp")
         env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1", "HQ_WALL": wall,
                     "PYTHONPATH": os.pathsep.join(x for x in (os.path.join(wall, "py"), env.get("PYTHONPATH", "")) if x)})
         py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
@@ -350,7 +352,11 @@ def _qa_box(hqdir: str) -> tuple[str | None, str]:
         return None, "the code given holds the live workspace itself, not a copy's link to it"
     live = os.path.realpath(link)
     try:
-        box = tempfile.mkdtemp(prefix="hq-qa-")
+        # F175: on the main disk, like proof's own copies; the temp folder (/tmp) filled up with other runs' copies and her tests
+        # then never started ("Disk quota exceeded", job 9264)
+        base = os.path.join(hqpaths.HQ, "scratch")
+        os.makedirs(base, exist_ok=True)
+        box = tempfile.mkdtemp(prefix="hq-qa-", dir=base)
     except OSError as ex:
         return None, f"no throwaway copy could be made ({ex.strerror or ex})"
     try:
