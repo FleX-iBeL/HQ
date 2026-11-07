@@ -364,8 +364,21 @@ def line_dir(name: str) -> Path | None:
     return None
 
 
+_LABEL = re.compile(r"(?<![\w.])[FHL]\d+(?:\.\d+)?(?![\w.])")  # F186: an item's label (F186, H340)
+
+
+def with_label(text: str, item: str = "", sender: str = "") -> str:
+    """F186: a text of hers about one item (F103's item, its label) that names no item gets the label in front, the way she'd write it, so he
+    always knows which one and his answer right after it counts for it (sprint.his_on). A text about two items, or about something with no
+    label yet (a job's id), goes as it is."""
+    text = text.strip()
+    if sender == "me" or not text or not _LABEL.fullmatch(str(item or "").strip()) or _LABEL.search(text):
+        return text
+    return f"{str(item).strip()}: {text}"
+
+
 def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", quiet: bool = False) -> dict:
-    m = {"at": round(time.time(), 3), "from": sender, "text": text.strip(), "why": why, "id": mid or secrets.token_hex(8),
+    m = {"at": round(time.time(), 3), "from": sender, "text": with_label(text, item, sender), "why": why, "id": mid or secrets.token_hex(8),
          **({"item": item} if item else {}), **({"quiet": True} if quiet else {})}  # F103: the id of the work it's about, carried as an argument
     import outbox  # H338: the style filter, the claim check, no question already answered, one text per topic, her batches
     m = outbox.check(m, folder(), read_lines(folder()), agent()["id"])
