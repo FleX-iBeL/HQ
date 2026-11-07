@@ -27,7 +27,9 @@ the record, never anyone's word, and does the next step:
   - Anything else (the review flagged it, her tests are missing, not sealed, not reviewed, a finding from QA, missing ready points): with
     prepare on, a prep job for Moneypenny in the team's line, for that one item, with the next step as the record says it. She does the
     work, never the send. When she ends, the line reads the record again. The same step three times without the record moving: one text
-    to him with what's stuck, and the line leaves the item until its words or its switches change.
+    to him with what's stuck, and the line leaves the item until its words or its switches change. A prep boxed (ran past its box)
+    no longer holds the item: the line starts a fresh one with the record's next step, each one a try (F178, 7 November 2026). Before
+    it gives up on her tests not through the hard checks, it runs qatests.py check itself once: sealed, it moves on with no text.
 
 His pause of the team (jobs.py off) holds the line too.
 
@@ -74,9 +76,10 @@ def prep_label(text):
 
 
 def prep_of(jobs, label):
-    """The waiting or running prep job for LABEL, or None."""
+    """The waiting, running or held prep job for LABEL, or None. F178: a boxed prep (ran past its box) is over for the line: it
+    no longer holds the item, the line starts a fresh one; the boxed job stays as it is, with what it wrote."""
     for j in jobs:
-        if prep_label(j["text"]) == label and not j["state"].startswith(q.FINISHED):
+        if prep_label(j["text"]) == label and not j["state"].startswith(q.FINISHED + ("boxed",)):
             return j
     return None
 
@@ -219,6 +222,9 @@ def _record_again(j, excused=()):
 WAITS_ON_HIM = re.compile(r"waits? on his (?:answer|decision|yes)|it's his decision now|on her sit-down list", re.I)
 
 
+HARD_CHECKS = re.compile(r"QA tests.{0,40}haven't passed the hard checks")
+
+
 def _fp(why):
     return re.sub(r"\(round \d+ of \d+\)", "", why or "")[:300]
 
@@ -242,7 +248,8 @@ def prep_text(label, why, row):
     return (f"{PREP}{label} (the line): get item {label} ready for the team. {title[:160]} The next step, from the record: {why}. "
             f"Do that step and every one after it you can, until sprint.py check {label} says it's ready: answer the review in the "
             f"item's own words (review.py add or reword), write or fix your QA tests (qatests.py new, check, review), fill what's "
-            f"missing. Never send it to the team, never jobs.py send-row or now: the program sends it once it's ready and its build "
+            f"missing. Before you end, run python3 routine/qatests.py check {label} once yourself, so tests that pass the hard checks "
+            f"are sealed and the line moves on. Never send it to the team, never jobs.py send-row or now: the program sends it once it's ready and its build "
             f"switch is on. Text him only for a real decision, never for a step you can take yourself.")
 
 
@@ -325,6 +332,10 @@ def act(label, what, detail, row, st, jobs):
         if e["tries"] > TRIES:
             if not e.get("told"):
                 e["told"] = True
+                if HARD_CHECKS.search(detail):  # F178: her tests may pass the hard checks by now (F165's night): the check once, before giving up
+                    code, out = _run([os.path.join(HERE, "qatests.py"), "check", label])
+                    if code == 0 and "tests are sealed" in out:
+                        return f"{label}: her QA tests sealed by the line's own check; it moves on"
                 _tell(label, "stuck", f"{label} is stuck on the same step after {TRIES} tries of mine: {detail}. "
                       f"The line leaves it until its words or its switches change.")
             return None
