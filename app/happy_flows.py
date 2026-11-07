@@ -15367,6 +15367,7 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         ws = self.tmp / f"h298-{name}"
         _sh.copytree(ROOT / "template", ws)
         (ws / "HQ").mkdir(exist_ok=True)
+        self._h340_old_hours(ws)
         if maker:
             (ws / "HQ/features.json").write_text(AGENTS_ON)
         status = self.tmp / f"h298-{name}-status"
@@ -15386,6 +15387,22 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         for k in ("HQ_MAKER", "HQ_FEATURES_PIECES", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_BRIEFING"):
             env.pop(k, None)
         return ws, env
+
+    @staticmethod
+    def _h340_old_hours(ws: Path) -> None:
+        """H340 gave the agents weekday hours (Moneypenny's through the night); the agents' benches test the runner's mechanics at the
+        times they name, so they keep the hours from before: 08:00 to 22:00 every day, and the runs where they were then."""
+        cj = ws / "HQ/agents/cycles.json"
+        c = json.loads(cj.read_text())
+        for a in c["agents"].values():
+            a["hours"], a["days"] = ["08:00", "22:00"], ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        c["agents"]["donna"]["batches"] = ["12:00", "17:00"]
+        c["agents"]["moneypenny"]["batches"] = ["12:00"]
+        pe = c["agents"]["pepper"]
+        pe["session"].update({"at": "20:00", "useful_until": "friday 09:30"})
+        for lk in pe["looks"]:
+            lk["at"] = {"midweek look": "12:30", "notes look": "19:30"}.get(lk["name"], lk["at"])
+        cj.write_text(json.dumps(c, indent=2) + "\n")
 
     def _h298_py(self, env: dict, code: str, timeout: int = 120):
         import subprocess as _sp
