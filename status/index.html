@@ -563,6 +563,13 @@
       </div>
       <p class="said" id="search-said" hidden></p>
     </div>
+    <!-- H339: the night's road, in Moneypenny's place until her own section comes with the big overhaul (H257); H307: its timeline any time -->
+    <section id="moneypenny-night" class="moneypenny-night" aria-label="Moneypenny's night's road">
+      <h2>Moneypenny · <a id="night-road-link" href="/night-road">The night's road</a></h2>
+      <style>#moneypenny-night{max-width:960px;margin:1rem auto;padding:0 1rem}</style>
+      <div id="night-timeline"></div>
+    </section>
+    <script>(function(){var box=document.getElementById('night-timeline');function load(){fetch('/night-road/timeline',{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(h){if(h)box.innerHTML=h;}).catch(function(){});}load();setInterval(load,60000);})();</script>
     <main id="app"><p>Reading the roadmap…</p></main>
     <script src="./update-ui.js"></script>
     <script>HQUpdate.mount({ line: document.getElementById('hqu-line'), banner: document.getElementById('hqu-banner') });</script>

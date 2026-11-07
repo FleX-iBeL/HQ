@@ -780,6 +780,32 @@ def plain_words_problem(words):
     return ""
 
 
+def night_log(words):
+    """H339: each step a running job says goes into the night's road, its log newest first on the page (status/night-road.mjs).
+    The night of a moment is the day of the evening it started, noon to noon; the file is in the workspace, never in HQ's code."""
+    try:
+        import datetime as dt_
+        t = dt_.datetime.now()
+        key = (t - dt_.timedelta(hours=12)).strftime("%Y-%m-%d")
+        folder = os.path.join(hqpaths.DATA, "night-road")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, key + ".json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                n = json.load(f)
+        except (OSError, ValueError):
+            n = {"title": "The night", "running": True, "rows": [], "log": [], "usage": []}
+        at = t.strftime("%Y-%m-%dT%H:%M:%S")
+        n.setdefault("log", []).append({"at": at, "text": words})
+        n["updated"] = at
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(n, f, indent=1)
+        os.replace(tmp, path)
+    except Exception:
+        pass  # the night's road is a view: a step that can't be logged there is still said on the status page
+
+
 def find(jobs, n):
     for j in jobs:
         if j["n"] == n:
@@ -1367,6 +1393,7 @@ def main(argv):
                              "found why, fixing it, then every check again\".")
                 j["now"] = {"at": now, "text": words}
                 write(text, jobs, on)
+                night_log(words)
                 print(f"Job {j['n']}, on the status page: {words}")
                 return
             if j.get("redone") and not again:

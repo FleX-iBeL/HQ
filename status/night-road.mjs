@@ -1,0 +1,232 @@
+// H339 (6 and 7 November 2026), his words: "when MP runs the team at night, she makes like we have our artifacts like (the fix
+// road), but instead of artifact, its visible in HQ so we can open them and they are stored of each night." The night's road,
+// built by the program from what HQ records (the queue's jobs, their times and states, the steps a job says it's doing, the saved
+// usage readings), so the page is complete and true with no words from anyone. A night is one file in the workspace,
+// HQ/night-road/YYYY-MM-DD.json: {title, updated, running, rows: [{name, kind, start, end}], log: [{at, text}], usage: [{at, week}]}.
+// The night of a day runs from its noon to the next day's noon, so her 21:45 check-in and the team's stop in the morning fall in it.
+// H307 (folded in): the same timeline on the status page any time, from the jobs and the planning.
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { FOLDER } from './paths.mjs';
+import { lineSettings } from './usage.mjs';
+
+export const NIGHTS = join(FOLDER, 'HQ', 'night-road');
+const KINDS = ['done', 'broken', 'running', 'expected', 'you'];
+const KIND_WORDS = { done: 'done', broken: 'found broken', running: 'running now', expected: 'expected (between earliest start and latest end)', you: 'you (waits for you)' };
+const STALE_MIN = 20;
+const JOB_MIN = 30;  // a job's length when nothing better is known
+const WEEK = 7 * 864e5;
+
+const pad = (n) => String(n).padStart(2, '0');
+const day = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hm = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ms = (s) => { const t = Date.parse(s ?? ''); return Number.isNaN(t) ? null : t; };
+const local = (d, t) => ms(`${d}T${t}`);  // YYYY-MM-DD and HH:MM, local time
+
+/** Which night a moment belongs to: the day of the evening it started (noon to noon). */
+export const nightOf = (t = Date.now()) => day(new Date(t - 12 * 36e5));
+const windowOf = (key) => { const s = local(key, '12:00'); return [s, s + 864e5]; };
+
+export async function nights() {
+  try {
+    return (await readdir(NIGHTS)).map((f) => /^(\d{4}-\d{2}-\d{2})\.json$/.exec(f)?.[1]).filter(Boolean).sort().reverse();
+  } catch { return []; }
+}
+
+async function readNight(key) {
+  try {
+    const n = JSON.parse(await readFile(join(NIGHTS, `${key}.json`), 'utf8'));
+    return n && typeof n === 'object' ? n : null;
+  } catch { return null; }
+}
+
+/** The queue's jobs as timeline rows: done when they really ran, running from their start, coming from earliest to latest. */
+export function jobRows(jobs, now = Date.now()) {
+  const out = [];
+  for (const j of jobs ?? []) {
+    const name = String(j.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    if (!name) continue;
+    const [ad, at] = String(j.agreed ?? '').split(' ');
+    const agreed = local(ad, at);
+    let m;
+    if ((m = /^done (\d\d:\d\d) on (\d{4}-\d{2}-\d{2})/.exec(j.state))) {
+      const end = local(m[2], m[1]);
+      if (end == null) continue;
+      const start = agreed != null && agreed <= end && end - agreed < 12 * 36e5 ? agreed : end - JOB_MIN * 6e4;
+      out.push({ name, kind: 'done', start, end });
+    } else if ((m = /^(?:running|stop asked)(?: since)? (\d\d:\d\d)/.exec(j.state))) {
+      let start = local(day(new Date(now)), m[1]);
+      if (start > now) start -= 864e5;
+      out.push({ name, kind: 'running', start, end: Math.max(start + JOB_MIN * 6e4, now + 5 * 6e4) });
+    } else if (/^boxed|^held/.test(j.state)) {
+      out.push({ name, kind: 'you', start: agreed ?? now, end: Math.max(now + 60 * 6e4, (agreed ?? now) + 6e4) });
+    } else if (/^ready/.test(j.state)) {
+      // the earliest a waiting job starts is the routine's next whole-minute tick after this one
+      const start = Math.ceil(now / 6e4) * 6e4 + 6e4 + ((j.place ?? 1) - 1) * JOB_MIN * 6e4;
+      out.push({ name, kind: 'expected', start, end: start + JOB_MIN * 6e4 });
+    }
+  }
+  return out;
+}
+
+const overlaps = (r, [s, e]) => r.end >= s && r.start <= e;
+const fromFile = (r) => ({ name: String(r.name ?? ''), kind: KINDS.includes(r.kind) ? r.kind : 'done', start: ms(r.start), end: ms(r.end) });
+const toFile = (r) => ({ name: r.name, kind: r.kind, start: new Date(r.start).toISOString(), end: new Date(r.end).toISOString() });
+
+/** A night as the page shows it. The night that runs now takes in the queue's jobs and is kept with them, so it reads the same later. */
+async function theNight(key, parsed, now) {
+  const kept = await readNight(key);
+  const n = { title: kept?.title || 'The night', updated: ms(kept?.updated), running: kept ? kept.running !== false : true,
+    rows: (Array.isArray(kept?.rows) ? kept.rows : []).map(fromFile).filter((r) => r.name && r.start != null && r.end != null),
+    log: (Array.isArray(kept?.log) ? kept.log : []).filter((x) => x && x.text).map((x) => ({ at: ms(x.at), text: String(x.text) })),
+    usage: (Array.isArray(kept?.usage) ? kept.usage : []).map((u) => ({ at: ms(u.at), week: Number(u.week) })).filter((u) => u.at != null && Number.isFinite(u.week)),
+    parts: Array.isArray(kept?.parts) ? kept.parts : [] };
+  if (key === nightOf(now)) {
+    const have = new Set(n.rows.map((r) => r.name));
+    const fresh = jobRows(parsed?.queue?.jobs, now).filter((r) => overlaps(r, windowOf(key)));
+    let changed = !kept && fresh.length > 0;
+    for (const r of fresh) {
+      const i = n.rows.findIndex((x) => x.name === r.name);
+      if (!have.has(r.name)) { n.rows.push(r); changed = true; }
+      else if (n.rows[i].kind !== r.kind || n.rows[i].end !== r.end) { n.rows[i] = r; changed = true; }
+    }
+    if (changed) {
+      try {
+        await mkdir(NIGHTS, { recursive: true });
+        await writeFile(join(NIGHTS, `${key}.json`), `${JSON.stringify({ ...(kept ?? {}), title: n.title, running: n.running,
+          updated: kept?.updated ?? new Date(now).toISOString(), rows: n.rows.map(toFile), log: kept?.log ?? [], usage: kept?.usage ?? [] }, null, 1)}\n`);
+      } catch { /* a page that can't keep it still shows it */ }
+    }
+  }
+  return n;
+}
+
+/** What a row shows as: never running after its end in a night that still runs (its end wasn't recorded: found broken). */
+const shownKind = (r, n, now) => (r.kind === 'running' && r.end < now && n.running ? 'broken' : r.kind);
+
+export function timelineHtml(rows, now = Date.now(), kindOf = (r) => r.kind) {
+  if (!rows.length) return '<p class="soft">Nothing on the timeline yet.</p>';
+  const list = [...rows].sort((a, b) => a.start - b.start);
+  const t0 = Math.min(now, ...list.map((r) => r.start));
+  const t1 = Math.max(now, ...list.map((r) => r.end));
+  const span = Math.max(t1 - t0, 6e4);
+  const at = (t) => Math.round((10000 * (t - t0)) / span) / 100;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span class="nr-tick" style="left:${f * 100}%">${hm(t0 + f * span)}</span>`).join('');
+  const body = list.map((r) => {
+    const k = kindOf(r);
+    const when = k === 'expected' ? `between ${hm(r.start)} and ${hm(r.end)}` : k === 'running' ? `${hm(r.start)}, until about ${hm(r.end)}`
+      : r.kind === 'running' && k === 'broken' ? `${hm(r.start)}–${hm(r.end)}, its end never recorded` : `${hm(r.start)}–${hm(r.end)}`;
+    return `<div class="nr-row"><div class="nr-name">${esc(r.name)} <span class="nr-when">${esc(when)}</span></div>`
+      + `<div class="nr-lane"><div class="nr-bar k-${k}" tabindex="0" style="left:${at(r.start)}%;width:${Math.max(0.6, at(r.end) - at(r.start))}%" title="${esc(r.name)} · ${esc(when)}"></div></div></div>`;
+  }).join('');
+  const legend = KINDS.map((k) => `<span class="nr-key"><i class="nr-sw k-${k}"></i>${KIND_WORDS[k]}</span>`).join('');
+  return `<div class="nr-timeline"><div class="nr-row nr-axis"><div class="nr-name"></div><div class="nr-lane">${ticks}`
+    + `<div class="nr-now now" style="left:${at(now)}%" title="Now, ${hm(now)}"></div></div></div>${body}</div><div class="nr-legend">${legend}</div>`;
+}
+
+/** Part 4b: the week's usage graph: the real line from 0%, the moving line, the stop line, where it's heading. */
+function usageHtml(n, now, markdown, reset0) {
+  const reads = [...n.usage].sort((a, b) => a.at - b.at);
+  if (!reads.length) return '<p class="soft">No usage reading yet this week: the graph starts empty at the week\'s start.</p>';
+  const last = reads[reads.length - 1];
+  let reset = ms(reset0);
+  if (reset == null) reset = reads[0].at + WEEK;
+  while (reset <= last.at) reset += WEEK;
+  while (reset - WEEK > last.at) reset -= WEEK;
+  const ws = reset - WEEK;
+  const week = reads.filter((r) => r.at >= ws);
+  const set = lineSettings(markdown ?? '');
+  const stop = set?.weekly && !set.weekly.moving ? set.weekly.fixed : 90;
+  const W = 600, H = 200, x = (t) => Math.round((W * (t - ws)) / WEEK * 10) / 10, y = (p) => Math.round((H - 10 - (H - 20) * Math.min(100, Math.max(0, p)) / 100) * 10) / 10;
+  const moving = (t) => Math.max(20, Math.round(100 * (t - ws) / WEEK));
+  const real = [[ws, 0], ...week.map((r) => [r.at, r.week])].map(([t, p]) => `${x(t)},${y(p)}`).join(' ');
+  const twelve = week.filter((r) => r.at >= last.at - 12 * 36e5);
+  const pace = twelve.length > 1 && last.at > twelve[0].at ? (last.week - twelve[0].week) / (last.at - twelve[0].at) : 0;
+  const to = Math.min(reset, Math.max(now + 36e5, ...n.rows.map((r) => r.end)));
+  const lands = Math.min(stop, last.week + pace * Math.max(0, to - last.at));
+  const dots = week.map((r) => `<circle class="nr-reading" cx="${x(r.at)}" cy="${y(r.week)}" r="3"><title>${hm(r.at)}: the week at ${r.week}%, the moving line at ${moving(r.at)}%</title></circle>`).join('');
+  return `<svg class="nr-usage" viewBox="0 0 ${W} ${H}" role="img" aria-label="The week's usage: now ${last.week}%, the stop line at ${stop}%">`
+    + `<line class="nr-stop" x1="0" y1="${y(stop)}" x2="${W}" y2="${y(stop)}" stroke="#d33" stroke-dasharray="6 4"/>`
+    + `<text x="4" y="${y(stop) - 4}" class="nr-stop-label">stop ${stop}%</text>`
+    + `<polyline class="nr-moving" fill="none" stroke="#888" stroke-dasharray="2 4" points="${x(ws)},${y(20)} ${x(ws + 0.2 * WEEK)},${y(20)} ${x(reset)},${y(100)}"/>`
+    + `<polyline class="nr-real" fill="none" stroke="#2a6" stroke-width="2" points="${real}"/>`
+    + `<line class="nr-heading" x1="${x(last.at)}" y1="${y(last.week)}" x2="${x(to)}" y2="${y(lands)}" stroke="#2a6" stroke-dasharray="4 3"/>`
+    + `${dots}<text x="${Math.min(W - 70, x(last.at) + 6)}" y="${y(last.week) - 6}">now ${last.week}%</text></svg>`
+    + `<div class="nr-legend"><span class="nr-key"><i class="nr-ln real"></i>the week used</span><span class="nr-key"><i class="nr-ln moving"></i>the moving line</span>`
+    + `<span class="nr-key"><i class="nr-ln stop"></i>the stop line (${stop}%)</span><span class="nr-key"><i class="nr-ln heading"></i>where it's heading (${Math.round(lands)}% by ${hm(to)})</span></div>`;
+}
+
+export const CSS = `
+.nr-timeline{margin:.6rem 0;font-size:.9rem}
+.nr-row{display:grid;grid-template-columns:minmax(10rem,32%) 1fr;gap:.5rem;align-items:center;margin:.2rem 0}
+.nr-name{overflow-wrap:anywhere}.nr-when{color:#777;font-size:.8rem}
+.nr-lane{position:relative;height:1.1rem;background:rgba(127,127,127,.08);border-radius:3px}
+.nr-axis .nr-lane{background:none;height:1.2rem}
+.nr-tick{position:absolute;top:0;font-size:.7rem;color:#888;transform:translateX(-50%)}
+.nr-now{position:absolute;top:0;width:2px;height:999px;background:#e33;z-index:2;pointer-events:none}
+.nr-timeline{position:relative;overflow:hidden}
+.nr-bar{position:absolute;top:2px;bottom:2px;border-radius:3px;min-width:4px}
+.k-done{background:#2a6}.k-broken{background:#d33}.k-running{background:#38f}.k-you{background:#c8a000}
+.k-expected{background:repeating-linear-gradient(45deg,#9ab 0 4px,transparent 4px 8px);border:1px solid #9ab}
+.nr-legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.8rem;margin:.3rem 0}
+.nr-sw{display:inline-block;width:.9rem;height:.6rem;border-radius:2px;margin-right:.3rem}
+.nr-ln{display:inline-block;width:1.2rem;border-top:2px solid #2a6;margin-right:.3rem;vertical-align:middle}
+.nr-ln.moving{border-top:2px dotted #888}.nr-ln.stop{border-top:2px dashed #d33}.nr-ln.heading{border-top:2px dashed #2a6}
+.nr-usage{width:100%;max-width:640px;height:auto;background:rgba(127,127,127,.05)}
+.nr-usage text{font-size:11px;fill:#666}
+@media (max-width:640px){.nr-row{display:block}.nr-name{margin-bottom:.15rem}}
+`;
+
+const PAGE_CSS = `body{font:15px/1.45 system-ui,sans-serif;max-width:960px;margin:1rem auto;padding:0 1rem;color:#222}
+.soft{color:#777}.nr-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.6rem;margin:.8rem 0}
+.nr-fact{background:rgba(127,127,127,.08);padding:.5rem;border-radius:6px}.nr-fact b{display:block;font-size:.75rem;color:#777;font-weight:600}
+.nr-progress{height:.5rem;background:rgba(127,127,127,.15);border-radius:3px;overflow:hidden}.nr-progress i{display:block;height:100%;background:#2a6}
+.nr-warn{color:#b30;font-weight:600}.nr-log li,.nr-parts li{margin:.2rem 0}.nr-pill{font-size:.75rem;border:1px solid #aaa;border-radius:9px;padding:0 .4rem;margin-left:.3rem}
+@media (prefers-color-scheme:dark){body{background:#151515;color:#ddd}}` + CSS;
+
+/** The night's page: /night-road (the night that's newest) and /night-road/YYYY-MM-DD (any kept night). */
+export async function nightPage(key, parsed, { now = Date.now(), markdown = '', reset = null } = {}) {
+  const list = await nights();
+  const cur = nightOf(now);
+  if (!key) key = list[0] && list[0] > cur ? list[0] : (list.includes(cur) || parsed?.queue?.jobs?.length ? cur : list[0] ?? cur);
+  const n = await theNight(key, parsed, now);
+  const all = [...new Set([key, ...(await nights())])].sort().reverse();
+  const kind = (r) => shownKind(r, n, now);
+  const ago = n.updated != null ? Math.max(0, Math.floor((now - n.updated) / 6e4)) : null;
+  const stale = n.running && key === cur && ago != null && ago > STALE_MIN;
+  const log = [...n.log].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+  const going = n.rows.filter((r) => kind(r) === 'running');
+  const ahead = n.rows.filter((r) => ['running', 'expected'].includes(kind(r)));
+  const step = log[0]?.text ?? (going[0] ? going[0].name : 'Nothing running');
+  const usedNow = n.usage.length ? [...n.usage].sort((a, b) => b.at - a.at)[0].week : null;
+  const finished = n.rows.filter((r) => ['done', 'broken'].includes(kind(r))).length;
+  const pct = n.rows.length ? Math.round((100 * finished) / n.rows.length) : 0;
+  const parts = n.parts.map((p) => `<li><span class="nr-dot">●</span> <b>${esc(p.title)}</b> ${esc(p.text ?? '')}${p.pill ? `<span class="nr-pill">${esc(p.pill)}</span>` : ''}</li>`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The night's road · ${esc(key)}</title><style>${PAGE_CSS}</style></head><body>
+<p><a href="/">← HQ</a></p>
+<h1>${esc(n.title)} · ${esc(key)}</h1>
+<p>The night's road: what the team did this night, kept as it happened.</p>
+<p>Last updated <span id="nr-updated" data-at="${n.updated ?? ''}" data-live="${n.running && key === cur ? 1 : 0}">${n.updated != null ? `${hm(n.updated)} (${ago} min ago)` : 'not yet'}</span>${stale ? ` <span class="nr-warn">Not updated for ${ago} min</span>` : ''}</p>
+<div class="nr-facts"><div class="nr-fact"><b>Current step</b>${esc(step)}</div>
+<div class="nr-fact"><b>Expected end</b>${ahead.length ? hm(Math.max(...ahead.map((r) => r.end))) : n.running ? 'nothing more planned' : 'the night is over'}</div>
+<div class="nr-fact"><b>The week used</b>${usedNow != null ? `${usedNow}%` : 'no reading yet'}</div>
+<div class="nr-fact"><b>The team</b>${n.running && key === cur ? 'working the night' : 'finished for the night'}</div></div>
+<div class="nr-progress" title="${finished} of ${n.rows.length} finished"><i style="width:${pct}%"></i></div>
+<h2>The timeline</h2>${timelineHtml(n.rows, now, kind)}
+<h2>The week's usage</h2>${usageHtml(n, now, markdown, reset)}
+<h2>Now</h2><ul>${going.map((r) => `<li>${esc(r.name)}, since ${hm(r.start)}</li>`).join('') || '<li>Nothing running.</li>'}</ul>
+${parts ? `<h2>The parts of the night</h2><ul class="nr-parts">${parts}</ul>` : ''}
+<h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(x.text)}</li>`).join('') || '<li>Nothing logged yet.</li>'}</ul>
+<h2>The nights</h2><ul>${all.map((d) => `<li><a href="/night-road/${d}">${d}${d === key ? ' (this one)' : ''}</a></li>`).join('')}</ul>
+<script>(function(){var u=document.getElementById('nr-updated');if(!u||!u.dataset.at)return;function f(){var t=Number(u.dataset.at),m=Math.max(0,Math.floor((Date.now()-t)/6e4)),d=new Date(t);u.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' ('+m+' min ago)';if(u.dataset.live==='1'&&m>${STALE_MIN}&&!document.querySelector('.nr-warn')){var w=document.createElement('span');w.className='nr-warn';w.textContent=' Not updated for '+m+' min';u.after(w);}}setInterval(f,30000);if(u.dataset.live==='1')setInterval(function(){location.reload();},60000);})();</script>
+</body></html>`;
+}
+
+/** H307: the timeline for the status page, any time: the night that runs now with the queue's jobs. */
+export async function statusTimeline(parsed, now = Date.now()) {
+  const n = await theNight(nightOf(now), parsed, now);
+  const rows = n.rows.length ? n.rows : jobRows(parsed?.queue?.jobs, now).filter((r) => r.end >= now - 12 * 36e5);
+  return `<style>${CSS}</style>${timelineHtml(rows, now, (r) => shownKind(r, n, now))}`;
+}

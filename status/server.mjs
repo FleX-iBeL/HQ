@@ -29,6 +29,7 @@ function parseRoadmap(text) {
 }
 import { FOLDER, ROADMAP } from './paths.mjs';
 import { reserveOf } from './usage.mjs';
+import { nightPage, statusTimeline } from './night-road.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.HQ_STATUS_PORT ?? 4748);
@@ -1200,6 +1201,25 @@ const server = createServer(async (req, res) => {
       sendBody(req, res, 200, 'application/json; charset=utf-8', await pageData(have));
     } catch (e) {
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(`The status server couldn't put the page together: ${e?.message ?? e}`);
+    }
+    return;
+  }
+  // H339: the night's road, built from what HQ records; one page per night, kept in the workspace. H307: its timeline on the status page.
+  if (path0 === '/night-road' || path0 === '/night-road/timeline' || /^\/night-road\/\d{4}-\d{2}-\d{2}$/.test(path0)) {
+    let text = '';
+    try { text = await readFile(ROADMAP, 'utf8'); } catch { /* no roadmap: the kept nights alone */ }
+    const parsed = text ? parseRoadmap(text) : null;
+    try {
+      if (path0 === '/night-road/timeline') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await statusTimeline(parsed));
+        return;
+      }
+      let reset = null;
+      try { reset = (JSON.parse(await readFile(join(root, '.status/usage.json'), 'utf8'))?.limits ?? []).find((l) => /weekly · all/i.test(l.label ?? ''))?.resetsAt ?? null; } catch { /* no reading */ }
+      const key = path0.split('/')[2] ?? null;
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await nightPage(key, parsed, { markdown: text, reset }));
+    } catch {
+      res.writeHead(500).end("The night's road couldn't be built");
     }
     return;
   }
