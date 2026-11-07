@@ -70,6 +70,10 @@ def _about(e: dict, what: str):
     return mod.call_note(e, config.USER)
 
 
+# F172: what the warm-up of a test call without made-up loops says instead of the mail heads-up
+TEST_NO_MAIL = "This is a test call: bring up nothing from his mail list, not even in a few words.\n"
+
+
 class Call:
     def __init__(self, *, model: str | None = None, voice: str | None = None, calls_dir: Path | None = None,
                  wrap_up: str = config.WRAP_UP, test_mode: bool = False, waiting_lines: bool = True,
@@ -77,7 +81,10 @@ class Call:
                  agent: str | None = None, continues: str | None = None, handover: bool = False,
                  voices: dict | None = None, about: dict | None = None, demo: bool = False, demo_topic: str = "",
                  callback: bool = False):
-        self._loops = loops
+        # F172: a test call never reads his real mail list for the heads-up (it showed his real mails in a test run and
+        # tacked a heads-up onto flow 5's yes question); a test that wants a heads-up passes its own made-up loops.
+        self.test_mode = bool(test_mode)
+        self._loops = loops if loops is not None or not test_mode else open_loops.OpenLoops([], 0, False)
         # H74: a demo call from the tutorial is a Free call (nothing of his, nothing saved) on Opus, with no tools
         self.demo = bool(demo)
         if self.demo:
@@ -274,7 +281,7 @@ class Call:
     def _line_for(self, who: dict) -> str | None:
         """The open line (app/lines.py): her last session on this computer, resumed when the switch is on and the
         line is fresh enough; a free or demo call never resumes."""
-        if self.free or self.demo:
+        if self.free or self.demo or self.test_mode:  # F172: a test call never picks up his real session (his calls, his mail)
             return None
         try:
             import lines
@@ -311,6 +318,8 @@ class Call:
 
     def _note_lines(self) -> None:
         """After the call: every agent's session on it, and how big its context got, for the next start."""
+        if self.test_mode:  # F172: a test call's session is never his next call's start
+            return
         try:
             import lines
             for aid, b in self.brains.items():
@@ -447,6 +456,7 @@ class Call:
             text = (
                 f"[Call system: {config.USER} is calling you now on HQ, the voice call. It is {stamp}. "
                 + (f"{note}\n" if note else "")
+                + (TEST_NO_MAIL if self.test_mode and not note else "")
                 + (self._continue_note() if self.continued else "")
                 + (_about(self.about, "note") if self.about else "")
                 + "Don't do anything yet and use no tools. Reply with only the word: ready]"

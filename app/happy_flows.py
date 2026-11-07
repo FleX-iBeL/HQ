@@ -895,6 +895,7 @@ class Run:
         need("?" in r1["reply"], f"she did not ask him anything: {r1['reply']!r}")
         if asked:
             need(live.call.policy.pending, "no question was waiting for his answer")
+        say(f"   yes question: {' '.join(r1['reply'].split())!r}")  # F172: so the question can be read on a green run too
         n_sentences = len([x for x in re.split(r"[.?!]+", r1["reply"]) if x.strip()])
         need(n_sentences <= 3, lambda: f"the check-in is not one natural sentence ({n_sentences} sentences): {r1['reply']!r}")
         need(not re.search(r"say yes|yes or no", r1["reply"].lower()), f"robotic check-in: {r1['reply']!r}")

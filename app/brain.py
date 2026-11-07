@@ -194,9 +194,11 @@ def refusal_text(d: "_policy.Decision") -> str:
     if d.verdict == "ask":
         return (
             f"Not done: this needs {_config.USER}'s yes first. Check it with him the way an assistant on "
-            "the phone would, in one short natural sentence with the details that matter, e.g. "
+            "the phone would, in one short natural sentence with the details that matter, and that one sentence is the "
+            "question itself, nothing before or after it (F172), e.g. "
             '"Shall I put dinner with a friend in your agenda, Saturday at 6 30 in the evening?" or '
-            '"So that\'s breakfast tomorrow at 10 in the morning, until 11. Want me to put it in?" '
+            '"Want me to put breakfast in for tomorrow from 10 to 11 in the morning?" '
+            "An email address goes the way it's said out loud (test at example dot com). "
             f"(What needs his okay: {d.question}; why: {d.why}.) Never say \"say yes or no\". Then stop and wait for "
             "his answer. If the call system then tells you he said yes, make exactly the same call again. Never end "
             "your turn without having asked him in words."
