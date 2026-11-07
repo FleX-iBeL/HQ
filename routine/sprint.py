@@ -913,6 +913,10 @@ def his_on(quote, about, ws=None):
     hits = his_said(parts, ws or _ws()) if parts else []
     if not hits:
         return None, NOT_HIS
+    label = re.match(r"\s*([FH]\d+(?:\.\d+)?)(?![\w.])", about or "")
+    named = [h for h in hits if label and re.search(rf"(?<![\w.]){re.escape(label.group(1))}(?![\w.])", str(h["line"]), re.I)]
+    if named:  # F167: a line of his naming the item by its label is about it, read by the program; one line naming two items is about each
+        return named[-1]["where"], ""
     hit = hits[-1]
     answer = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
     try:
@@ -927,13 +931,13 @@ def his_on(quote, about, ws=None):
     return (hit["where"], "") if answer.strip().lower().startswith("yes") else (None, NOT_ON_IT)
 
 
-def his_yes(quote, about, ws=None, names=(), real_only=False):
+def his_yes(quote, about, ws=None, names=(), real_only=False, reading=None):
     """F104: his say-so, everywhere his quote stands in for his yes: (where, ""), or (None, why not in plain words). `about` is what it's taken as his yes
     to, in a line; `names` what that goes by (its label, its feature name). They must be his words; then a clear yes passes and a clear no is refused by
     the program (yes_reading), any newer line of his included, and only the rest goes to one small look, the way of mistakes.second_look. There a no,
     garbage or a failed look refuses, and the floor of three words stays. HQ_SAYSO_FAKE stands in for Claude in the flows (yes, no, or anything else for
     a look that failed); a test never asks the real model, and a test copy with no lines of his, that his_quote lets through, needs no look unless
-    a flow gives a stand-in."""
+    a flow gives a stand-in. F167: `reading(line, turn)`, a gate's own reading ("yes", "no" or "" when it can't tell), goes before yes_reading."""
     fake = os.environ.get("HQ_SAYSO_FAKE") if hqpaths.under_test() else None
     hit = None
     if hqpaths.under_test() and not os.environ.get("HQ_PROOF_ON"):
@@ -946,11 +950,12 @@ def his_yes(quote, about, ws=None, names=(), real_only=False):
         hits = his_said(parts, ws, real_only) if parts else []
         if not hits:
             return None, NOT_HIS
-        clear = next((h for h in reversed(hits) if yes_reading(h["line"], h["turn"], names) == "yes"), None)
+        read = lambda h: (reading(h["line"], h["turn"]) if reading else "") or yes_reading(h["line"], h["turn"], names)
+        clear = next((h for h in reversed(hits) if read(h) == "yes"), None)
         if clear:
             return clear["where"], ""
         hit, where = hits[-1], hits[-1]["where"]  # the newest place he said it
-        if yes_reading(hit["line"], hit["turn"], names) == "no":
+        if read(hit) == "no":
             return None, NOT_A_YES
         if sum(len(p.split()) for p in parts) < HIS_QUOTE_WORDS:
             return None, f"a quote under {HIS_QUOTE_WORDS} words only counts right after an agent line that names this"

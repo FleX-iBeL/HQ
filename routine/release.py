@@ -317,6 +317,8 @@ def wanted_refuses(want: str | None, old: str) -> str | None:
         return f"{want} isn't a version like 1.0.0"
     if tuple(int(x) for x in parts.groups()) <= tuple((int(x) for x in re.findall(r"\d+", old)[:3])):
         return f"{want} isn't newer than {old}"
+    if not git("rev-parse", "-q", "--verify", f"refs/tags/v{want}").returncode:
+        return f"the tag v{want} is already here"  # F167: said before anything else, the changelog's Coming next included
     return None
 
 
@@ -375,16 +377,50 @@ def plan_not_yet(said: str | None, what: str) -> str | None:
     return None
 
 
+# F167: his plain order to release ("Release 1.0.2 now, with everything on dev, past the QA gate.", "Yes, release 1.0.2 now") is his yes, read
+# by the program, so one small look's mood can't turn it down: a sentence that starts with release (after a yes word at the most) and names the
+# version. Past the QA check only: past a red night it takes his words naming the night, as before. A question or a hold in a sentence about the
+# release is a no, read by the program too; anything it can't tell goes on to the reading of his yes and the look, as before.
+_VERSION = re.compile(r"(?<![\w.])v?\d+\.\d+(?:\.\d+)?(?![\w.])")
+_RELEASE = re.compile(r"(?<![\w'])release(?![\w'])")
+_NIGHT_NAMED = re.compile(r"(?<![\w'])(?:past the (?:red )?night|red night)(?![\w'])")
+QA_NAMES = ("without qa", "skip qa", "skipping qa", "past qa", "past the qa gate", "past the qa check", "without the qa check",
+            "without the qa gate", "without a qa check", "skip the qa check", "with everything on dev")
+NIGHT_NAMES = ("past the night", "red night")
+
+
+def order_reading(line: str, turn: str, what: str) -> str:
+    """F167: "yes" for his plain order to release, "no" for a question or a hold about it, "" when it isn't plain (see above)."""
+    import sprint as S
+    low = " ".join(str(line).lower().replace("\u2019", "'").split())
+    if S.planned_release(low):
+        return ""  # F166: a planned release is read there, and counts once its moment has come
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", low) if x]
+    rel = [x for x in sents if _RELEASE.search(x) and _VERSION.search(x)]
+    if not rel:
+        return ""
+    if S._TAKEN_BACK.search(low) or any("?" in x or S._HOLD_WORD.search(x) for x in rel):
+        return "no"
+    order = re.compile(rf"^(?:(?:{S._YES_FIRM}|please)[,!]?\s+)*release\s+(?:of\s+)?v?\d")
+    if not any(order.match(x) for x in rel) or any(S._NOT_SURE.search(x) or S._HOLD_WORD.search(x) for x in sents):
+        return ""
+    if "night" in what and not _NIGHT_NAMED.search(low):
+        return "yes" if S.yes_reading(line, turn, NIGHT_NAMES) == "yes" else "no"  # the plain order is his yes past the QA check only
+    return "yes"
+
+
 def say_so(said: str | None, what: str) -> bool:
     """F101: going past a gate takes his own words, found in his lines and kept; a flag alone is nothing."""
     import sprint as S
-    names = ("without qa", "skip qa", "skipping qa", "past qa") if "QA" in what else ("past the night", "red night")
+    names = QA_NAMES if "QA" in what else NIGHT_NAMES
     no = plan_not_yet(said, what)
     if no:
         print(f"No release: {what} needs his say-so, and his planned words are no say-so yet: {no}.")
         return False
-    where, no = S.his_yes(said, f"releasing HQ to everyone: {what}", names=names)
+    where, no = S.his_yes(said, f"releasing HQ to everyone: {what}", names=names, reading=lambda line, turn: order_reading(line, turn, what))
     if not where:
+        if "night" in what and no == S.NOT_A_YES:
+            no += " (his plain order to release is his yes past the QA check only; past the night takes his words naming it, past the night or red night)"
         print(f"No release: {what} needs --said with his own words, as they stand in a call, a text or a quick note, saying yes to it: {no}.")
         return False
     S.keep_say_so([f"release: {what}"], " ".join((said or "").split()), where)
