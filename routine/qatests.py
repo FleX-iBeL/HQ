@@ -307,8 +307,20 @@ def run_on(d: str, hqdir: str) -> tuple[dict, str]:
         env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1", "HQ_WALL": wall,
                     "PYTHONPATH": os.pathsep.join(x for x in (os.path.join(wall, "py"), env.get("PYTHONPATH", "")) if x)})
         py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
+        # H339 (job 9333): her test is written to sit in HQ/qa-tests/LABEL of the workspace, and may read the planning next to it
+        # (its __file__'s parents[2]/roadmap.md). Sealed it sits in .status/qa-sealed/LABEL/SEAL, where that read finds nothing and the
+        # test stops before its first line. So the sealed files run from their own place in the throwaway copy, byte for byte.
+        run_d = d
+        if os.path.isdir(os.path.join(box, "workspace", "HQ")):
+            up = os.path.dirname(os.path.realpath(d))
+            name = os.path.basename(up) if os.path.dirname(up) == os.path.realpath(seal_root()) else os.path.basename(os.path.realpath(d))
+            run_d = os.path.join(box, "workspace", "HQ", "qa-tests", name or "test")
+            os.makedirs(run_d, exist_ok=True)
+            for f in ("test.py", "tests.json"):
+                if os.path.exists(os.path.join(d, f)):
+                    shutil.copyfile(os.path.join(d, f), os.path.join(run_d, f))
         try:
-            r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(d, "test.py"), hqdir], cwd=hqdir, env=env, text=True,
+            r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(run_d, "test.py"), hqdir], cwd=hqdir, env=env, text=True,
                                capture_output=True, timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
             out = (r.stdout + r.stderr)
         except subprocess.TimeoutExpired:
