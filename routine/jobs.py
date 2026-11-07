@@ -1466,9 +1466,21 @@ def main(argv):
             # F100: the job ran past its box. Not done: parked for a call, what it wrote stays, a resume carries on.
             j = find(jobs, int(args[0]))
             why = one_line(" ".join(args[1:])).replace("·", "-") or "it ran past its box"
+            was = j["state"]
             j["state"] = f"boxed: {why}"
             write(text, jobs, on)
             print(show(j))
+            try:  # H339: the run that ended at its box is a found-broken row of its own on the night's road, at its real times
+                import trail
+                m = re.match(r"(?:running|stop asked)(?: since)? (\d\d):(\d\d)", was)
+                start = None
+                if m:
+                    t0 = time.localtime()
+                    start = time.mktime((t0.tm_year, t0.tm_mon, t0.tm_mday, int(m[1]), int(m[2]), 0, 0, 0, -1))
+                    start = start - 86400 if start > time.time() else start
+                trail.step((j.get("item") or {}).get("id"), "job", job=j["n"], state="boxed", start=round(start) if start else None)
+            except Exception:
+                pass
             try:
                 import carryon
                 import usagecost

@@ -6,7 +6,7 @@
 // The night of a day runs from its noon to the next day's noon, so her 21:45 check-in and the team's stop in the morning fall in it.
 // H307 (folded in): the same timeline on the status page any time, from the jobs and the planning.
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
@@ -77,6 +77,58 @@ export function jobRows(jobs, now = Date.now()) {
   return out;
 }
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const FACT_MIN = 5;  // a fact's bar (a verdict, a release, a round): from its own time, a few minutes wide
+const fact = (name, kind, at) => ({ name: `${name} at ${hm(at)}`, kind, start: at, end: at + FACT_MIN * 6e4 });
+const jobName = (j) => String(j?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+const plainWhy = (s) => String(s ?? '').replace(/\b[Jj]ob \d+/g, 'a job').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+async function trailLines() {
+  try {
+    return (await readFile(join(dirname(ROADMAP), 'trail.jsonl'), 'utf8')).split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((x) => x && typeof x.at === 'number');
+  } catch { return []; }
+}
+
+/** Every other fact HQ records, each a row of its own at its real time (done example 1): each check's verdict (QA failed or
+ * passed, from the item's row and from the record), each refusal and incident, each review round, the release, and a run that
+ * ended at its box (found broken from its start to that end, so the run that's then done is the green row after it). */
+export async function factRows(parsed, now = Date.now()) {
+  const out = [], seen = new Set();
+  for (const ph of parsed?.phases ?? []) for (const st of ph.steps ?? []) {
+    const label = /^([A-Z]+\d+)\b/.exec(st.name ?? '')?.[1];
+    if (!label) continue;
+    for (const d of st.details ?? []) {
+      for (const m of String(d.text ?? '').matchAll(/QA (failed|passed) \(job (\d+), (\d{1,2}) ([A-Z][a-z]+) (\d{4}) (\d\d):(\d\d)\)/g)) {
+        const mo = MONTHS.indexOf(m[4]);
+        if (mo < 0 || seen.has(m[2])) continue;
+        seen.add(m[2]);
+        const at = new Date(Number(m[5]), mo, Number(m[3]), Number(m[6]), Number(m[7])).getTime();
+        out.push(fact(`${label} QA ${m[1]}`, m[1] === 'failed' ? 'broken' : 'done', at));
+      }
+    }
+  }
+  const lines = await trailLines();
+  const labels = new Map(lines.filter((x) => x.label).map((x) => [x.id, x.label]));
+  const jobs = new Map((parsed?.queue?.jobs ?? []).map((j) => [Number(j.n), j]));
+  for (const x of lines) {
+    const at = Math.round(x.at * 1000), label = labels.get(x.id) ?? '';
+    if (at > now) continue;
+    if (x.step === 'qa' && ['failed', 'passed'].includes(x.state) && !seen.has(String(x.job))) {
+      seen.add(String(x.job));
+      out.push(fact(`${label || 'An item'} QA ${x.state}`, x.state === 'failed' ? 'broken' : 'done', at));
+    } else if (x.step === 'release') out.push(fact(`Release ${x.version ?? ''} out`.replace(/\s+/g, ' '), 'done', at));
+    else if (x.step === 'round') out.push(fact(`${label || 'An item'} review round ${x.n ?? ''}`.trim(), 'done', at));
+    else if (x.step === 'incident' || x.step === 'refused') out.push(fact(`Went wrong: ${plainWhy(x.why) || 'an incident'}`, 'broken', at));
+    else if (x.step === 'job' && x.state === 'boxed' && jobs.has(Number(x.job))) {
+      const j = jobs.get(Number(x.job)), [ad, t] = String(j.agreed ?? '').split(' ');
+      const start = x.start ? Math.round(x.start * 1000) : local(ad, t);
+      out.push({ name: jobName(j), kind: 'broken', start: start != null && start < at ? start : at - JOB_MIN * 6e4, end: at, boxed: true });
+    }
+  }
+  return out;
+}
+
 const overlaps = (r, [s, e]) => r.end >= s && r.start <= e;
 const fromFile = (r) => ({ name: String(r.name ?? ''), kind: KINDS.includes(r.kind) ? r.kind : 'done', start: ms(r.start), end: ms(r.end) });
 const toFile = (r) => ({ name: r.name, kind: r.kind, start: new Date(r.start).toISOString(), end: new Date(r.end).toISOString() });
@@ -84,6 +136,15 @@ const toFile = (r) => ({ name: r.name, kind: r.kind, start: new Date(r.start).to
 /** Takes one fresh row from HQ's records into a night's rows. What went wrong and then right keeps both: the found-broken row
  * stays with its real time and a new row follows it, never one row overwritten to green. Running and expected rows move on. */
 export function takeRow(rows, r) {
+  if (r.boxed) {
+    if (rows.some((y) => y.name === r.name && y.kind === 'broken' && y.end === r.end)) return false;
+    const { boxed, ...b } = r;
+    const after = rows.findIndex((y) => y.name === r.name && y.kind !== 'broken' && y.end > b.end);
+    if (after < 0) { rows.push(b); return true; }
+    rows.splice(after, 0, b);
+    rows[after + 1] = { ...rows[after + 1], start: Math.max(rows[after + 1].start, b.end) };
+    return true;
+  }
   let last = -1;
   rows.forEach((x, i) => { if (x.name === r.name) last = i; });
   if (last < 0) { rows.push(r); return true; }
@@ -134,8 +195,11 @@ async function closeKept(key, kept, n, records) {
 async function theNight(key, parsed, now) {
   const kept = await readNight(key);
   const n = readKept(kept);
-  const records = jobRows(parsed?.queue?.jobs, now);
-  if (key !== nightOf(now)) return closeKept(key, kept, n, records);
+  const facts = await factRows(parsed, now);
+  const boxedNames = new Set(facts.filter((r) => r.boxed).map((r) => r.name));
+  // a run ended at its box is its own found-broken row (the record's real end), so the job's own boxed state adds none
+  const records = [...facts, ...jobRows(parsed?.queue?.jobs, now).filter((r) => !(r.kind === 'broken' && boxedNames.has(r.name)))];
+  if (key !== nightOf(now)) return closeKept(key, kept, n, records.filter((r) => !r.boxed));
   // a job a kept night already holds stays on the night it started
   const older = new Set();
   for (const k of (await nights()).filter((d) => d < key)) for (const r of (await readNight(k))?.rows ?? []) older.add(r.name);
