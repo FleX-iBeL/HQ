@@ -20,6 +20,11 @@ A record says what was run and how it came out: {"n", "label", "head", "commits"
 flows (same arguments, same output); HQ_PROOF_ROOT a test's own HQ repository; HQ_PROOF_DIR its own records folder. While a
 test runs (HQ_UNDER_TEST) the gate is off unless HQ_PROOF_ON says it's the gate being tested.
 
+F165 (7 November 2026): HQ_PROOF_EXCUSED, flow numbers with commas, set only by the line (routine/line.py) when it runs a parked
+build's record step again, names flows already on the planning as their own items, checks unrelated to the build's row: such a
+flow's failure, when the row doesn't name it, doesn't hold the record ("excused" in the record, next to "failed"). His row: "a
+real-model check that fails for a reason outside the item doesn't hold that item's build but becomes its own item."
+
 F121 (3 November 2026): items built and checked in a supervised chat, not as jobs, have no record. `run-rows` runs the quick set
 once on the commit HQ is on, then each row's own named flows (one group per row), and writes `rows-<run id>-<ROW>.json` for every
 row with commits in that commit (`commits_of`, or listed in qa.COMMITS_FOR); a row without any gets no record and is named. Each
@@ -334,6 +339,12 @@ def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
     return p.returncode, out
 
 
+def _excused(failed: list[str], named) -> list[str]:
+    """F165: the failing flow lines ("605: FAILED - ...") of flows HQ_PROOF_EXCUSED names and the row doesn't."""
+    ok = {x.strip() for x in (os.environ.get("HQ_PROOF_EXCUSED") or "").split(",") if x.strip()} - {str(x) for x in named}
+    return [f for f in failed if (m := re.match(r"\s*(\d+): FAILED - ", f)) and m.group(1) in ok]
+
+
 def _not_tried() -> list[str]:
     """H313: the happy flows not run for real here, each one holding the record. A test's stand-in for the flows (HQ_PROOF_RUNNER) tests
     the proof's own workings, not the app, so it has none."""
@@ -414,7 +425,12 @@ def _run(n: int) -> int:
                 rec["ran"] += r_
                 rec["passed"] += p
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"])
-        rec["green"] = (not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0 and rec["passed"] == rec["ran"]
+        excused = _excused(rec["failed"], named)
+        if excused:  # F165: a check already split off as its own item doesn't hold this build
+            rec["excused"] = excused
+            rec["failed"] = [f for f in rec["failed"] if f not in excused]
+        rec["green"] = (not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0
+                        and rec["passed"] + len(rec.get("excused") or []) == rec["ran"]
                         and ("qa_tests" not in rec or bool(rec["qa_tests"].get("green"))))
     finally:
         wall.proof_end(n)

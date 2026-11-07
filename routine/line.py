@@ -17,7 +17,9 @@ the record, never anyone's word, and does the next step:
     2026): the line reads its failing lines. A real failure (her tests, a flow the row names) goes back to the team by itself as a resume
     of its own job, the failing lines in a note it reads first (at night; by day only on his switch), up to its two resumes (past them:
     one text to him, and the line leaves it). A check unrelated to the item becomes its own row, both switches on as the night's own,
-    like the night run's failures, never resumed for. Nothing to read: its proof runs once more (red twice: one text, the line leaves it).
+    like the night run's failures, never resumed for; once each is on the planning, the build's record step runs again by itself, those
+    checks excused (F165, 7 November 2026: before, such a build stayed held until someone looked; tonight F155, job 623 and H338), so a
+    build whose own tests pass closes. Nothing to read: its proof runs once more (red twice: one text, the line leaves it).
   - Ready: with build on, the program sends it to the team itself (by day only on his own switch, at night also on hers). Build off:
     nothing more; prepared.
   - Only the Ready mark is missing: the program sets it.
@@ -200,6 +202,20 @@ def _split(label, j, other, st):
     return out
 
 
+def _record_again(j, excused=()):
+    """F155: the job's record step once more in the background (its tests on a copy, the done mark, else parked with why), on the
+    lock the full runs take turns on. F165: EXCUSED, flows already on the planning as their own items, don't hold its record."""
+    lock = os.path.expanduser("~/hq-fullrun.lock")
+    cmd = f'python3 routine/runjob.py {j["n"]}'
+    if shutil.which("flock"):
+        cmd = f'flock {lock} sh -c "{cmd}"'
+    env = {**os.environ, "HQ_ROLE_HERE": "1"}
+    if excused:
+        env["HQ_PROOF_EXCUSED"] = ",".join(excused)
+    subprocess.Popen(["sh", "-c", cmd], cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     stdin=subprocess.DEVNULL, start_new_session=True, env=env)
+
+
 WAITS_ON_HIM = re.compile(r"waits? on his (?:answer|decision|yes)|it's his decision now|on her sit-down list", re.I)
 
 
@@ -248,7 +264,17 @@ def act(label, what, detail, row, st, jobs):
         said = _split(label, j, other, st)
         run = st.setdefault("_reruns", {}).setdefault(str(j["n"]), {})
         if what == "split":
-            return f"{label}: job {j['n']} red only on checks unrelated to it, each its own item ({'; '.join(said)})" if said else None
+            # F165: once each unrelated check is on the planning as its own item, the build's record step runs again by itself,
+            # those checks excused, so a build whose own tests pass closes (before, it stayed held until someone looked)
+            written = set(run.get("split") or []) | {s.split(" is ", 1)[0] for s in said if " is " in s and "not written" not in s}
+            checks = [c for c, _ in other]
+            again = None
+            if checks and all(c in written for c in checks) and not set(checks) <= set(run.get("excused") or []):
+                run["excused"] = sorted(set(run.get("excused") or []) | set(checks))
+                _record_again(j, [c.split(" ", 1)[1] for c in run["excused"] if c.startswith("flow ")])
+                again = f"its record step runs again with {', '.join(run['excused'])} excused"
+            out = "; ".join(said + ([again] if again else []))
+            return f"{label}: job {j['n']} red only on checks unrelated to it, each its own item ({out})" if out else None
         import wall
         no = None if wall.off() else wall.no_resume(j["n"])
         if no:  # past its two resumes: one text to him, and the line leaves it
@@ -288,12 +314,7 @@ def act(label, what, detail, row, st, jobs):
                       f"The line leaves it until a fix goes in.")
             return None
         runs[str(j["n"])] = {"at": time.strftime("%Y-%m-%d %H:%M")}
-        lock = os.path.expanduser("~/hq-fullrun.lock")
-        cmd = f'python3 routine/runjob.py {j["n"]}'  # F155: the record step: its tests, the done mark, else parked with why
-        if shutil.which("flock"):
-            cmd = f'flock {lock} sh -c "{cmd}"'
-        subprocess.Popen(["sh", "-c", cmd], cwd=os.path.dirname(HERE), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         stdin=subprocess.DEVNULL, start_new_session=True, env={**os.environ, "HQ_ROLE_HERE": "1"})
+        _record_again(j)
         return f"{label}: job {j['n']}'s check run once more by the line"
     if what == "prep":
         fp = _fp(detail)
