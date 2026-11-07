@@ -53,7 +53,7 @@ import jobs as q  # noqa: E402
 import sprint as S  # noqa: E402
 
 ROUNDS = 20  # F151: 20 at most, counted per version: each QA failure starts them again, as for a new item
-RUN_TIMEOUT = 300  # seconds for one run of her tests
+RUN_TIMEOUT = 1200  # seconds for one run of her tests; F175: room for F165's ten real runs of flow 605 (about 460 s), a hanging test still stopped
 REVIEW_TIMEOUT = 240
 BUDGET = 0.25
 MODEL = os.environ.get("HQ_QA_REVIEW_MODEL") or os.environ.get("HQ_REVIEW_MODEL") or "sonnet"
