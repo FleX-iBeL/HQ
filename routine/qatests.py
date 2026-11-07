@@ -291,22 +291,87 @@ def named_tests(t: dict) -> list[str]:
 # ---------- running them ----------
 
 def run_on(d: str, hqdir: str) -> tuple[dict, str]:
-    """Her test.py in folder d on the code at hqdir: ({name: passed}, its output)."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
-    env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1"})
-    py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
+    """Her test.py in folder d on the code at hqdir: ({name: passed}, its output). F9176: only ever on a throwaway copy of the
+    workspace (the planning with its jobs, the sprint file), never his live one: hqdir/workspace points to the copy while her test
+    runs, and every Python it starts carries the test wall's hook, which refuses a write to the live files by their own path."""
+    box, why = _qa_box(hqdir)
+    if not box:
+        return {}, f"Refused: her tests didn't run: {why}. They only ever run on a throwaway copy, never on the live files."
+    link, wall = os.path.join(hqdir, "workspace"), os.path.join(box, "wall")
+    was = os.readlink(link)
+    _relink(link, os.path.join(box, "workspace"))
     try:
-        r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(d, "test.py"), hqdir], cwd=hqdir, env=env, text=True, capture_output=True,
-                           timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
-        out = (r.stdout + r.stderr)
-    except subprocess.TimeoutExpired:
-        return {}, f"her tests didn't finish in {RUN_TIMEOUT} s"
-    got = {}
-    for ln in out.splitlines():
-        m = _LINE.match(ln)
-        if m:
-            got[m.group(2)] = got.get(m.group(2), True) and m.group(1) == "PASS"
-    return got, out[-3000:]
+        env = {k: v for k, v in os.environ.items() if not k.startswith("HQ_")}
+        env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1", "HQ_WALL": wall,
+                    "PYTHONPATH": os.pathsep.join(x for x in (os.path.join(wall, "py"), env.get("PYTHONPATH", "")) if x)})
+        py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
+        try:
+            r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(d, "test.py"), hqdir], cwd=hqdir, env=env, text=True,
+                               capture_output=True, timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
+            out = (r.stdout + r.stderr)
+        except subprocess.TimeoutExpired:
+            return {}, f"her tests didn't finish in {RUN_TIMEOUT} s"
+        got = {}
+        for ln in out.splitlines():
+            m = _LINE.match(ln)
+            if m:
+                got[m.group(2)] = got.get(m.group(2), True) and m.group(1) == "PASS"
+        try:
+            refused = [json.loads(x).get("path", "") for x in open(os.path.join(wall, "refused.jsonl"), encoding="utf8") if x.strip()]
+        except (OSError, ValueError):
+            refused = []
+        if refused:  # a test that reached for the live files doesn't pass, whatever it printed
+            got = {n: False for n in got}
+            out += "\nRefused: her test tried to write the live files: " + ", ".join(sorted(set(refused)))[:400] + "\n"
+        return got, out[-3000:]
+    finally:
+        _relink(link, was)
+        shutil.rmtree(box, ignore_errors=True)
+
+
+def _relink(link: str, to: str) -> None:
+    """The link pointed somewhere else in one step: never a moment with no workspace, never a write through it."""
+    tmp = f"{link}.qa-{os.getpid()}"
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    os.symlink(to, tmp)
+    os.replace(tmp, link)
+
+
+def _qa_box(hqdir: str) -> tuple[str | None, str]:
+    """F9176: a throwaway folder (in the temp folder) with a copy of hqdir's workspace and the wall's hook: (its path, ""), or
+    (None, why). No copy means no run, never a fall back to the live files."""
+    import tempfile
+    import testwall
+    link = os.path.join(hqdir, "workspace")
+    if not os.path.islink(link):
+        return None, "the code given holds the live workspace itself, not a copy's link to it"
+    live = os.path.realpath(link)
+    try:
+        box = tempfile.mkdtemp(prefix="hq-qa-")
+    except OSError as ex:
+        return None, f"no throwaway copy could be made ({ex.strerror or ex})"
+    try:
+        testwall._copy_workspace(live, os.path.join(box, "workspace"))
+        paths = {live} | {os.path.realpath(p) for _, _, p in testwall.real_places(os.path.dirname(live), live)}
+        try:  # a run already behind a wall keeps that wall's real places too
+            paths |= set(json.load(open(os.path.join(os.environ["HQ_WALL"], "real.json"), encoding="utf8"))["paths"])
+        except (KeyError, OSError, ValueError):
+            pass
+        py = os.path.join(box, "wall", "py")
+        os.makedirs(py)
+        with open(os.path.join(py, "hqwallhook.py"), "w", encoding="utf8") as f:
+            f.write(testwall.HOOK)
+        with open(os.path.join(py, "sitecustomize.py"), "w", encoding="utf8") as f:
+            f.write(testwall.SITECUSTOMIZE)
+        with open(os.path.join(box, "wall", "real.json"), "w", encoding="utf8") as f:
+            json.dump({"paths": sorted(paths), "claudes": []}, f)
+        return box, ""
+    except Exception as ex:
+        shutil.rmtree(box, ignore_errors=True)
+        return None, f"no throwaway copy could be made ({ex})"[:300]
 
 
 def _head() -> str:
