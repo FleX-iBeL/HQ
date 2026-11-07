@@ -14876,7 +14876,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                 s = b.go(code)
                 need(s["note"] and s["note"]["boxed"] == "turns", f"not boxed: {s['note']}")
             need(b.texts() == before, f"a text from a round's own noise: {b.texts()[len(before):][-400:]}")
-            new = lambda: b.ledger()[len(led):] if b.ledger().startswith(led) else b.ledger()  # noqa: E731  (F161: the ledger's own header names the word)
+            new = lambda: (b.ledger()[len(led):] if b.ledger().startswith(led) else b.ledger()) if led else re.sub(r"\A.*?(?=^## \d{4}-|\Z)", "", b.ledger(), count=1, flags=re.S | re.M)  # noqa: E731  (F161: the ledger's own header names the word; F167: also when the rounds made the ledger, its header is no round's)
             need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise: {new()[-600:]}")
             b.minute()
             need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise, the minute after the cap: {new()[-600:]}")
