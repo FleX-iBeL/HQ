@@ -5,8 +5,8 @@
 // Writes .status/usage.json (not in version history). The stop line is the
 // "**Usage limit: N%**" in the roadmap and its three lines (5-hour, weekly, Fable), each moving every minute or fixed (H91; stopLine in usage.mjs).
 // Ends with code 0 when work may go on, 2 when it has to stop.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoadmap } from './parse.mjs';
 import { ROADMAP } from './paths.mjs';
@@ -35,7 +35,16 @@ const by = flag >= 0 ? (process.argv[flag + 1] ?? '') : 'HQ session';
 // HQ_USAGE reads a test's own reading. A headless job (HQ_HEADLESS, runjob.py) never reads the status line: the runner saves
 // the stream's limits as they arrive, and a read here would write an empty reading over them.
 const noWall = process.env.HQ_UNDER_TEST && process.env.HQ_NO_WALL;
-const USAGE_FILE = process.env.HQ_USAGE || join(root, '.status/usage.json');
+// F198: a test writes usage only into its own copy, never HQ's real file. A reading whose by names a test (like "F-something test")
+// without HQ_USAGE goes to its own workspace's .status/usage.json when the test runs on a workspace of its own
+// (HQ_WORKSPACE elsewhere than HQ's); otherwise it's refused before anything is written (exit 3), and the refusal is logged in HQ's
+// .status/usage-refused.json: the newest refusal (its time, the refused reading's by, why), rewritten at each one.
+const REAL_USAGE = join(root, '.status/usage.json');
+const byNamesTest = (b) => /\btests?\b/i.test(b ?? '');
+const realPath = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+const ownWorkspace = process.env.HQ_WORKSPACE && realPath(process.env.HQ_WORKSPACE) !== realPath(join(root, 'workspace'))
+  ? process.env.HQ_WORKSPACE : null;
+const USAGE_FILE = process.env.HQ_USAGE || (byNamesTest(by) && ownWorkspace ? join(ownWorkspace, '.status/usage.json') : REAL_USAGE);
 const weeklyOnly = process.argv.includes('--weekly-only');
 const LIVE = join(root, 'scratch/routine/usage-live.json');
 const FRESH_MS = 10 * 60 * 1000;
@@ -145,7 +154,13 @@ if (process.argv.includes('--statusline') || !reading.readable) {
     reading.limits.push({ ...l, kept: true, keptAt: l.keptAt ?? prev.checkedAt, keptBy: l.keptBy ?? prev.by });
   }
 }
-mkdirSync(join(root, '.status'), { recursive: true });
+if (byNamesTest(reading.by) && realPath(USAGE_FILE) === realPath(REAL_USAGE)) {
+  const refused = { at: new Date().toISOString(), by: reading.by, why: "a test's reading never goes into HQ's real usage file (F198); HQ_USAGE points a test at its own copy" };
+  try { mkdirSync(join(root, '.status'), { recursive: true }); writeFileSync(join(root, '.status/usage-refused.json'), `${JSON.stringify(refused, null, 1)}\n`); } catch {}
+  console.log(`Refused: a reading by "${reading.by}" names a test, and a test's reading goes only into its own copy (HQ_USAGE), never HQ's real usage file. Logged in .status/usage-refused.json.`);
+  process.exit(3);
+}
+mkdirSync(dirname(USAGE_FILE), { recursive: true });
 writeFileSync(USAGE_FILE, `${JSON.stringify(reading, null, 2)}\n`);
 // H339 part 4b: each weekly reading goes into the night that runs as it comes in, so the night's road draws the week from HQ's own readings.
 {
