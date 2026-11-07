@@ -874,7 +874,7 @@ RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the 
              ("- The to-do list (H200)", "- Feedback for HQ")),
     "reminders": ("before a reminder, a nudge, a text he asks for later, or a call back", ("- Texts from",)),
     "mail": ("before tidying his mail or changing how often it's checked", ("- Mail more often", "- Tidying his mail")),
-    "calendar": ("before notes on appointments, or looking back at the ticks and X's", ("- Ticks and X", "- Notes on appointments")),
+    "calendar": ("before notes on appointments, or looking back at the ticks and X's (adding, moving or deleting an event needs no look)", ("- Ticks and X", "- Notes on appointments")),
     "game": ("before the six-week game", ("- The six-week game",)),
     "travel": ("before travel advice, trips on appointments or driving", ("- Public transport door to door", "- Public transport in the Netherlands", "- Travel on appointments", "- Driving to appointments")),
     "notes": ("before his quick notes", ("- His quick notes",)),

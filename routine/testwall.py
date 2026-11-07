@@ -253,6 +253,18 @@ def _git(*a, cwd=None) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
 
 
+def _fillers_of(real_hq: str) -> str:
+    """The recorded filler lines for a run on REAL_HQ. A proof's throwaway worktree has none of its own (F172: there every
+    run re-recorded them all during flow 5's call, about 3 times the CPU, and five real runs no longer fit her test's
+    time), so it takes those of the HQ it was made from."""
+    here = os.path.join(real_hq, "scratch", "fillers")
+    if os.path.isdir(here):
+        return here
+    common = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=real_hq).stdout.strip()
+    main = os.path.join(os.path.dirname(common), "scratch", "fillers") if common.endswith(os.sep + ".git") else ""
+    return main if main and os.path.isdir(main) else ""
+
+
 def copy_hq(root: str, real_hq: str, real_ws: str, dest: str) -> None:
     """HQ, its .git, .status and the workspace, with nothing that reaches the outside."""
     os.makedirs(dest)
@@ -272,8 +284,9 @@ def copy_hq(root: str, real_hq: str, real_ws: str, dest: str) -> None:
     os.symlink(".", os.path.join(dest, "HQ"))  # the workspace's ../HQ paths
     _copy_git(root, dest)
     os.makedirs(os.path.join(dest, "scratch"))
-    if os.path.isdir(os.path.join(real_hq, "scratch", "fillers")):  # the recorded filler lines: an empty cache re-records them all during the first call, and the call runs slow
-        _tree(os.path.join(real_hq, "scratch", "fillers"), os.path.join(dest, "scratch", "fillers"))
+    fillers = _fillers_of(real_hq)
+    if fillers:  # the recorded filler lines: an empty cache re-records them all during the first call, and the call runs slow
+        _tree(fillers, os.path.join(dest, "scratch", "fillers"))
     if os.path.isdir(os.path.join(real_hq, ".status")):
         _tree(os.path.join(real_hq, ".status"), os.path.join(dest, ".status"))
     _copy_workspace(real_ws, os.path.join(dest, "workspace"))
