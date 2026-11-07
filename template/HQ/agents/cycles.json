@@ -1,5 +1,5 @@
 {
-  "_about": "The agents run themselves: each agent's own cycle (routine/cycles.py). Numbers only; nothing personal. Changed in Settings or on a call (cycles.py set AGENT KEY VALUE). weekly_share and daily_share are points of the weekly usage limit; hours is when her cycles may run; a box is minutes and turns; looks_a_day is how often a day she looks at her own list inside her hours (morning, midday, evening), turning a new order into its step.",
+  "_about": "The agents run themselves: each agent's own cycle (routine/cycles.py). Numbers only; nothing personal. Changed in Settings or on a call (cycles.py set AGENT KEY VALUE). weekly_share and daily_share are points of the weekly usage limit; hours is when her cycles may run (18:00 to 08:00 runs through the night), on her days (Monday to Friday: nobody works at the weekend); a box is minutes and turns; looks_a_day is how often a day she looks at her own list inside her hours (morning, midday, evening), turning a new order into its step.",
   "agents": {
     "donna": {
       "on": true,
@@ -7,11 +7,11 @@
       "daily_share": 1,
       "hours": [
         "08:00",
-        "22:00"
+        "17:00"
       ],
       "batches": [
         "12:00",
-        "17:00"
+        "16:30"
       ],
       "tripwire_texts": 2,
       "looks_a_day": 3,
@@ -27,25 +27,32 @@
         "turns": 10,
         "most_a_day": 6
       },
-      "looks": []
+      "looks": [],
+      "days": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
+      ]
     },
     "pepper": {
       "on": true,
       "weekly_share": 2,
       "daily_share": 1,
       "hours": [
-        "08:00",
-        "22:00"
+        "17:00",
+        "18:00"
       ],
       "batches": [],
       "tripwire_texts": 2,
       "looks_a_day": 3,
       "session": {
-        "at": "20:00",
+        "at": "17:00",
         "every": "thursday",
         "minutes": 20,
         "turns": 60,
-        "useful_until": "friday 09:30"
+        "useful_until": "friday 17:45"
       },
       "step": {
         "minutes": 5,
@@ -55,7 +62,7 @@
       "looks": [
         {
           "name": "midweek look",
-          "at": "12:30",
+          "at": "17:30",
           "every": "wednesday",
           "minutes": 5,
           "turns": 15,
@@ -63,12 +70,19 @@
         },
         {
           "name": "notes look",
-          "at": "19:30",
+          "at": "17:40",
           "every": "day",
           "minutes": 8,
           "turns": 30,
           "what": "His quick notes (HQ/notes.md, read only; and what your ledger says you already handled): each new note goes where it belongs, in his words. Something to do in his life: the to-do list (python3 app/todo.py add, the right list). An idea or a bug for HQ: the planning (python3 routine/jobs.py write-row \"HIS WORDS\" [--bug]), for Moneypenny to take on. Write in your ledger which notes you handled, so none goes twice. Text your line only when a note needs his word."
         }
+      ],
+      "days": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
       ]
     },
     "moneypenny": {
@@ -77,11 +91,11 @@
       "weekly_share": 5,
       "daily_share": 2,
       "hours": [
-        "08:00",
-        "22:00"
+        "18:00",
+        "08:00"
       ],
       "batches": [
-        "12:00"
+        "18:30"
       ],
       "tripwire_texts": 2,
       "looks_a_day": 3,
@@ -106,6 +120,13 @@
           "turns": 30,
           "what": "Start the team's night. First what the day did: a job paused, held, failed QA, or past its range (jobs.py list, the QA marks); act inside your limits and write it in your ledger. Then tonight's capacity: the room under the stop lines (python3 routine/usageline.py) against the estimates of the open items (sprint.py list), so how many items the team can carry tonight, like counting people on a shift. Then the backlog: bugs first, then by MoSCoW and rank; pick that many, the best first. Switch them on as yourself (sprint.py go LABEL both on --by moneypenny); the line prepares them and gives them to the team tonight. Never send a row yourself. One line in your ledger: the room, how many, which and why. Text your line only when the user is needed."
         }
+      ],
+      "days": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
       ]
     }
   },

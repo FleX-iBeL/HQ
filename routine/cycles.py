@@ -42,7 +42,8 @@ into her ledger. The settings are the workspace's HQ/agents/cycles.json (numbers
 
     python3 routine/cycles.py                         what runs, each agent's share used this week, what's planned
     python3 routine/cycles.py settings                the settings, per agent
-    python3 routine/cycles.py set AGENT KEY VALUE     on|off, fix (F86's loop, on|off), weekly, daily, hours (08:00-22:00), batches (12:00,17:00),
+    python3 routine/cycles.py set AGENT KEY VALUE     on|off, fix (F86's loop, on|off), weekly, daily, hours (08:00-17:00, or 18:00-08:00 through the night),
+                                                      days (monday-friday), batches (12:00,16:30),
                                                       texts (tripwire texts a day), session_at, session_every,
                                                       session_minutes, session_turns, step_minutes, step_turns, steps_a_day, looks_a_day
     python3 routine/cycles.py order AGENT start|stop|standing "HIS WORDS" [--now]   an order from a call or a text
@@ -123,7 +124,7 @@ def on(base: Path | None = None) -> bool:
         return False
 
 
-DEFAULT_AGENT = {"on": True, "fix": False, "weekly_share": 2, "daily_share": 1, "hours": ["08:00", "22:00"], "batches": [], "tripwire_texts": 2,
+DEFAULT_AGENT = {"on": True, "fix": False, "weekly_share": 2, "daily_share": 1, "hours": ["08:00", "22:00"], "days": list(DAYS), "batches": [], "tripwire_texts": 2,
                  "session": {"at": "09:00", "every": "day", "minutes": 10, "turns": 30, "useful_until": "12:00"},
                  "step": {"minutes": 3, "turns": 10, "most_a_day": 3}, "looks": [], "looks_a_day": 3}
 
@@ -166,7 +167,7 @@ def _save_settings(d: dict, base: Path | None = None) -> None:
     os.replace(tmp, p)
 
 
-SET_KEYS = ("on", "fix", "weekly", "daily", "hours", "batches", "texts", "session_at", "session_every", "session_minutes",
+SET_KEYS = ("on", "fix", "weekly", "daily", "hours", "days", "batches", "texts", "session_at", "session_every", "session_minutes",
             "session_turns", "session_until", "step_minutes", "step_turns", "steps_a_day", "looks_a_day", "own_calendars")
 
 
@@ -210,11 +211,19 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
         if not m:
             return "hours are from-to, like 08:00-22:00."
         lo, hi = m.group(1), m.group(2)
-        if not (_is_time(lo) and _is_time(hi)) or _hhmm(lo) >= _hhmm(hi):
-            return "hours are from-to inside one day, like 08:00-22:00."
-        if not _hhmm(lo) <= a["session"]["at"] < _hhmm(hi):
+        if not (_is_time(lo) and _is_time(hi)) or _hhmm(lo) == _hhmm(hi):
+            return "hours are from-to, like 08:00-22:00 (or 18:00-08:00, through the night)."
+        if not _at_hour({"hours": [_hhmm(lo), _hhmm(hi)]}, a["session"]["at"]):
             return f"her session is at {a['session']['at']}, outside {_hhmm(lo)} to {_hhmm(hi)}: it would never run. Move it first."
         a["hours"] = [_hhmm(lo), _hhmm(hi)]
+    elif key == "days":  # H340: her working days, like monday-friday or monday,wednesday
+        w = [x.strip().lower() for x in re.split(r"[,; ]+", v) if x.strip()]
+        if len(w) == 1 and re.fullmatch(r"\w+-\w+", w[0]) and all(x in DAYS for x in w[0].split("-")):
+            f_, t_ = (DAYS.index(x) for x in w[0].split("-"))
+            w = DAYS[f_:t_ + 1] if f_ <= t_ else DAYS[f_:] + DAYS[:t_ + 1]
+        if not w or not all(x in DAYS for x in w):
+            return "days are weekdays, like monday-friday or monday,wednesday,friday."
+        a["days"] = [x for x in DAYS if x in w]
     elif key == "batches":
         ts = [x.strip() for x in re.split(r"[,; ]+", v) if x.strip() and x.strip().lower() != "none"]
         if not all(_is_time(x) for x in ts):
@@ -224,7 +233,7 @@ def set_setting(aid: str, key: str, value: str, base: Path | None = None) -> str
         if not _is_time(v):
             return "session_at is a time, like 08:30."
         lo, hi = a.get("hours") or ["08:00", "22:00"]
-        if not lo <= _hhmm(v) < hi:
+        if not _at_hour(a, _hhmm(v)):
             return f"session_at {_hhmm(v)} is outside her hours, {lo} to {hi}: it would never run. Change her hours first."
         a["session"]["at"] = _hhmm(v)
     elif key == "session_every":
@@ -503,9 +512,56 @@ def _t(hhmm: str) -> dt.time:
     return dt.time(int(h), int(m))
 
 
-def in_hours(a: dict, now: dt.datetime) -> bool:
+def _hours(a: dict) -> tuple[dt.time, dt.time]:
     lo, hi = a.get("hours") or ["08:00", "22:00"]
-    return _t(lo) <= now.time() < _t(hi)
+    return _t(lo), _t(hi)
+
+
+def _wraps(a: dict) -> bool:
+    """H340: hours past midnight, like Moneypenny's 18:00 to 08:00: the night after a day is that day's."""
+    lo, hi = _hours(a)
+    return hi <= lo
+
+
+def _at_hour(a: dict, hhmm: str) -> bool:
+    """A time of day inside her hours, whatever the day."""
+    lo, hi = _hours(a)
+    t = _t(hhmm)
+    return (t >= lo or t < hi) if _wraps(a) else lo <= t < hi
+
+
+def _shift_day(a: dict, now: dt.datetime) -> dt.date:
+    """The day the hours around now belong to: before 08:00 in hours that run from the evening, the day before."""
+    return now.date() - dt.timedelta(days=1) if _wraps(a) and now.time() < _hours(a)[1] else now.date()
+
+
+def _working_day(a: dict, day: dt.date) -> bool:
+    return DAYS[day.weekday()] in (a.get("days") or DAYS)
+
+
+def in_hours(a: dict, now: dt.datetime) -> bool:
+    """H340: her hours on her working days (days, Monday to Friday by the template; nobody works at the weekend)."""
+    return _at_hour(a, now.strftime("%H:%M")) and _working_day(a, _shift_day(a, now))
+
+
+def _shift_end(a: dict, now: dt.datetime) -> dt.datetime:
+    """When the hours that now is in (or the day's, outside them) end: the next morning for hours past midnight."""
+    d = _shift_day(a, now)
+    end = dt.datetime.combine(d, _hours(a)[1])
+    return end + dt.timedelta(days=1) if _wraps(a) else end
+
+
+def next_start(a: dict, now: dt.datetime) -> dt.datetime:
+    """The start of her next hours from now (now itself inside them), on a working day."""
+    if in_hours(a, now):
+        return now
+    lo = _hours(a)[0]
+    for k in range(8):
+        d = now.date() + dt.timedelta(days=k)
+        at = dt.datetime.combine(d, lo)
+        if at >= now.replace(second=0, microsecond=0) and _working_day(a, d):
+            return at
+    return dt.datetime.combine(now.date() + dt.timedelta(days=1), lo)
 
 
 def useful_until(parsed: dict, a: dict, job_at: dt.datetime, now: dt.datetime) -> dt.datetime | None:
@@ -529,8 +585,7 @@ def useful_until(parsed: dict, a: dict, job_at: dt.datetime, now: dt.datetime) -
     if parsed["kind"] == "review":
         return job_at + dt.timedelta(days=1)
     # a step: what the plan says (until the next one, her own until); one from before that: a while after its time
-    hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
-    end = job_at.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
+    end = _shift_end(a, job_at)
     return end if parsed["kind"] == "fix" else min(end, job_at + dt.timedelta(minutes=STEP_GRACE))  # a round isn't tied to a time of day
 
 
@@ -582,8 +637,7 @@ def over_share(sh: dict, est: float) -> str | None:
 
 
 def _minutes_left(a: dict, now: dt.datetime) -> float:
-    hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
-    return (now.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() / 60
+    return (_shift_end(a, now) - now.replace(second=0, microsecond=0)).total_seconds() / 60
 
 
 def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None, log=None) -> str:
@@ -640,8 +694,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         any_hour = bool((rec or {}).get("any_hour"))  # F174: a look at new work runs day or night; her share is the wall
         if not in_hours(a, now) and not any_hour:
             lo, hi = a.get("hours") or ["08:00", "22:00"]
-            if now.time() >= _t(hi):
-                return skip(f"the day's hours end at {hi}; nothing of hers runs at night", morning=True)
+            if next_start(a, now).date() != now.date():  # H340: her hours are over for today, or it's a day nobody works
+                return skip(f"the day's hours end at {hi}; nothing of hers runs outside her hours", morning=True)
             return "wait"
         if st["stopping"] and not stop_here and p["kind"] != "fix":  # his stop comes first: it may be about this very run
             return "wait"
@@ -709,8 +763,7 @@ def out_of_hours(job: dict, now: dt.datetime | None = None, base: Path | None = 
 def _again(aid: str, p: dict, a: dict, job_at: dt.datetime, now: dt.datetime, base: Path | None, tomorrow: bool = False) -> bool:
     """A session, a look or a review comes back at her next hours, as itself, once it's still useful then. Tomorrow: not again
     today, where the same check would only send it round."""
-    lo = _t((a.get("hours") or ["08:00", "22:00"])[0])
-    nxt = now if in_hours(a, now) and not tomorrow else (now + (dt.timedelta(days=1) if now.time() >= lo else dt.timedelta(0))).replace(hour=lo.hour, minute=lo.minute, second=0, microsecond=0)
+    nxt = next_start(a, _shift_end(a, now) if tomorrow else now)
     u = useful_until(p, a, job_at, now)
     if not u or u <= nxt:
         return False
@@ -1173,7 +1226,7 @@ def plan(aid: str, raw: str, now: dt.datetime | None = None, base: Path | None =
         if not _is_time(at):
             raise ValueError(f"step {i} needs a time today, HH:MM")
         st["at"] = _hhmm(at)
-        if not (_t(lo) <= _t(st["at"]) < _t(hi)):
+        if not _at_hour(a, st["at"]):
             raise ValueError(f"step {i}'s time {st['at']} is outside your hours {lo} to {hi}")
         if str(st.get("until", "")).strip() and not (_is_time(str(st["until"])) and _hhmm(str(st["until"])) > st["at"]):
             raise ValueError(f"step {i}'s until is a time after its own, HH:MM")
@@ -1244,7 +1297,7 @@ def _step_until(st: dict, times: list, now: dt.datetime, a: dict) -> dt.datetime
     day = now.replace(second=0, microsecond=0)
     at = day.replace(hour=_t(st["at"]).hour, minute=_t(st["at"]).minute)
     at = max(at, day)
-    end = day.replace(hour=_t(a["hours"][1]).hour, minute=_t(a["hours"][1]).minute)
+    end = _shift_end(a, day)
     if str(st.get("until", "")).strip():
         u = _t(_hhmm(str(st["until"])))
         return min(end, day.replace(hour=u.hour, minute=u.minute))
@@ -1319,8 +1372,7 @@ def asleep(now: dt.datetime) -> bool:
 
 
 def _day_end(a: dict, now: dt.datetime) -> dt.datetime:
-    hi = _t((a.get("hours") or ["08:00", "22:00"])[1])
-    return now.replace(hour=hi.hour, minute=hi.minute, second=0, microsecond=0)
+    return _shift_end(a, now)
 
 
 def _true(e: dict, now: dt.datetime, base: Path | None = None) -> str | None:
@@ -2285,7 +2337,7 @@ def _order_step(aid: str, o: dict, now: dt.datetime, base: Path | None, goal: st
         if yes:
             spec["yes"] = {**{k_: yes[k_] for k_ in ("n", "key", "what", "why", "tool", "input")}, "words": words}
         st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": spec, "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "order": o["n"], **({"stop": True} if stop else {}),
-                                             "until": now.replace(hour=_t(hi).hour, minute=_t(hi).minute, second=0, microsecond=0).strftime(FMT)}
+                                             "until": _shift_end(agent_settings(aid, base), now).strftime(FMT)}
         code, out = _schedule("add", "now", step_text(aid, stamp, k, label), "--priority", "--kind", f"step-{aid}")
         item = re.match(r"Item (\d+)\b", out or "")
         if look:  # H308: the order carries its item's label, so a later or a doubled look makes no second one
@@ -2310,6 +2362,8 @@ def look_times(a: dict) -> list[list]:
         return []
     lo, hi = a.get("hours") or ["08:00", "22:00"]
     lo_m, hi_m = _mins(lo), _mins(hi)
+    if hi_m <= lo_m:  # H340: hours past midnight count on into the next morning
+        hi_m += 24 * 60
     first, last = lo_m + 60, hi_m - 180
     if last <= first:
         ts = [lo_m + (hi_m - lo_m) * (2 * i + 1) // (2 * n) for i in range(n)]
@@ -2320,7 +2374,7 @@ def look_times(a: dict) -> list[list]:
     ts = sorted({max(lo_m, t - t % 5) for t in ts})
     names = {1: ["midday look"], 2: ["morning look", "evening look"], 3: ["morning look", "midday look", "evening look"]}.get(len(ts)) \
         or [f"look {i + 1} of {len(ts)}" for i in range(len(ts))]
-    return [[names[i], f"{t // 60:02d}:{t % 60:02d}"] for i, t in enumerate(ts)]
+    return [[names[i], f"{t // 60 % 24:02d}:{t % 60:02d}"] for i, t in enumerate(ts)]
 
 
 def _day_looks(st_: dict, a: dict, now: dt.datetime) -> dict:
@@ -2475,10 +2529,16 @@ def plan_reviews(now: dt.datetime | None = None, base: Path | None = None, log=N
         if not a.get("on") or not _agent(aid, base):
             continue
         text = cycle_text(aid, "monthly review")
-        if any(i["state"] == "waiting" and i["text"] == text for i in items):
+        mine = [i for i in items if i["state"] == "waiting" and i["text"] == text]
+        for i in mine:  # H340: one planned outside her hours (they changed) moves into them
+            if not in_hours(a, dt.datetime.strptime(i["at"], FMT)):
+                _schedule("cancel", str(i["n"]))
+                did.append(f"{aid}'s monthly review (item {i['n']}) was outside her hours")
+        if any(in_hours(a, dt.datetime.strptime(i["at"], FMT)) for i in mine):
             continue
         ff = first_friday(now)
-        at = ff.replace(hour=_t(r.get("at", "09:00")).hour, minute=_t(r.get("at", "09:00")).minute, second=0, microsecond=0)
+        rt = r.get("at", "09:00") if _at_hour(a, r.get("at", "09:00")) else a["hours"][0]  # H340: the review's time, else her hours' start
+        at = ff.replace(hour=_t(rt).hour, minute=_t(rt).minute, second=0, microsecond=0)
         code, out = _schedule("add", at.strftime(FMT), text, "--priority", "--kind", f"cycle-{aid}")
         did.append(f"{aid}'s monthly review planned for {at:%A %-d %B %H:%M}")
     if log:
@@ -2555,7 +2615,7 @@ def drop_waiting(now: dt.datetime | None = None, base: Path | None = None, log=N
         p = parse(j["text"])
         if p and (j["state"] == "ready" or j["state"].startswith("held")):
             a = agent_settings(p["agent"], base)
-            if not in_hours(a, now) and now.time() >= _t((a.get("hours") or ["08:00", "22:00"])[1]):
+            if not in_hours(a, now) and next_start(a, now).date() != now.date():
                 gatekeep(j, now, base, log)
                 did.append(f"job {j['n']} dropped at the hours' end")
     return did
