@@ -20,6 +20,8 @@ the record, never anyone's word, and does the next step:
     like the night run's failures, never resumed for; once each is on the planning, the build's record step runs again by itself, those
     checks excused (F165, 7 November 2026: before, such a build stayed held until someone looked; tonight F155, job 623 and H338), so a
     build whose own tests pass closes. Nothing to read: its proof runs once more (red twice: one text, the line leaves it).
+  - Held (F192, 7 November 2026): its Waits on names an item still open that hasn't passed her check: nothing, no build, prep or
+    resume, by day or at night, and show names what it waits on; she lifts it with "Waits on: nothing".
   - Ready: with build on, the program sends it to the team itself (by day only on his own switch, at night also on hers). Build off:
     nothing more; prepared.
   - Only the Ready mark is missing: the program sets it.
@@ -109,8 +111,11 @@ def next_step(row, g, jobs, now=None):
             return "passed", "passed her check; the release takes it from here"
     except Exception:
         pass
+    held = held_by(row)
     j = q.with_team(jobs, label)
     if j:
+        if held and j["state"].startswith("paused: "):  # F192: a parked build of a held item isn't resumed or rerun either
+            return "hold", held
         if j["state"].startswith("paused: ended, no record"):
             real, other = red_lines(j["state"], row)
             if real:  # F164: a real failure goes back to the team as a resume of its own job, at night on the night's own switches
@@ -124,6 +129,8 @@ def next_step(row, g, jobs, now=None):
     p = prep_of(jobs, label)
     if p:
         return "wait", f"her prep job {p['n']} ({p['state']})"
+    if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted
+        return "hold", held
     why = S.not_ready_why(row)
     if why is None:
         b = g.get("build")
@@ -141,6 +148,39 @@ def next_step(row, g, jobs, now=None):
     if not g.get("prep"):
         return "none", f"not ready and prepare is off: {why}"
     return "prep", why
+
+
+# F192 (7 November 2026): a hold she gives is the item's own Waits on (point 8 of ready); she lifts it with "Waits on: nothing".
+# Its last Waits on counts; an item it names holds it while that item's row is open and hasn't passed her check.
+_WAITS = re.compile(r"Waits on: ([^.|]*)")
+_LABEL = re.compile(r"(?<![\w-])([A-Z]\d+(?:\.\d+)*)(?![\w-])")
+
+
+def held_by(row):
+    """F192: why ROW is held behind another item (its Waits on names an open item that hasn't passed her check), or None."""
+    said = _WAITS.findall(row.get("line") or "")
+    if not said:
+        return None
+    try:
+        import qa
+    except Exception:
+        qa = None
+    waits = []
+    for other in dict.fromkeys(_LABEL.findall(said[-1])):
+        if other == row.get("label"):
+            continue
+        r = S.row_of(other)
+        if not r or r.get("state") not in ("⬜", "🔨"):
+            continue  # done, parked or gone: nothing to wait for
+        try:
+            if qa and qa.state(other) == "passed":
+                continue
+        except Exception:
+            pass
+        waits.append(other)
+    if not waits:
+        return None
+    return f"held: waits on {', '.join(waits)} until {'they have' if len(waits) > 1 else 'it has'} passed her check (its Waits on)"
 
 
 # F164: the failing lines a red record gives (runjob._no_record_why): her QA tests ("FAIL name: ...", "her QA tests: ..."), flows
