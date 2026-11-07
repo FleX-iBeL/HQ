@@ -244,7 +244,7 @@ def why_not_ready(row, st=None):
         return f"{row['label']} isn't ready: the review flagged it{more}: {f}"
     if s == "waiting":
         return (f"{row['label']} isn't ready: it's new or changed and its review hasn't passed yet (it runs once the "
-                f"row has been quiet {QUIET // 60} minutes); it can be marked once it passes")
+                "row's words have stayed the same a few minutes); it can be marked once it passes")  # F194: no number here, so the page's waiting line is the only one naming its time
     if s == "didnt_run":
         return f"{row['label']} isn't ready: its review didn't run (it's tried again); it can be marked once it passes"
     return None
