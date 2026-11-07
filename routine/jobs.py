@@ -1031,13 +1031,19 @@ def main(argv):
                 sys.exit(f"{why}. Only rows marked ready go to the team; mark it ready first, or on his explicit say-so: "
                          f"send-row {label} --not-ready --said \"his words\" (with --now for today, from his words of today).")
             import estimate as est_
+            import qa as qa_
+            kind_ = est_.kind_of(line)
+            if kind_ == "research" and (qa_.rows(text).get(label) or ("", ""))[1] == "F":
+                # F173: a bug row is a fix, even when its words talk about research ("A research item passes her tests…"):
+                # sent as research it closed with no proof and no QA, so the line sent it again and again (jobs 9224 to 9233)
+                kind_ = est_.build_size(line)
             title = one_line(title).replace("·", "-").rstrip(".")
             cmd = "add"
             how_ = ("by the line" if "--line" in args else "in a text" if os.environ.get("HQ_DIRECT_AGENT") else "on a call"
                     if os.environ.get("HQ_WORDS_FROM") else "from the status page")  # nowroad: where it came from; the line: its own send
             args = [f"{label} on the HQ roadmap, sent to the team {how_}: {title}. Read the {label} row "
                     f"and do what it says. Pull dev first, privacy check, push to dev with push.py, "
-                    f"write the result in the {label} row.", "--item", label, "--kind", est_.kind_of(line), *keep]
+                    f"write the result in the {label} row.", "--item", label, "--kind", kind_, *keep]
         if cmd == "add":
             past = "--past-the-line" in args
             say_so = "--not-ready" in args  # H272: his explicit say-so for a row without the Ready mark
