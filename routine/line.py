@@ -246,16 +246,31 @@ def red_lines(state, row):
     return real, other
 
 
-_WHY = re.compile(r"test(?:'s| is) wrong|can'?t be done|cannot be done|can not be done|isn'?t possible|not possible", re.I)
+_WHY = re.compile(r"test(?:'s| is) wrong|\btest [\w.-]+ is wrong|can'?t be done|cannot be done|can not be done|isn'?t possible|"
+                  r"not possible", re.I)
+_HERS = re.compile(r"(?:fail on the built code: |; )([\w.-]+)(?=: | passes in the team's run)")
+
+
+def red_names(real):
+    """F187: the still-red tests' names in the failing lines: 'FAIL NAME', and her sealed tests' line (qatests.py: 'her QA tests fail
+    on the built code: NAME: ...; NAME: ...')."""
+    names = set()
+    for part in real:
+        m = re.match(r"FAIL ([\w.-]+)", part)
+        if m:
+            names.add(m.group(1))
+        if "fail on the built code: " in part:
+            names |= set(_HERS.findall(part[part.index("fail on the built code: "):]))
+    return names
 
 
 def stated_reason(real, row):
-    """F187: the build's written result in its row names a still-red test and why (the test is wrong, or it can't be done): that
-    sentence, or ''. A resumed build ends only on a green record or such a reason; any other stop is silent and resumed again."""
-    names = {m.group(1) for part in real for m in [re.match(r"FAIL ([\w.-]+)", part)] if m}
+    """F187: a sentence in the build's row that names a still-red test and why (the test is wrong, her test NAME is wrong, or it can't
+    be done), whatever its lead word ('Built (job N): NAME stays red, the test is wrong.'): that sentence, or ''. A resumed build ends
+    only on a green record or such a reason; any other stop is silent and resumed again."""
+    names = red_names(real)
     for s in re.split(r"(?<=[.!?])\s+|\s\|\s", row.get("line") or ""):
-        if re.search(r"\bresult\b", s, re.I) and _WHY.search(s) and any(
-                re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", s) for n in names):
+        if _WHY.search(s) and any(re.search(rf"(?<![\w-]){re.escape(n)}(?![\w-])", s) for n in names):
             return s.strip()
     return ""
 
@@ -397,7 +412,9 @@ def act(label, what, detail, row, st, jobs):
                   f"it has had its {wall.MOST_RESUMES} resumes. {wall.what_next(j['n'])} The line leaves it.")
             return f"{label}: job {j['n']} red past its resumes; told him, the line leaves it"
         note = ("Your build came back red on what your item owns, so the line (F164) sent it back to you as a resume: make these "
-                "green, then commit, push, write the result and end the run as before. The failing lines: " + " / ".join(real)
+                "green, then commit, push, write the result and end the run as before. If one can't go green, write why in the row "
+                "in one sentence naming the test, like 'Built (job N): NAME stays red, the test is wrong.' or '... NAME stays red, it "
+                "can't be done ...': then it goes to Moneypenny as a decision, not back to you. The failing lines: " + " / ".join(real)
                 ).replace("⟪", "(").replace("⟫", ")")
         with q.locked():
             text, js, on = q.read()
