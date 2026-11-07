@@ -1119,6 +1119,7 @@ def _new_quotes(old, new):
 
 
 _ANY_MARK = re.compile(f"[{S.QUOTE_OPEN}{S.QUOTE_CLOSE}]")
+_MARK_RUN = re.compile(f"[{S.QUOTE_OPEN}{S.QUOTE_CLOSE}]{{2,}}")
 
 
 def _addition_why(words, about=""):
@@ -1127,7 +1128,7 @@ def _addition_why(words, about=""):
     if S.TEAM_NOTE.search(words):
         return ("Refused: that has the shape of the team's mark (Built, Done, Fixed, QA passed or failed). A mark is put only by its own "
                 "command at its own place. Say it without that shape.")
-    rest = words
+    rest = _MARK_RUN.sub('"', words)  # F167: a run of quote marks around his words is one mark, not empty quotes
     for marks in S.QUOTE_MARKS:  # a quote is a quote, in any marks, backticks too
         for m in marks.finditer(rest):
             bit = m.group(1).strip()
