@@ -954,7 +954,8 @@ def start_rules(context: str = "all", agent: str = "") -> str:
 
 WRAP_UP_PROMPT = """[Call system: @USER@ has hung up. The call is over, and nothing you write now is spoken.
 Do the after-call work, quietly and fully, as in a normal chat:
-1. Write what matters from this call into coaching/log.md, in his words, and new to-do items with the to-do script (how: \
+1. Write what matters from this call into coaching/log.md, in his words, with the Edit tool (after the call the log is yours \
+to write directly, even when the call sent it to its script), and new to-do items with the to-do script (how: \
 python3 "@HQ@/app/rules.py" todo); after \
 a call only the log, the lists and the transcript are written (F99), so anything else goes in the log as a follow-up. \
 At least one entry in coaching/log.md, newest first, as its own section headed `## {day} {start} · call (<your name>)` \

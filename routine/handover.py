@@ -65,6 +65,9 @@ def _lock(rel):
 
 
 def edit(rel: str, payload: str) -> int:
+    folder = os.path.realpath(hqpaths.FOLDER)
+    if os.path.isabs(rel) and os.path.realpath(rel).startswith(folder + os.sep):  # F155: the full path of a file in the folder
+        rel = os.path.relpath(os.path.realpath(rel), folder)
     rel = rel.replace(os.sep, "/").lstrip("./")
     if os.environ.get("HQ_ROUND") and rel == "HQ/roadmap.md":  # F86: a round only adds, through review.py add
         print("Refused: a round can only add to its row, through review.py add.")

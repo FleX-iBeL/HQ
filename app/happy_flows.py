@@ -40040,7 +40040,10 @@ async def _happy_call(self, drop: bool) -> str:
     after = log.read_text(encoding="utf8") if log.exists() else ""
     new = after.replace(before, "", 1) if before and before in after else after
     say(f"   after-call work {secs:.0f} s: {(live.call.wrap_up_reply or '').strip()[:200]!r}")
-    need(after != before, "the call's notes weren't written: coaching/log.md is unchanged")
+    refused = [f"{tool} {summary[:120]}: {d.why[:160]}" for tool, summary, d in (getattr(live.call.policy, "log", None) or [])
+               if d.verdict == "deny"]  # F155: a red 602 says what was refused, not only that the log is unchanged
+    need(after != before, "the call's notes weren't written: coaching/log.md is unchanged"
+                          + (f"; refused: {' | '.join(refused[-3:])}" if refused else ""))
     key = word.split()[0]  # Whisper may hear "jasmine tea" as "Jasmine T": the first word is enough
     need(key in new.lower(), f"the notes don't have his words ({word!r}): {new[:300]!r}")
     need(re.search(r"^## \d{4}-\d{2}-\d{2} .*call", new, re.M), f"no dated call section in the notes: {new[:300]!r}")

@@ -477,6 +477,10 @@ class Policy:
                 if not any(p[0] == tool and p[1] == key for p in self.pending):
                     self.pending.append((tool, key, d.question))
                     self.pending_turns = 0
+        if (self.after_call and d.verdict == DENY and not d.road and not self.dry_run and tool == "Bash"
+                and LOG_REL in str((inp or {}).get("command") or "")):  # F155: a refused log save after a call names the way that works
+            d = Decision(DENY, f"{d.why}; after the call the coaching log is yours to write directly: make the change with the "
+                               "Edit tool on coaching/log.md", retry=True, road=True)
         summary = summarize(tool, inp or {})
         self.log.append((tool, summary, d))
         if d.verdict == DENY and not self.dry_run and (d.door or outward(tool, inp or {})):
@@ -923,8 +927,13 @@ class Policy:
             name = Path(args[0]).name
             sub = args[1] if len(args) > 1 else ""
             mine = self.hq_script(args[0], name) or self.hq_app_script(args[0], name)
-            if mine and name == "handover.py" and len(args) == 4 and sub == "edit" and args[2] == LOG_REL:
+            if mine and name == "handover.py" and len(args) == 4 and sub == "edit" and self._is_log(args[2]):
                 return Decision(ALLOW, "the coaching log, through its script, after the call")  # afternotes: F114 sends the log through handover.py, the after-call run refused it
+            if mine and name == "handover.py" and sub == "edit" and len(args) > 2 and self._is_log(args[2]):
+                # F155: a dropped call's notes were lost when the log's save went another way (flow 602): name the way that works
+                return Decision(DENY, "after the call the coaching log is yours to write directly: make the change with the Edit "
+                                      "tool on coaching/log.md, or as handover.py edit coaching/log.md 'JSON' with the JSON as one "
+                                      "quoted word", retry=True, road=True)
             if not mine or not (name in AFTER_CALL_SCRIPTS or sub in AFTER_CALL_READS.get(name, ())):
                 return Decision(DENY, f"after a call only the log, the lists and the transcript are written, so {name} "
                                       f"{sub} waits: leave it as a follow-up in the log")
@@ -1419,6 +1428,15 @@ class Policy:
         if not p.is_absolute():
             p = self._base() / p
         return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "status" / name
+
+    def _is_log(self, arg: str) -> bool:
+        """F155: the coaching log as handover.py takes it: its name in the folder, with or without ./, or its full path."""
+        if arg.replace(os.sep, "/").lstrip("./") == LOG_REL:
+            return True
+        try:
+            return os.path.isabs(os.path.expanduser(arg)) and self.rel(arg).as_posix() == LOG_REL
+        except ValueError:
+            return False
 
     def rel(self, path: str) -> Path:
         p = Path(path).expanduser()
