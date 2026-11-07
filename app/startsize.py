@@ -2,7 +2,7 @@
 """F106: what each agent starts a call with, in bytes, against the cap. Only sizes, nothing of what's in it.
 
     python3 app/startsize.py           every agent's start, and a day agent's on a Deep call
-    python3 app/startsize.py --check   exit 1 when one is over config.START_CAP
+    python3 app/startsize.py --check   exit 1 when one is over config.START_CAP, or its rules over config.START_RULES_MOST
 
 The small list: what a call really starts with. A Deep call with the day's agent, or an agent whose context is "all", loads the folder like a
 chat (the CLI reads CLAUDE.md with its @-imports, nothing trimmed): that's measured as it is and named Deep. It isn't held to the cap, a
@@ -48,8 +48,10 @@ def main(argv: list[str]) -> int:
         if d["deep"]:
             print(f"{d['agent']}: Deep, the whole folder as a chat loads it: {d['total']} bytes, not held to {d['cap']}")
             continue
-        over += d["total"] > d["cap"]
+        over += d["total"] > d["cap"] or d["rules"] > config.START_RULES_MOST  # H338: the rules part has its own share of the cap
         print(f"{d['agent']}: {d['total']} bytes of {d['cap']} (the rules and who she is {d['rules']}, what she starts with {d['start']})")
+        if d["rules"] > config.START_RULES_MOST:
+            print(f"{d['agent']}: the rules and who she is are {d['rules']} bytes, over their share of {config.START_RULES_MOST}")
         if d["context"] == "day":
             deep = start_of(a, load="deep")
             print(f"{d['agent']} on a Deep call: the whole folder as a chat loads it: {deep['total']} bytes, not held to {d['cap']}")

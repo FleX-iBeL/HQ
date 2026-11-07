@@ -22352,6 +22352,14 @@ print(json.dumps(out))
         o = json.loads(r.stdout.strip().splitlines()[-1])
         need(o["cap"] == 40000 and max(o["totals"].values()) <= o["cap"], f"the sizes: {o['totals']}")
         need(not o["lost"] and o["named"] and o["safety"], f"lost from the rules: {o['lost']} named {o['named']} safety {o['safety']}")
+        # H338: a briefing too big for the room the rules leave is fitted: the longest list gives first, his commitments last, the whole one a command away
+        import quick_context as _qc
+        big = ("Head.\n\nOpen commitments (x):\n" + "\n".join(f"- promise {i}" for i in range(30)) + "\n\nTomorrow:\n"
+               + "\n".join(f"- an appointment with a longer title {i}" for i in range(60)))
+        fit = _qc.fit_brief(big, 900, "coach")
+        need(len(fit.encode()) <= 900 and fit.count("- promise") == 30 and 0 < fit.count("- an appointment") < 60 and "fresh coach" in fit
+             and _qc.fit_brief(big, 10 ** 6, "coach") == big and config.START_RULES_MOST < config.START_CAP,
+             f"the briefing isn't fitted to its room: {len(fit.encode())} bytes, {fit[-300:]!r}")
         need(o["donna"] == {"situation": False, "where": False, "day": False} and o["pepper"] == {"situation": False, "where": False, "day": True}
              and not o["moneypenny"]["situation"], f"what's loaded whole: {o}")
         for topic in o["topics"]:

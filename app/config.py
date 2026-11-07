@@ -876,6 +876,9 @@ def voice_rules(context: str = "all") -> str:
 # F106: lighter starts. His words: "lighter starts"; the design's cap per agent: "say 40 KB; the number is his". A call starts with the
 # core of the rules; the topics below are a lookup (app/rules.py), read before she acts on one. voice_rules() stays the whole book.
 START_CAP = int(os.environ.get("HQ_START_CAP") or 40_000)  # bytes HQ adds to Claude's own prompt at a call's start, per agent
+# H338: the cap split in two, so neither part can push a start over. The rules and who she is are HQ's own text: held to this by
+# startsize.py --check. What she starts with grows with his files: a briefed start fits its briefing into the rest (quick_context.fit_brief).
+START_RULES_MOST = int(os.environ.get("HQ_START_RULES_MOST") or 17_000)
 RULE_TOPICS = {  # topic: (when to read it, the first words of its parts in the rules)
     "team": ("before anything with the team, the job list, the scheduler, planned or repeating work, the planning",
              ("- Work for the computer", "- The team (H133)", "- The team's work on a call", "- The waiting jobs run", "- A running job whose",

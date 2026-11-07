@@ -217,6 +217,32 @@ IDENTITY_FILES = {"day": ["rules.md"],
                   "build": ["rules.md"]}
 
 
+BRIEF_KEPT = ("Open commitments", "Very important mail", "Passed on to you")  # cut last: what he promised, what waits on him
+
+
+def fit_brief(brief: str, room: int, context: str) -> str:
+    """H338: the briefing kept to `room` bytes. Pepper's start went over her cap twice as his vision's day grew; the day and the rules
+    stay whole, so the briefing gives: the longest list loses its last lines first (his commitments and the very important mail
+    last of all), each list keeps its first line and one item,
+    and the whole briefing stays one command away."""
+    if len(brief.encode()) <= room:
+        return brief
+    more = (f"\n\n(The briefing is shortened to fit the call's start; the whole of it: python3 "
+            f"\"{config.ROOT / 'routine' / 'briefing.py'}\" fresh {context}.)")
+    parts = [p.splitlines() for p in brief.split("\n\n")]
+    cut = set()
+    size = lambda: len("\n\n".join("\n".join(p + (["- …"] if i in cut else [])) for i, p in enumerate(parts)).encode()) + len(more.encode())
+    while size() > room:
+        long_ = [i for i, p in enumerate(parts) if len(p) > 2 and not p[0].startswith(BRIEF_KEPT)] \
+            or [i for i, p in enumerate(parts) if len(p) > 2]
+        if not long_:
+            break
+        i = max(long_, key=lambda k: len("\n".join(parts[k]).encode()))
+        parts[i].pop()
+        cut.add(i)
+    return "\n\n".join("\n".join(p + (["- …"] if i in cut else [])) for i, p in enumerate(parts)) + more
+
+
 def briefed(folder: Path, context: str = "day", today: datetime.date | None = None) -> str:
     """A call's start with the backend switch `briefing` on (Fable, 27 October 2026): her identity (the rules, where
     things go, for the coach the vision's day whole, so the vision is never on demand), the briefing the routine
@@ -264,6 +290,7 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
         brief = ""
     if not brief:
         brief = "The briefing couldn't be made just now; read what you need from the files."
+    at = len(parts)
     parts.append(brief.rstrip())
     if context == "build":  # the walkthrough on keeping HQ running: its index, when the briefing didn't bring it
         import maintaining
@@ -275,6 +302,8 @@ def briefed(folder: Path, context: str = "day", today: datetime.date | None = No
         parts.append("Claude's memory for this folder (the index; a note is read when it's needed):\n\n"
                      + (mem / "MEMORY.md").read_text().strip() if context == "build" else  # H280: hers stays; F106: the others look it up
                      f"Claude's memory for this folder is {mem / 'MEMORY.md'}: read it when a turn needs how his tools work.")
+    rest = len(("\n\n".join(parts) + "\n").encode()) - len(parts[at].encode())  # H338: the briefing gets what the rest leaves
+    parts[at] = fit_brief(parts[at], config.START_CAP - config.START_RULES_MOST - rest, context)
     return "\n\n".join(parts) + "\n"
 
 
