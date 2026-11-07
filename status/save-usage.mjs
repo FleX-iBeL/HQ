@@ -149,7 +149,7 @@ mkdirSync(join(root, '.status'), { recursive: true });
 writeFileSync(USAGE_FILE, `${JSON.stringify(reading, null, 2)}\n`);
 // H339 part 4b: each weekly reading goes into the night that runs as it comes in, so the night's road draws the week from HQ's own readings.
 {
-  const wk = reading.readable && reading.limits.find((l) => !l.kept && lineKey(l.label) === 'weekly');
+  const wk = reading.readable && reading.limits.find((l) => !l.kept && (lineKey(l.label) === 'weekly' || (/week/i.test(l.label ?? '') && !/fable|sonnet|opus/i.test(l.label))));
   if (wk && Number.isFinite(wk.percent)) {
     try { await addReading(wk.percent, Date.parse(reading.checkedAt ?? '') || Date.now(), wk.resetsAt ?? null); } catch { /* a view only */ }
   }

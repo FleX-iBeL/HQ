@@ -92,6 +92,8 @@ export function takeRow(rows, r) {
     rows.push({ ...r, start: Math.max(r.start, x.end), end: Math.max(r.end, x.end + 6e4) });
     return true;
   }
+  const before = rows.slice(0, last).filter((y) => y.name === r.name && y.kind === 'broken').pop();
+  if (before && r.kind !== 'broken') r = { ...r, start: Math.max(r.start, before.end), end: Math.max(r.end, before.end + 6e4) };
   if (x.kind === r.kind && x.end === r.end && x.start === r.start) return false;
   rows[last] = x.kind === 'broken' ? { ...x, end: r.end } : r;
   return true;
@@ -250,7 +252,7 @@ export const CSS = `
 const PAGE_CSS = `body{font:15px/1.45 system-ui,sans-serif;max-width:960px;margin:1rem auto;padding:0 1rem;color:#222}
 .soft{color:#777}.nr-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.6rem;margin:.8rem 0}
 .nr-fact{background:rgba(127,127,127,.08);padding:.5rem;border-radius:6px}.nr-fact b{display:block;font-size:.75rem;color:#777;font-weight:600}
-.nr-progress{height:.5rem;background:rgba(127,127,127,.15);border-radius:3px;overflow:hidden}.nr-progress i{display:block;height:100%;background:#2a6}
+.nr-progress{display:block;width:100%;height:.5rem;accent-color:#678}
 .nr-warn{color:#b30;font-weight:600}.nr-log li,.nr-parts li{margin:.2rem 0}.nr-pill{font-size:.75rem;border:1px solid #aaa;border-radius:9px;padding:0 .4rem;margin-left:.3rem}
 @media (prefers-color-scheme:dark){body{background:#151515;color:#ddd}}` + CSS;
 
@@ -274,7 +276,6 @@ export async function nightPage(key, parsed, { now = Date.now(), markdown = '', 
   const parts = n.parts.map((p) => `<li><span class="nr-dot">●</span> <b>${esc(p.title)}</b> ${esc(p.text ?? '')}${p.pill ? `<span class="nr-pill">${esc(p.pill)}</span>` : ''}</li>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>The night's road · ${esc(key)}</title><style>${PAGE_CSS}</style></head><body>
-<p><a href="/">← HQ</a></p>
 <h1>${esc(n.title)} · ${esc(key)}</h1>
 <p>The night's road: what the team did this night, kept as it happened.</p>
 <p>Last updated <span id="nr-updated" data-at="${n.updated ?? ''}" data-live="${n.running && key === cur ? 1 : 0}">${n.updated != null ? `${hm(n.updated)} (${ago} min ago)` : 'not yet'}</span>${stale ? ` <span class="nr-warn">Not updated for ${ago} min</span>` : ''}</p>
@@ -282,13 +283,14 @@ export async function nightPage(key, parsed, { now = Date.now(), markdown = '', 
 <div class="nr-fact"><b>Expected end</b>${ahead.length ? hm(Math.max(...ahead.map((r) => r.end))) : n.running ? 'nothing more planned' : 'the night is over'}</div>
 <div class="nr-fact"><b>The week used</b>${usedNow != null ? `${usedNow}%` : 'no reading yet'}</div>
 <div class="nr-fact"><b>The team</b>${n.running && key === cur ? 'working the night' : 'finished for the night'}</div></div>
-<div class="nr-progress" title="${finished} of ${n.rows.length} finished"><i style="width:${pct}%"></i></div>
+<progress class="nr-progress" max="100" value="${pct}" title="${finished} of ${n.rows.length} finished">${pct}%</progress>
 <h2>The timeline</h2>${timelineHtml(n.rows, now, kind)}
 <h2>The week's usage</h2>${usageHtml(n, now, markdown, reset)}
 <h2>Now</h2><ul>${going.map((r) => `<li>${esc(r.name)}, since ${hm(r.start)}</li>`).join('') || '<li>Nothing running.</li>'}</ul>
 ${parts ? `<h2>The parts of the night</h2><ul class="nr-parts">${parts}</ul>` : ''}
 <h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(x.text)}</li>`).join('') || (n.rows.length ? '<li>No words logged yet: the timeline above is what ran.</li>' : '<li>A quiet night: nothing to do.</li>')}</ul>
 <h2>The nights</h2><ul>${all.map((d) => `<li><a href="/night-road/${d}">${d}${d === key ? ' (this one)' : ''}</a></li>`).join('')}</ul>
+<p><a href="/">Back to HQ</a></p>
 <script>(function(){var u=document.getElementById('nr-updated');if(!u||!u.dataset.at)return;function f(){var t=Number(u.dataset.at),m=Math.max(0,Math.floor((Date.now()-t)/6e4)),d=new Date(t);u.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' ('+m+' min ago)';if(u.dataset.live==='1'&&m>${STALE_MIN}&&!document.querySelector('.nr-warn')){var w=document.createElement('span');w.className='nr-warn';w.textContent=' Not updated for '+m+' min';u.after(w);}}setInterval(f,30000);if(u.dataset.live==='1')setInterval(function(){location.reload();},60000);})();</script>
 </body></html>`;
 }
