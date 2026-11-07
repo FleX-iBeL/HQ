@@ -470,6 +470,16 @@ def sounds_like_goodbye(words: str) -> bool:
     return any(f" {g} " in w for g in GOODBYE_WORDS)
 
 
+# F165: a turn that asks about his calendar gets today's appointments from HQ's copy (agenda.day_note). Loose on purpose too.
+CALENDAR_WORDS = ("calendar", "agenda", "schedule", "appointment", "appointments", "meeting", "meetings", "diary", "planned today",
+                  "on today", "my day", "busy today", "free today")
+
+
+def sounds_like_calendar(words: str) -> bool:
+    w = " " + re.sub(r"[^a-z' ]+", " ", (words or "").lower().replace("’", "'")) + " "
+    return any(f" {g} " in w for g in CALENDAR_WORDS)
+
+
 HANGUP_RULES = """
 
 # Hanging up yourself (H75)

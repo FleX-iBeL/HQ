@@ -239,7 +239,7 @@ class Call:
     async def _before_turn(self, words: str) -> list[str]:
         """On a three-way call: who answers this turn, her own session, model and voice, and a note saying so."""
         if len(self.panel) < 2:
-            return self._goodbye_note(self.speaker, words)
+            return self._calendar_note(words) + self._goodbye_note(self.speaker, words)
         who = agents.pick(self.panel, words, self.speaker["id"])
         notes = []
         joined, self._joined = getattr(self, "_joined", None), None
@@ -259,7 +259,7 @@ class Call:
         notes.append(f"[Call system: {agents.way(self.panel)} call with {rest} and {config.USER}."
                      + (f" Since your last turn on this call, oldest first:\n{since}\n" if since else " ")
                      + f"{who['name']} answers this turn: answer as yourself, in your own character.]")
-        return notes + self._goodbye_note(who, words)
+        return notes + self._calendar_note(words) + self._goodbye_note(who, words)
 
     async def _joined_hi(self, other_id: str) -> list[str]:
         """H130: once the line bringing her in has been heard, the one who joined says hi: her own session, model and
@@ -398,6 +398,18 @@ class Call:
             self._speak_as(who)
             self.speaker = who
         self.transcript.speaker = who["name"]
+
+    def _calendar_note(self, words: str) -> list[str]:
+        """F165: on a turn that asks about his calendar, today's appointments from HQ's copy (agenda.day_note), so the answer
+        needs no tool. Not on Free (nothing of his here)."""
+        if self.free or not config.sounds_like_calendar(words):
+            return []
+        try:
+            note = agenda.day_note(config.USER)
+            return [note] if note else []
+        except Exception as e:
+            logger.warning(f"F165: today's calendar couldn't be read: {e!r}")
+            return []
 
     def _goodbye_note(self, who: dict, words: str) -> list[str]:
         """H129: on a turn that may be his goodbye, what he's doing right now (his calendar, else his to-do list), so

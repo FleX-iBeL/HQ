@@ -619,6 +619,34 @@ def goodbye_note(user: str = "the user", now: float | None = None) -> str:
             "in your goodbye on something that's up on his to-do list now, from what you already know of it.]")
 
 
+def day_note(user: str = "the user", now: float | None = None) -> str:
+    """F165: what the call's Claude gets on a turn that asks about his calendar: today's appointments from HQ's copy, so it
+    answers from them, with no tool to find or read the file (on 6 November 2026 a call couldn't find it, or asked to run a
+    script for it, instead of naming today's appointment). "" when HQ has never read his calendar."""
+    t = now or time.time()
+    s = _read()
+    if not s.get("looked") and not s.get("events"):
+        return ""
+    d = datetime.fromtimestamp(t)
+    today = d.strftime("%Y-%m-%d")
+    rows = []
+    for e in sorted(read(t).get("events") or [], key=_order):
+        start, end = e.get("start") or "", e.get("end") or ""
+        if e.get("all_day"):
+            if not (start[:10] <= today and (end[:10] > today if end else start[:10] == today)):
+                continue
+            when = "all day"
+        elif start[:10] == today:
+            when = start[11:16] + (f" to {end[11:16]}" if end[:10] == today else "")
+        else:
+            continue
+        title = re.sub(r"\s+", " ", e.get("title", "")).strip()
+        rows.append(f"{when}: {title}" + (f", at {e['where']}" if e.get("where") else ""))
+    looked = f" (read from Google at {datetime.fromtimestamp(s['looked']):%H:%M})" if s.get("looked") else ""
+    return (f"[Call system: {user}'s calendar today, {d:%A} {d.day} {d:%B}, from HQ's own copy of it{looked}: "
+            + ("; ".join(rows) if rows else "nothing") + ". When he asks what's on it today, answer from this; no tool needed.]")
+
+
 def call_note(e: dict, user: str = "the user") -> str:
     """What a call's Claude gets when the call was started from this appointment."""
     lines = [f"Title: {e.get('title', '')}", f"When: {when_words(e)}", f"Calendar: {e.get('calendar', '')}"]
