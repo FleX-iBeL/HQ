@@ -130,9 +130,67 @@ export function agentsShareSum() {
   }, 0);
   return Math.round(10 * total) / 10;
 }
+/**
+ * F168 (7 November 2026): what each agent's own runs used of the weekly limit in the last 7 days, read as routine/cycles.py used
+ * reads it (estimate.all_history: this computer's finished jobs and the other HQ's, the kinds cycle-<agent> and step-<agent>,
+ * their measured cost.weekly). The history folder as estimate.py finds it: HQ_ESTIMATES, a test roadmap's "-estimates" next to
+ * it, else .status. Nothing readable: nothing used. {donna, pepper, moneypenny}, or null off Node.
+ */
+export function agentsUsed(now = Date.now()) {
+  const fs = globalThis.process?.getBuiltinModule?.('node:fs');
+  const path = globalThis.process?.getBuiltinModule?.('node:path');
+  if (!fs || !path || !import.meta.url.startsWith('file:')) return null;
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
+  const env = globalThis.process.env;
+  const dir = env.HQ_ESTIMATES || (env.HQ_ROADMAP ? env.HQ_ROADMAP.replace(/\.[^./]*$/, '') + '-estimates' : path.join(root, '.status'));
+  const lines = [];
+  try {
+    for (const l of fs.readFileSync(path.join(dir, 'job-estimates-history.jsonl'), 'utf8').split('\n')) {
+      try { if (l.trim()) lines.push(JSON.parse(l)); } catch { /* a broken line counts as nothing */ }
+    }
+  } catch { /* no history yet */ }
+  const mine = new Set(lines.map((h) => h?.machine).filter(Boolean));
+  const seen = new Set(lines.map((h) => `${h?.machine ?? ''}|${h?.n}`));
+  try {  // H81: the other HQ's lines, as it last answered, the ones that aren't this computer's
+    const peer = JSON.parse(fs.readFileSync(path.join(dir, 'job-estimates-peer.json'), 'utf8'));
+    for (const h of peer?.lines ?? []) {
+      const m = h?.machine || peer?.name || 'other';
+      if (h && typeof h === 'object' && !mine.has(m) && !seen.has(`${m}|${h.n}`)) lines.push(h);
+    }
+  } catch { /* no other HQ */ }
+  const since = now / 1000 - 7 * 86400;
+  const used = { donna: 0, pepper: 0, moneypenny: 0 };
+  for (const h of lines) {
+    if (!h || (Number(h.done) || 0) < since) continue;
+    const a = /^(?:cycle|step)-(donna|pepper|moneypenny)$/.exec(h.kind ?? '')?.[1];
+    if (a) used[a] += Number(h.cost?.weekly) || 0;
+  }
+  return used;
+}
+/** F168: the room kept under his line for the agents: each one's weekly share less what she used this week, never under 0, added up
+ * (routine/usagecost.py agents_room). Worked out at every read. */
+export function agentsRoom(now = Date.now()) {
+  const fs = globalThis.process?.getBuiltinModule?.('node:fs');
+  const path = globalThis.process?.getBuiltinModule?.('node:path');
+  if (!fs || !path || !import.meta.url.startsWith('file:')) return RESERVE;
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..');
+  const env = globalThis.process.env;
+  const folder = env.HQ_CYCLES_FOLDER || env.HQ_WORKSPACE || path.join(root, 'workspace');
+  const agentsOf = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8'))?.agents ?? {}; } catch { return {}; } };
+  const tpl = agentsOf(path.join(root, 'template', 'HQ', 'agents', 'cycles.json'));
+  const own = agentsOf(path.join(folder, 'HQ', 'agents', 'cycles.json'));
+  const used = agentsUsed(now) ?? {};
+  const total = ['donna', 'pepper', 'moneypenny'].reduce((sum, a) => {
+    let n = Number({ weekly_share: 2, ...(tpl?.[a] ?? {}), ...(own?.[a] ?? {}) }.weekly_share);
+    n = Number.isFinite(n) && n > 0 ? n : 0;
+    const u = Number(used[a]);
+    return sum + Math.max(0, n - (Number.isFinite(u) && u > 0 ? u : 0));
+  }, 0);
+  return Math.round(10 * total) / 10;
+}
 export function reserveOf(markdown) {
   const own = /\*\*Usage reserve:\s*([0-9]{1,2})\b/.exec(markdown ?? '')?.[1];  // his own number on the roadmap wins
-  return Math.min(50, own !== undefined ? Number(own) : agentsShareSum());  // F113: 0 to 50, as the command
+  return Math.min(50, own !== undefined ? Number(own) : agentsRoom());  // F113: 0 to 50, as the command; F168: what's left this week
 }
 
 /**
