@@ -637,7 +637,8 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
             return skip("it was held while it ran, and a held run is never started again; the next bigger session decides", ran=True)
         if not on(base) or not a.get("on"):
             return skip("the agents running themselves is off" if not on(base) else "she's switched off")
-        if not in_hours(a, now):
+        any_hour = bool((rec or {}).get("any_hour"))  # F174: a look at new work runs day or night; her share is the wall
+        if not in_hours(a, now) and not any_hour:
             lo, hi = a.get("hours") or ["08:00", "22:00"]
             if now.time() >= _t(hi):
                 return skip(f"the day's hours end at {hi}; nothing of hers runs at night", morning=True)
@@ -648,7 +649,7 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         if u and now > u:
             return skip(f"too late to be useful (until {u:%A %H:%M})")
         bx = box(p, base)["minutes"]
-        if a.get("hours", ["", "22:00"])[1] != "23:59" and _minutes_left(a, now) < bx:  # harm: the night: nothing of hers reaches past the hours' end
+        if a.get("hours", ["", "22:00"])[1] != "23:59" and _minutes_left(a, now) < bx and not any_hour:  # harm: the night: nothing of hers reaches past the hours' end
             return skip(f"its box of {bx:g} minutes doesn't fit before the day's hours end; nothing of hers runs at night", morning=True, tomorrow=True)
         why = over_share(shares(aid, now, base), _round_points(base) if p["kind"] == "fix" else _est_weekly(job))  # F86: a round's one price
         if why:
@@ -662,7 +663,7 @@ def gatekeep(job: dict, now: dt.datetime | None = None, base: Path | None = None
         if p["kind"] == "step":
             today = now.strftime("%Y-%m-%d")
             n = st["started"].get(today, 0)
-            if n >= int(a["step"].get("most_a_day") or 3) and not (rec or {}).get("order"):  # his own "now" is his to give; it still counts
+            if n >= int(a["step"].get("most_a_day") or 3) and not (rec or {}).get("order") and not (rec or {}).get("new_work"):  # his own "now" is his to give; it still counts
                 return skip(f"the day's steps are used up ({n})")
             if rec is None:  # harm 16: no record of its plan here: nothing to check its inputs against, so it doesn't run
                 return skip("its plan isn't on record on this computer, so its inputs can't be checked")
@@ -700,6 +701,8 @@ def out_of_hours(job: dict, now: dt.datetime | None = None, base: Path | None = 
     p = parse(job.get("text", ""))
     if not p:
         return False
+    if p["kind"] == "step" and ((_state().get("agents") or {}).get(p["agent"], {}).get("steps") or {}).get(_step_key(p), {}).get("any_hour"):
+        return False  # F174: a look at new work runs day or night
     return not in_hours(agent_settings(p["agent"], base), now or dt.datetime.now())
 
 
@@ -2622,6 +2625,177 @@ def fix_rounds(now: dt.datetime | None = None, base: Path | None = None, log=Non
     return did
 
 
+# -- new work, looked at when it lands (F174) -----------------------------------------------------------------------------------
+# His words, 7 November 2026: "F174: I want you to pick up new work whenever it lands, not once a day." Every minute the routine
+# reads the record for what's new for her: a Must row on the planning that's new or whose words changed, a night run whose record
+# turned red, a build that stopped with no record. Each gets a small look of hers (one step naming that one thing, not her bigger
+# session), one at a time, bugs first, then by the planning's order; each wording, red record and stuck build once. A look waits,
+# with a ledger line, while her share has no room, while her start is refused (tried again after NEW_RETRY minutes), or while
+# another look of hers is open; what lands while her night shift (her bigger session) runs is that night shift's. A look that
+# finds nothing new is nothing: no run, no text. Day or night: the look carries any_hour, her share is the wall.
+
+NEW_RETRY = 5  # minutes between tries of a refused start [the builder's pick]
+NEW_UNTIL = 60  # minutes a look stays useful once planned [the builder's pick]
+_OPEN_ROW = re.compile(r"^\| (?:⬜|🔁|🔨|⏸) \| ([FHB]\d+(?:\.\d+)*) ")
+_LABEL = re.compile(r"\b([FHB]\d+(?:\.\d+)*)\b")
+
+
+def _must_rows(base: Path | None = None) -> list[dict]:
+    """The open Must rows on the planning: {"label", "fp" (of its words), "bug", "rank"}, bugs first, then the planning's order."""
+    ws = base or folder()
+    try:
+        text = (ws / "HQ" / "roadmap.md").read_text(encoding="utf8")
+        sp = json.loads((ws / "HQ" / "sprint.json").read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return []
+    musts = {k for k, v in (sp.get("moscow") or {}).items() if str(v).lower() == "must"}
+    order = [str(x) for x in sp.get("order") or []] if isinstance(sp.get("order"), list) else []
+    out, heading = [], ""
+    for i, ln in enumerate(text.splitlines()):
+        if ln.startswith("## "):
+            heading = ln
+            continue
+        m = _OPEN_ROW.match(ln)
+        if not m or m.group(1) not in musts:
+            continue
+        cells = ln.split(" | ")
+        out.append({"label": m.group(1), "fp": _fp(cells[2] if len(cells) > 2 else ln), "bug": "Bugs" in heading,
+                    "rank": order.index(m.group(1)) if m.group(1) in order else len(order) + i})
+    return sorted(out, key=lambda r: (not r["bug"], r["rank"]))
+
+
+def _night_red() -> dict | None:
+    """The night run's record when it's red: {"key", "words"}, else None."""
+    try:
+        r = json.loads((ROOT / "scratch" / "nightly" / "last.json").read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(r, dict) or not (r.get("failed") or r.get("exit")):
+        return None
+    failed = r.get("failed") or []
+    n = len(failed) if isinstance(failed, list) else failed
+    return {"key": f"night|{r.get('at', '')}", "words": f"a look at the night run of {r.get('at', '?')}, red: {n} of {r.get('ran', '?')} flows failed; "
+            "read its record and log, find why, and put the fix in your prep"}
+
+
+def _stuck_builds(jobs_: list) -> list[dict]:
+    """Builds that stopped with no record: {"key", "words"}."""
+    out = []
+    for j in jobs_:
+        st = j.get("state", "")
+        if not (st.startswith("paused") and "no record" in st) or parse(j.get("text", "")):
+            continue
+        m = _LABEL.search(j.get("text", ""))
+        what = f"the build for {m.group(1)}" if m else "a build"
+        out.append({"key": f"stuck|{j['n']}|{st.split(':')[0]}", "words": f"a look at job {j['n']}, {what} that stopped with no record: "
+                    "read its record and log, find why, and put what it needs in your prep"})
+    return out
+
+
+def _her_open(aid: str, text: str, jobs_: list, now: dt.datetime) -> str | None:
+    """"night" while her night shift (a bigger session) runs, "look" while another look of hers is open, else None."""
+    import jobs as q
+    import schedule
+    seen = None
+    for j in jobs_:
+        p = parse(j.get("text", ""))
+        if not p or p["agent"] != aid or j.get("state", "").startswith(tuple(q.FINISHED) + ("paused", "skipped")):
+            continue
+        if p["kind"] == "session" or "night shift" in p.get("name", ""):
+            return "night"
+        seen = "look"
+    hm = now.strftime(FMT)
+    for it in schedule.read(text):
+        p = parse(it["text"])
+        if p and p["kind"] in ("session", "look", "review"):
+            continue  # a cycle that hasn't started yet isn't running; it reads the planning itself when it does
+        if it["state"].startswith("waiting") and it["at"] <= hm and ((p and p["agent"] == aid) or (not p and aid in it["text"].lower())):
+            seen = seen or "look"
+    return seen
+
+
+def new_work(now: dt.datetime | None = None, base: Path | None = None, log=None) -> list[str]:
+    """F174: what's new for her gets her look within minutes (see above). One start a minute at the most."""
+    now = (now or dt.datetime.now()).replace(second=0, microsecond=0)
+    aid = FIX_AGENT
+    did = []
+    if not on(base):
+        return did
+    a = agent_settings(aid, base)
+    if not a.get("on") or not _agent(aid, base):
+        return did
+    import jobs as q
+    text, jobs_, _ = q.read()
+    found = [{"key": f"row|{r['label']}", "fp": r["fp"], "label": r["label"], "bug": r["bug"]} for r in _must_rows(base)]
+    nr = _night_red()
+    found += [{"key": x["key"], "fp": x["key"], "label": "", "bug": True, "words": x["words"]} for x in ([nr] if nr else []) + _stuck_builds(jobs_)]
+    with held() as d:
+        nw = d.get("new_work")
+        if nw is None:  # the first minute: what's there already is the night shift's, as before
+            d["new_work"] = {"seen": {f["key"]: f["fp"] for f in found}, "waiting": []}
+            return did
+        seen, waiting = nw.setdefault("seen", {}), nw.setdefault("waiting", [])
+        busy = _her_open(aid, text, jobs_, now)
+        for f in found:
+            if seen.get(f["key"]) == f["fp"]:
+                continue
+            w = next((x for x in waiting if x["key"] == f["key"]), None)
+            if w:
+                w.update(f)
+            else:
+                waiting.append({**f, "since": now.strftime(FMT)})
+        if busy == "night":  # her running night shift takes what lands meanwhile
+            for w in waiting:
+                seen[w["key"]] = w["fp"]
+                ledger.entry(aid, f"{w['label'] or w['key']} taken by her night shift", ["it landed while her night shift ran, so that night shift has it"], now)
+                did.append(f"{aid}: {w['label'] or w['key']} taken by her night shift")
+            nw["waiting"] = []
+            return did
+        if not waiting:
+            return did
+        waiting.sort(key=lambda w: not w["bug"])  # stable: bugs first, then the order found (the planning's)
+        w = waiting[0]
+        name = w["label"] or w["key"]
+
+        def wait(kind: str, why: str) -> None:
+            if w.get("why") != kind:
+                w["why"] = kind
+                ledger.entry(aid, f"her look at {name} waits", [f"waits: {why}", "its row stays as it was; it gets its look within minutes of that clearing"], now)
+            did.append(f"{aid}'s look at {name} waits: {why}")
+
+        if busy == "look":
+            return did  # one at a time: it starts once the open one ends; nothing to write
+        if w.get("retry") and now.strftime(FMT) < w["retry"]:
+            return did
+        why = over_share(shares(aid, now, base), max(_step_price(aid, a), LEAST_CHARGE))
+        if why:
+            wait("share", why)
+            return did
+        goal = w.get("words") or (f"a look at {w['label']}, {'changed' if w['key'] in seen else 'new'} on the planning as a Must {'bug' if w['bug'] else 'feature'}: "
+                                  "read its row; put it in your prep, or write in your ledger what it waits on")
+        stamp = now.strftime(FMT)
+        st_ = _agent_state(d, aid)
+        k = 0
+        while f"{aid}|{stamp}|{k}" in st_["steps"]:
+            k = max(k, 99) + 1
+        code, out = _schedule("add", "now", step_text(aid, stamp, k, goal), "--priority", "--kind", f"step-{aid}")
+        if code:
+            w["retry"] = (now + dt.timedelta(minutes=NEW_RETRY)).strftime(FMT)
+            wait("refused", f"her start was refused ({(out or '').splitlines()[0][:120] if out else code}); tried again in {NEW_RETRY} minutes")
+            return did
+        st_["steps"][f"{aid}|{stamp}|{k}"] = {"spec": {"goal": goal, "done_means": "it's in your prep, or your ledger says what it waits on", "inputs": [],
+                                                      "may": "one look inside your limits", "at": now.strftime("%H:%M")},
+                                             "fps": [], "day": now.strftime("%Y-%m-%d"), "state": "planned", "stamp": stamp, "new_work": w["key"], "any_hour": True,
+                                             "until": (now + dt.timedelta(minutes=NEW_UNTIL)).strftime(FMT)}
+        seen[w["key"]] = w["fp"]
+        nw["waiting"] = waiting[1:]
+        did.append(f"{aid}: a look at {name} planned")
+    if log:
+        for x in did:
+            log(f"cycles: {x}")
+    return did
+
+
 def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> dict:
     """The routine's minute on the main: the items follow the settings, finished runs go into the ledgers, the
     batches go out, waiting runs are dropped at the hours' end, the reviews are planned, the weekly score written."""
@@ -2637,7 +2811,7 @@ def tick(now: dt.datetime | None = None, base: Path | None = None, log=None) -> 
         out["processed"] = settle(now, base, log)
     except Exception as e:
         out["processed"] = [f"error: {e!r}"]
-    for name, fn in (("batches", send_batches), ("later", later), ("looks", list_looks), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds)):
+    for name, fn in (("batches", send_batches), ("later", later), ("looks", list_looks), ("orders", waiting_orders), ("dropped", drop_waiting), ("reviews", plan_reviews), ("scores", write_scores), ("fixes", fix_rounds), ("new", new_work)):
         try:
             out[name] = fn(now, base, log=log)
         except Exception as e:
