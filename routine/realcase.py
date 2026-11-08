@@ -41,6 +41,7 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+VERSION_HERE = ".version-here.json"  # H340: the version state of the code a copy was made of (update.py reads it)
 LEFT_OUT = {"workspace", "scratch", ".status", ".venv", "models", "HQ", ".git", "__pycache__", "node_modules"}
 LINES = {"team": "HQ/team-line", "direct": "HQ/direct-line", "donna": "HQ/direct-line", "coaching": "HQ/coaching-line"}
 CHROME = ("google-chrome", "chromium", "chromium-browser", "google-chrome-stable")
@@ -75,6 +76,12 @@ def _copy_code(src: str, dest: str) -> None:
             shutil.copytree(s, os.path.join(dest, nm), symlinks=True, ignore=junk, ignore_dangling_symlinks=True)
         elif os.path.isfile(s):
             shutil.copy2(s, os.path.join(dest, nm), follow_symlinks=False)
+    # H340 (QA, job 9418): the copy has no git, so it would serve the changelog as if it were on its version and hide Coming
+    # next; it carries the code's own version state instead (its tag and how far ahead), read by update.local_version
+    r = subprocess.run([sys.executable, os.path.join(src, "routine", "update.py"), "here"], capture_output=True, text=True, timeout=30)
+    if r.returncode == 0 and r.stdout.strip():
+        with open(os.path.join(dest, VERSION_HERE), "w") as f:
+            f.write(r.stdout.strip().splitlines()[-1] + "\n")
 
 
 class Case:

@@ -16,6 +16,7 @@ changelog what we've added/changed over the versions".
     update.py check [--force]   looks at HQ's public repo for its newest version tag (read only, no login);
                                 at most every 6 hours, every 30 minutes after a failed look (offline: quiet)
     update.py changelog         one JSON line: CHANGELOG.md as versions, newest first
+    update.py here              one JSON line: this code's version (its tag, how far ahead), for a copy without git (H340)
     update.py start             starts the update in the background (it ends a call, a job or the mail check that runs)
     update.py restart           H187: restarts what the files on stdin changed (JSON {"changed": [...],
                                 "was": {"call": bool, "status": bool}}); one JSON line {"done", "todo"}
@@ -173,6 +174,13 @@ def local_version() -> dict:
                 ahead = git("rev-list", "--count", f"{tag}..HEAD", timeout=10).stdout.strip()
                 return {"tag": tag, "version": vname(tag), "ahead": int(ahead or 0)}
     except Exception:
+        pass
+    try:  # H340: a throwaway copy without git (routine/realcase.py) carries the version state of the code it was made of
+        with open(os.path.join(HQ, ".version-here.json")) as f:
+            d = json.load(f)
+        if vtuple(d.get("tag", "")):
+            return {"tag": d["tag"], "version": d.get("version") or vname(d["tag"]), "ahead": int(d.get("ahead") or 0)}
+    except (OSError, ValueError, TypeError, AttributeError):
         pass
     return {"tag": "v" + fv, "version": fv, "ahead": 0} if fv else {"tag": "", "version": "", "ahead": 0}
 
@@ -1682,6 +1690,8 @@ def main(argv: list[str]) -> int:
             pass
     elif cmd == "changelog":
         print(json.dumps(changelog()))
+    elif cmd == "here":  # H340: this code's version state, for a throwaway copy without git (routine/realcase.py)
+        print(json.dumps(local_version()))
     elif cmd == "start":
         print(json.dumps(start()))
     elif cmd == "run":
