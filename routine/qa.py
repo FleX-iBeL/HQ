@@ -261,8 +261,25 @@ def _append(jobs: list, text: str, label: str | None = None) -> dict:
     j = {"n": n, "state": "ready", "past": False, "agreed": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
          "text": q.one_line(text).replace("·", "-")}
     q.carry(j, label)  # F103: the same id through the QA and the fix
-    jobs.append(j)
+    jobs.insert(_place(jobs, label), j)
     return j
+
+
+def _place(jobs: list, label: str | None) -> int:
+    """F212: where a new QA job goes in the list: by its item's rank on the planning, the order the line picks by (F176,
+    tick.by_rank), so the place the status page numbers is the place it runs. Before the first waiting job whose item ranks
+    lower; equals and higher-ranked work stay ahead of it. An unranked item, or no planning: at the end, as before."""
+    try:
+        import sprint as sp_
+        place = {l: i for i, l in enumerate(sp_.order())}
+    except Exception:
+        return len(jobs)
+    if label not in place:
+        return len(jobs)
+
+    def rank(w):
+        return place.get((w.get("item") or {}).get("label") or job_label(w.get("text") or ""), len(place))
+    return next((i for i, w in enumerate(jobs) if q.waiting(w) and rank(w) > place[label]), len(jobs))
 
 
 def _estimate(j: dict, kind: str) -> None:
