@@ -40451,6 +40451,269 @@ FLOWS.update({
 # == end of H339's block ==
 
 
+
+# == H342's block: her QA tests replay the real case, on a copy of the real data, where he would see it, and fail first ==
+
+def _h342_item(self, name, his):
+    """A throwaway HQ with one made-up bug row about the status page, his words in it, and her tests started (qatests.py new)."""
+    import subprocess as _sp
+    sys.path.insert(0, str(ROOT / "routine"))
+    ws, env, d = self._wall_env(name, hour=14)
+    env.update({"HQ_SAYSO_FAKE": "no", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_DIRECT_AGENT": "moneypenny",
+                "HQ_QA_SEALS": str(d / "seals"), "HQ_QA_ON": "1"})
+    env.pop("HQ_PROOF_ON", None)
+    jobs, _minute, _state, _new = self._wall_tools(env, d, ws)
+    self._wall_usage(env)
+    th = ws / "HQ/team-line"
+    th.mkdir(parents=True, exist_ok=True)
+    said_at = time.time()
+    (th / "thread.jsonl").write_text(json.dumps({"at": said_at, "from": "me", "text": his}) + "\n")
+    env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+
+    def script(nm, *a, **k):
+        r = _sp.run([sys.executable, str(ROOT / "routine" / nm), *a], capture_output=True, text=True, env={**env, **k}, cwd=str(ws), timeout=600)
+        r.out = r.stdout + r.stderr
+        return r
+
+    r = jobs("write-row", "The status page shows how many items passed her check the first time. What's wrong: it doesn't say zq342. What right "
+                          "looks like: the line says zq342 passed. How to check: the status page as served.", "--bug", HQ_DIRECT_AGENT="moneypenny")
+    need(r.returncode == 0 and re.search(r"\b([FH]\d+) is on the planning", r.stdout), f"the row: {r.stdout} {r.stderr}")
+    label = re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+    r = script("review.py", "add", label, f'His words: "{his}" Sources: his text on the team line, {time.strftime("%-d %B %Y %H:%M", time.localtime(said_at))}.',
+               HQ_SAYSO_FAKE="yes")
+    need(r.returncode == 0, f"his words in the row: {r.out}")
+    script("qatests.py", "new", label)
+    qd = ws / "HQ/qa-tests" / label
+    t = json.loads((qd / "tests.json").read_text())
+    need(t["sentences"], f"no sentence of his in her list: {t}")
+    for x in t["sentences"]:
+        x["tests"] = ["t"]
+    t["tests"] = {"t": "the status page, as HQ's own server serves it on the copy, says zq342 passed"}
+    (qd / "tests.json").write_text(json.dumps(t))
+    head = ("import sys, os, pathlib\nhq = pathlib.Path(sys.argv[1])\nsys.path.insert(0, str(hq / 'routine'))\n\n\n"
+            "def t(n, ok, why):\n    print(('PASS ' if ok else 'FAIL ') + n + ('' if ok else ': ' + why), flush=True)\n\n\n")
+    return ws, env, d, script, label, qd, head
+
+
+def _h342_state(env, label):
+    import subprocess as _sp
+    r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import qatests; print(json.dumps(qatests.state(sys.argv[2])))",
+                 str(ROOT / "routine"), label], capture_output=True, text=True, env=env)
+    need(r.returncode == 0, f"her tests' state couldn't be read: {r.stderr[-300:]}")
+    return json.loads(r.stdout)
+
+
+def _h342_put(env, label, code):
+    """Changes her tests' state in the throwaway sprint file: code is a Python statement on e (the row's qa_tests entry)."""
+    import subprocess as _sp
+    r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import qatests\n"
+                 f"def ch(e):\n    {code}\nqatests._put(sys.argv[2], ch)", str(ROOT / "routine"), label], capture_output=True, text=True, env=env)
+    need(r.returncode == 0, f"her tests' state couldn't be changed: {r.stderr[-300:]}")
+
+
+REAL_CASE_TEST = ("import realcase\ncase = realcase.Case(sys.argv[1])\nwith case.serve() as page:\n    code, body = page.get('/first-time')\n"
+                  "t('t', code == 200 and 'zq342 passed' in body, f'the status page as served ({code}) says {realcase.words(body)[:120]!r}, not zq342 passed')\n")
+
+
+async def _h342_flow497(self) -> str:
+    """H342 (1), no Claude: fail first, for the row's reason. On a throwaway HQ with a made-up row about the status page, her test that
+    already passes on the code from before the build is refused with its PASS line; one that only crashes there (a traceback, an exit
+    that isn't 0) or fails with nothing but an error's name is refused; a real-case test (realcase.Case: HQ's own status server on the
+    copy, the page as served) that fails for the row's reason is sealed, and the seal keeps the rules and her FAIL line. realcase refuses
+    to start outside her test run."""
+    import subprocess as _sp
+    ws, env, d, script, label, qd, head = _h342_item(self, "h342fail", "The status page should say zq342 passed, as he reads it there.")
+    for case, body, want in (
+            ("passes", "t('t', True, '')\n", ("already pass", "PASS t", "rewrite it to replay")),
+            ("crashes", "t('t', False, 'not there yet')\nraise RuntimeError('a helper is missing')\n", ("crashed", "traceback")),
+            ("exits", "t('t', False, 'not there yet')\nsys.exit(3)\n", ("crashed", "exit 3")),
+            ("bare", "t('t', False, \"KeyError('x')\")\n", ("without saying what he'd see",))):
+        (qd / "test.py").write_text(head + body)
+        r = script("qatests.py", "check", label)
+        need(r.returncode != 0 and all(w in r.out for w in want) and "Nothing sealed" in r.out, f"a test that {case} on the old code: {r.out[-500:]}")
+        need(not (_h342_state(env, label).get("sealed") or {}).get("fp"), f"a test that {case} was sealed")
+    (qd / "test.py").write_text(head + REAL_CASE_TEST)
+    r = script("qatests.py", "check", label)
+    need(r.returncode == 0 and "are sealed" in r.out, f"the real-case test that fails for its reason wasn't sealed: {r.out[-600:]}")
+    s = _h342_state(env, label).get("sealed") or {}
+    need(s.get("rules") == "H342", f"the seal doesn't carry the rules it was made under: {s}")
+    why = ((s.get("before") or {}).get("whys") or {}).get("t") or ""
+    need("zq342" in why and "status page as served (200)" in why, f"the seal doesn't keep her FAIL line from the code before the build: {why!r}")
+    r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import realcase; realcase.Case(sys.argv[2])",
+                 str(ROOT / "routine"), str(ROOT)], capture_output=True, text=True, env={k: v for k, v in env.items() if k not in ("HQ_WALL", "HQ_QA_BOX")})
+    need(r.returncode != 0 and "Refused" in r.stderr and "her test run" in r.stderr, f"realcase started outside her test run: {r.stderr[-300:]}")
+    return "a passing, a crashing, an exiting and a bare test refused on the old code; the real-case test sealed with its FAIL line and the rules"
+
+
+async def _h342_flow498(self) -> str:
+    """H342 (2), no Claude: the review asks the real-case probe. Her real-case test (the page as served) passes its review; a test that
+    reads a file behind the status page (.status/line.json) is flagged by the program even when the reviewer would pass it, and the ready
+    check names it. The reviewer's answer needs the probe: without it there's no verdict, and a probe that finds no replay is a hole. Tests
+    sealed or reviewed before the rules hold the ready check until they're checked and reviewed again, and the review then looks anew."""
+    import subprocess as _sp
+    ws, env, d, script, label, qd, head = _h342_item(self, "h342probe", "The status page should say zq342 passed, as he reads it there.")
+    (qd / "test.py").write_text(head + REAL_CASE_TEST)
+    need("are sealed" in script("qatests.py", "check", label).out, "the real-case test wasn't sealed")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 0 and "Round 1 of 20" in r.out and "passed" in r.out, f"the real-case test's review: {r.out[-400:]}")
+    r = script("qatests.py", "show", label)
+    need("nothing of hers holds the Ready mark" in r.out, f"her tests still hold the Ready mark after their review passed: {r.out[-400:]}")
+    # the stand-in: the state file behind the page, read instead of the page
+    (qd / "test.py").write_text(head + "import json\np = hq / '.status' / 'line.json'\nd = json.load(open(p)) if p.exists() else {}\n"
+                                       "t('t', 'zq342 passed' in json.dumps(d), 'the line state file has no zq342 yet')\n")
+    need("are sealed" in script("qatests.py", "check", label).out, "the stand-in test wasn't sealed (it fails on the old code)")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 1 and "file behind the page" in r.out and "line.json" in r.out, f"the stand-in passed its review: {r.out[-500:]}")
+    r = script("sprint.py", "check", label)
+    need("file behind the page" in r.out, f"the ready check doesn't name the stand-in: {r.out[-400:]}")
+    # the verdict needs the probe
+    r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import qatests\n"
+                 "s = ['one']\nok = {'pass': True, 'sentences': [{'checked': True}], 'findings': []}\n"
+                 "print(json.dumps([qatests.verdict(ok, s), qatests.verdict({**ok, 'real_case': {'replays': True}}, s),"
+                 " qatests.verdict({**ok, 'real_case': {'replays': False, 'hole': 'it reads a made-up night'}}, s)]))",
+                 str(ROOT / "routine")], capture_output=True, text=True, env=env)
+    v = json.loads(r.stdout)
+    need(v[0] is None and v[1] == [True, []] and v[2][0] is False and "real-case probe" in v[2][1][0] and "made-up night" in v[2][1][0],
+         f"the verdict without, with and with a failing probe: {v}")
+    # rules: back to the real-case test, then its seal and its review made to look older than the rules
+    (qd / "test.py").write_text(head + REAL_CASE_TEST)
+    need("are sealed" in script("qatests.py", "check", label).out, "the real-case test wasn't sealed again")
+    need(script("qatests.py", "review", label).returncode == 0, "the real-case test's second review didn't pass")
+    _h342_put(env, label, "e['sealed'].pop('rules', None)")
+    r = script("sprint.py", "check", label)
+    need("real-case rules" in r.out and "haven't passed the hard checks" in r.out, f"a seal from before the rules doesn't hold the ready check: {r.out[-400:]}")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 2 and "sealed before the real-case rules" in r.out, f"a review of a seal from before the rules ran: {r.out[-300:]}")
+    need("are sealed" in script("qatests.py", "check", label).out, "the check didn't seal them again under the rules")
+    _h342_put(env, label, "e['reviews'][-1].pop('rules', None)")
+    r = script("sprint.py", "check", label)
+    need("before the real-case probe" in r.out, f"a review from before the probe still counts: {r.out[-400:]}")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 0 and "unchanged since" not in r.out, f"the review didn't look again under the probe: {r.out[-300:]}")
+    return "the real-case test passes its review, the stand-in is flagged by the program, the verdict needs the probe, old seals and reviews hold"
+
+
+async def _h342_flow499(self) -> str:
+    """H342 (3), no Claude: a build also runs the sealed tests of the items it touches. In a throwaway git history, the build's commit
+    changes a.py (and the flows file, which doesn't count). Of the items with sealed tests: one whose commits touched a.py and whose test
+    passed before the build fails now: the run is red, naming it and its flows; one that was already red before the build is named, not
+    counted; one on an open fix road counts only its tests from before the road; one whose test imports a is run; one that only touched
+    b.py isn't run. The neighbour's write lands in its own copy, never in the workspace the build's copy points to."""
+    import subprocess as _sp
+    ws, env, d, script, label, qd, head = _h342_item(self, "h342near", "The status page should say zq342 passed, as he reads it there.")
+    repo = d / "repo"
+    repo.mkdir()
+    g = lambda *a: _sp.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", *a], capture_output=True, text=True)
+    g("init", "-q")
+
+    def commit(subject, **files):
+        for f, body in files.items():
+            p = repo / f.replace("__", "/")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body)
+        g("add", "-A")
+        need(g("commit", "-qm", subject).returncode == 0, f"no commit {subject}")
+
+    commit("F9100: the start", **{"a.py": "STATE = 'ok'\n", "b.py": "B = 1\n"})
+    commit("F9301: near uses a", **{"a.py": "STATE = 'ok'  # near\n"})
+    commit("F9302: far uses b", **{"b.py": "B = 2\n"})
+    commit("F9303: always red, uses a", **{"a.py": "STATE = 'ok'  # old\n"})
+    commit("F9304: on a road, uses a", **{"a.py": "STATE = 'ok'  # road\n"})
+    commit(f"{label}: the build", **{"a.py": "STATE = 'broken'\n", "app__happy_flows.py": "# flows\n"})
+    (repo / "workspace").symlink_to(ws)
+    rm = ws / "HQ/roadmap.md"
+    rm.write_text(rm.read_text() + "\n| ⬜ | F9301 A made-up neighbour | Its test is happy flow 12. | |\n")
+    seals = d / "seals"
+    mk = lambda lab, body: (seals / lab / "s").mkdir(parents=True, exist_ok=True) or (seals / lab / "s" / "test.py").write_text(head + body)
+    mk(label, "t('t_own', True, '')\n")
+    mk("F9301", "ws = os.path.realpath(hq / 'workspace')\nopen(os.path.join(ws, 'HQ', 'h342-neighbour.marker'), 'w').write('x')\n"
+                "t('near', \"'ok'\" in (hq / 'a.py').read_text(), 'a.py says broken')\n")
+    mk("F9302", "t('far', False, 'always red, never run')\n")
+    mk("F9303", "t('old', False, 'red before the build too')\n")
+    mk("F9304", "t('r_old', True, '')\nt('r_new', False, 'the road is still open')\n")
+    mk("F9305", "sys.path.insert(0, str(hq))\nimport a\nt('imp', a.STATE in ('ok', 'broken'), 'a.py has no state')\n")
+    names = {label: ["t_own"], "F9301": ["near"], "F9302": ["far"], "F9303": ["old"], "F9304": ["r_old", "r_new"], "F9305": ["imp"]}
+    for lab, ns in names.items():
+        k = seals / lab / "s"
+        (k / "tests.json").write_text(json.dumps({"sentences": [], "tests": {n: "x" for n in ns}}))
+        w = ws / "HQ/qa-tests" / lab
+        w.mkdir(parents=True, exist_ok=True)
+        for f in ("test.py", "tests.json"):
+            (w / f).write_text((k / f).read_text())
+        road = ", 'qa_fails': [{'at': 1, 'finding': 'x', 'tests_before': ['r_old']}]" if lab == "F9304" else ""
+        _h342_put(env, lab, f"e.update({{'sealed': {{'fp': qatests.fingerprint_of({str(k)!r}), 'at': 1, 'copy': {str(k)!r}, 'tests': {ns!r}, 'his': 1, 'cycle': 0}}{road}}})")
+    r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import qatests\n"
+                 "print('RESULT ' + json.dumps(qatests.end_run(sys.argv[2], sys.argv[3])))", str(ROOT / "routine"), label, str(repo)],
+                capture_output=True, text=True, env={**env, "HQ_PROOF_ROOT": str(repo)}, timeout=900)
+    m = re.search(r"RESULT (.*)", r.stdout)
+    need(m, f"the build's run didn't finish: {r.stdout[-400:]} {r.stderr[-800:]}")
+    rec = json.loads(m.group(1))
+    nb = {x["label"]: x for x in rec.get("neighbours") or []}
+    need(rec.get("green") is False and rec.get("neighbours_red") == ["F9301"], f"the broken neighbour didn't turn it red alone: {rec}")
+    need("F9301" in rec.get("why", "") and "flows 12" in rec.get("why", "") and 12 in rec.get("neighbour_flows", []), f"the red isn't named with its flows: {rec.get('why')}")
+    need(set(nb) == {"F9301", "F9303", "F9304", "F9305"}, f"the neighbours run: {sorted(nb)} (F9302 only touched b.py)")
+    need(nb["F9303"].get("already_red") == ["old"] and not nb["F9303"].get("broken"), f"a red from before the build counted: {nb['F9303']}")
+    need(nb["F9304"]["ran"] == 1 and not nb["F9304"]["failed"], f"a fix road's new test counted: {nb['F9304']}")
+    need(not (ws / "HQ" / "h342-neighbour.marker").exists(), "the neighbour's test wrote into the workspace the build's copy points to")
+    return "the broken neighbour turns the run red with its flows; a red from before, a road's new test and an untouched item don't"
+
+
+async def _h342_flow500(self) -> str:
+    """H342 (4), no Claude: each week, how many items passed her check the first time. On a throwaway planning with QA marks this week
+    and last: qa.py first-time counts an item in the week of its first mark (1 of 2 this week, one sent back; 1 of 1 last week) and every
+    check of the week apart (2 of 4); HQ's own status server serves the line and the page fetches it; a first mark turned into a
+    send-back is counted at once."""
+    import datetime as _dt
+    import subprocess as _sp
+    ws, env, d = self._wall_env("h342first", hour=14)
+    rm = ws / "HQ/roadmap.md"
+    today = _dt.date.today()
+    fmt = lambda day, hm: f"{day.day} {day:%B %Y} {hm}"
+    now_, last = fmt(today, "00:01"), fmt(today - _dt.timedelta(days=7), "10:00")
+    rows = (f"| ⬜ | F9401 A first-time pass | Made up. | QA passed (job 1, {now_}): fine. |\n"
+            f"| ⬜ | F9402 Sent back once | Made up. | QA failed (job 2, {now_}): off. QA passed (job 3, {now_}): fine. |\n"
+            f"| ⬜ | F9403 Passed last week | Made up. | QA passed (job 4, {last}): fine. QA failed (job 5, {now_}): later. |\n")
+    text = rm.read_text().replace("## Phase F · Bugs\n", "## Phase F · Bugs\n", 1)
+    marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+    i = text.index("## Phase F · Bugs")
+    j = text.index(marker, i) + len(marker)
+    rm.write_text(text[:j] + rows + text[j:])
+    r = _sp.run([sys.executable, str(ROOT / "routine/qa.py"), "first-time", "--weeks", "2"], capture_output=True, text=True, env=env)
+    lines = r.stdout.strip().splitlines()
+    need(len(lines) == 2 and "1 of 2 items passed her check the first time (1 sent back: F9402); 2 of 4 checks passed in all" in lines[0]
+         and "1 of 1 items passed her check the first time; 1 of 1 checks passed in all" in lines[1], f"the count: {r.stdout} {r.stderr[-300:]}")
+    p, port = self._status_server(ROOT, env, "h342first")
+    try:
+        code, body, _ = http_get("/first-time", f"http://127.0.0.1:{port}", timeout=30)
+        html = body.decode()
+        need(code == 200 and "This week" in html and "<b>1 of 2</b> items passed her check the first time" in html and "Last week" in html,
+             f"the served line: {code} {html[:400]}")
+        code, page, _ = http_get("/", f"http://127.0.0.1:{port}", timeout=30)
+        need(code == 200 and b"fetch('/first-time'" in page and b'id="first-time"' in page, "the status page doesn't fetch the line")
+        time.sleep(1.1)
+        rm.write_text(rm.read_text().replace(f"QA passed (job 1, {now_})", f"QA failed (job 1, {now_})", 1))
+        code, body, _ = http_get("/first-time", f"http://127.0.0.1:{port}", timeout=30)
+        need("<b>0 of 2</b> items passed her check the first time" in body.decode(), f"the line didn't follow the planning: {body.decode()[:300]}")
+        code, js, _ = http_get("/first-time?json", f"http://127.0.0.1:{port}", timeout=30)
+        w = json.loads(js)["weeks"][0]
+        need(w["items"] == 2 and w["first_time"] == 0 and w["checks"] == 4 and w["passed"] == 1, f"the numbers: {w}")
+    finally:
+        p.terminate()
+    return "1 of 2 this week and 1 of 1 last, 2 of 4 checks; served, fetched by the page, and following the planning at once"
+
+
+for _n in range(497, 501):
+    setattr(Run, f"flow{_n}", globals()[f"_h342_flow{_n}"])
+FLOWS.update({
+    497: ("H342 (1): fail first for the row's reason: a test passing, crashing or bare on the old code is refused; a real-case test is sealed with its FAIL line", False, "flow497"),
+    498: ("H342 (2): the review's real-case probe: a file behind the status page is flagged by the program; seals and reviews from before the rules hold", False, "flow498"),
+    499: ("H342 (3): a build runs the sealed tests of the items it touches: a broken neighbour is red with its flows; red before, a road's new test, untouched ones aren't", False, "flow499"),
+    500: ("H342 (4): each week how many items passed her check the first time: counted from the marks, served on the status page, following the planning", False, "flow500"),
+})
+FLOW_LIMITS.update({497: 600, 498: 600, 499: 600})
+# == end of H342's block ==
+
+
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
