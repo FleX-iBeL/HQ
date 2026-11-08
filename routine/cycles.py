@@ -2543,6 +2543,9 @@ def plan_reviews(now: dt.datetime | None = None, base: Path | None = None, log=N
         rt = r.get("at", "09:00") if _at_hour(a, r.get("at", "09:00")) else a["hours"][0]  # H340: the review's time, else her hours' start
         at = ff.replace(hour=_t(rt).hour, minute=_t(rt).minute, second=0, microsecond=0)
         code, out = _schedule("add", at.strftime(FMT), text, "--priority", "--kind", f"cycle-{aid}")
+        if code:  # F181: schedule.py refused the time (it has passed, say): said as refused, never as planned
+            did.append(f"{aid}'s monthly review for {at:%A %-d %B %H:%M} was refused by the schedule: {' '.join(out.split())[:200]}")
+            continue
         did.append(f"{aid}'s monthly review planned for {at:%A %-d %B %H:%M}")
     if log:
         for x in did:

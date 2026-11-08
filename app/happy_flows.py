@@ -29976,12 +29976,26 @@ tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
         for a in ("pepper", "moneypenny"):
             cy("set", a, "on", "off")
         rm = ws / "HQ/roadmap.md"
-        t = drive("tick", "2026-10-29 10:00")
+        # F181: the minutes run on the made-up day's own clock (every python they start, schedule.py too), so its first
+        # Friday is still ahead whatever the real date is; schedule.py refuses a time that has passed, and so it should
+        shim = self.tmp / "f181-clock"
+        shim.mkdir(exist_ok=True)
+        (shim / "sitecustomize.py").write_text(
+            "import datetime as _d, os\n_REAL = _d.datetime\n_AT = _REAL.strptime(os.environ['H195_CLOCK'], '%Y-%m-%d %H:%M')\n"
+            "class _DT(_d.datetime):\n    @classmethod\n    def now(cls, tz=None):\n        return _AT if tz is None else _AT.astimezone(tz)\n"
+            "    @classmethod\n    def today(cls):\n        return cls.now()\n_d.datetime = _DT\n")
+        def clock(at):
+            return {"H195_CLOCK": at, "PYTHONPATH": os.pathsep.join([str(shim)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))}
+        t = drive("tick", "2026-10-29 10:00", extra=clock("2026-10-29 10:00"))
         need(any("donna's monthly review planned for Friday 6 November 09:00" in x for x in t["log"]), f"the review wasn't planned: {t['log']}")
         items = re.findall(r"^- Item (\d+) · waiting(.*?) · Agent cycle: donna, monthly review$", rm.read_text(), re.M)
         need(len(items) == 1 and ", priority" in items[0][1] and "every" not in items[0][1] and "2026-11-06 09:00" in items[0][1], f"the review item: {items}")
-        t = drive("tick", "2026-10-29 10:01")
+        t = drive("tick", "2026-10-29 10:01", extra=clock("2026-10-29 10:01"))
         need(not any("monthly review planned" in x for x in t["log"]), "a second minute planned the review again")
+        # F181: her other cycles, planned on the made-up day, may be past on the real clock too; they'd run first, so they go
+        for n_, what in re.findall(r"^- Item (\d+) · waiting.* · ([^·\n]*)$", rm.read_text(), re.M):
+            if what != "Agent cycle: donna, monthly review":
+                need(sched("cancel", n_).returncode == 0, f"her other cycle item {n_} didn't cancel")
         # start it: moved to now, promoted; the fake claude writes the proposal
         before = {p.relative_to(ws).as_posix(): _hl.md5(p.read_bytes()).hexdigest() for p in ws.rglob("*") if p.is_file() and ".git" not in p.parts}
         r = sched("move", items[0][0], "now")
@@ -30023,7 +30037,7 @@ tick.start(job); print(json.dumps(json.load(open(run + '/job-settings.json'))))
         need((ws / "HQ/agents/handbook.md").read_text() == (ROOT / "template/HQ/agents/handbook.md").read_text(), "the handbook changed")
         # off: no review planned
         ws2, env2 = self._h298_ws("p9off", maker=False)
-        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws2), "tick", "2026-10-29 10:00"], capture_output=True, text=True, env={**env2, "HQ_LEDGER_FOLDER": str(ws2 / "HQ/ledger")}, cwd=str(ROOT), timeout=120)
+        r = _sp.run([sys.executable, str(drv), str(ROOT), str(ws2), "tick", "2026-10-29 10:00"], capture_output=True, text=True, env={**env2, "HQ_LEDGER_FOLDER": str(ws2 / "HQ/ledger"), **clock("2026-10-29 10:00")}, cwd=str(ROOT), timeout=120)
         need("monthly review" not in (ws2 / "HQ/roadmap.md").read_text(), "a review was planned with the feature off")
         return ("Donna's review planned once for Friday 6 November 09:00 as a one-off priority item (the first-Friday math from any day); started, it ran "
                 "in its 20-minute 60-turn box with her character, the handbook, her whole month and the questions, and its proposal landed in her ledger "
