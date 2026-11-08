@@ -4,7 +4,7 @@ night. This file keeps its old name for now (another branch was editing it the s
 They print a short pass/fail table at the end.
 
     .venv/bin/python app/happy_flows.py                # all ten flows
-    .venv/bin/python app/happy_flows.py --quick        # only the flows without Claude turns (1, 8, 9, 10, 15, 16, 18, 19, 20, 21, 23, 25, 26, 27, 28, 29, 30, 31, 33, 34)
+    .venv/bin/python app/happy_flows.py --quick        # only the flows without Claude turns (1, 8, 9, 10, 15, 16, 18, 19, 20, 21, 23, 25, 26, 27, 28, 29, 30, 31, 33, 34); a flow named in --only still runs (F188)
     .venv/bin/python app/happy_flows.py --only 3,5     # just these flows
     .venv/bin/python app/happy_flows.py --keep         # keep the scratch folder (server log, transcripts)
 
@@ -40856,7 +40856,7 @@ async def main(args) -> bool:
             name, uses_claude, method = FLOWS[n]
             res = Result(n, name)
             results.append(res)
-            if args.quick and uses_claude:
+            if args.quick and uses_claude and not args.only:  # F188: a Claude flow named in --only runs, also with --quick
                 res.note = "skipped (--quick)"
                 continue
             if testwall.outer_gone():  # F111: whoever started this run is gone, and its folder goes with it
