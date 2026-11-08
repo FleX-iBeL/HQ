@@ -504,7 +504,7 @@ def tick(now=None):
                 done.append(f"{label}: held on a wait that never ends ({stuck}); told her")
         if what == "passed":  # its switches go: nothing more for the line to do
             with q.locked():
-                S.set_go(label, "both", False)
+                S.set_go(label, "both", False, by="line")  # the line's own off, not his decision (F201)
             done.append(f"{label}: passed her check, its switches off")
             continue
         if what in ("send", "mark", "rerun", "resume", "split", "prep"):

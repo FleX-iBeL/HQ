@@ -48,6 +48,10 @@ usage:
                                                         when left out); --json for the status page
   python3 routine/sprint.py plan LABEL... [--night D]    Plan the sprint: those rows planned for the team in that order
   python3 routine/sprint.py refresh                    the sizes and the looks for rows whose words changed (the routine does it)
+  python3 routine/sprint.py held-off LABEL... [prep|build|both] --said "HIS WORDS" [--at "YYYY-MM-DD HH:MM"]
+                                                        F201: an off he gave, held as his decision (no switch written):
+                                                        the Must pickup leaves it off until he turns it on (an off by
+                                                        go ... off is held the same way by itself)
 Used by the background look itself: look-run LABEL.
 
 H271 (25 October 2026, call at 11:31), in the user's words: "i want moneypenny to prioritize bugs always over features
@@ -302,6 +306,39 @@ def go_of(label, d=None):
     return {k: g.get(k) for k in GO_KINDS}
 
 
+def off_of(label, d=None):
+    """F201: {"prep": {...} | None, "build": {...} | None} for LABEL: the switch-offs he decided on (his words, who, when), kept under
+    "offs" in sprint.json apart from the switches, so a later on (or a switch list written back without it) doesn't erase his decision."""
+    d = _load(RANKS) if d is None else d
+    o = (d.get("offs") or {}).get(label.strip().upper()) or {}
+    return {k: o.get(k) for k in GO_KINDS}
+
+
+def hold_off(label, which, words, at=None, d=None):
+    """F201: keep his switch-off of LABEL's prep, build or both as his decision, with his words and when. Writes no switch."""
+    label = label.strip().upper()
+    kinds = GO_KINDS if which == "both" else (which,)
+    if any(k not in GO_KINDS for k in kinds):
+        sys.exit("held-off LABEL… [prep|build|both] --said \"HIS WORDS\" [--at \"YYYY-MM-DD HH:MM\"]")
+    rec = {"by": "him", "words": words or "", "at": at or time.strftime("%Y-%m-%d %H:%M")}
+    if words:
+        try:
+            r, _ = _go_words(words)
+        except (SystemExit, Exception):
+            r = None
+        if r and r.get("where"):
+            rec["where"] = r["where"]
+    save = d is None
+    d = _load(RANKS) if save else d
+    o = d.setdefault("offs", {}).setdefault(label, {})
+    for k in kinds:
+        o[k] = rec
+    if save:
+        d["set"] = int(time.time())
+        _save(RANKS, d)
+    return off_of(label, d)
+
+
 def go_all(d=None):
     """{label: go_of} for every row with a switch on."""
     d = _load(RANKS) if d is None else d
@@ -324,7 +361,8 @@ def _go_words(words):
 
 def set_go(label, which, on, by="him", words=None):
     """Switch prep, build or both on or off for LABEL. On needs his words of today (--said) or, for Moneypenny's own cycle, by="moneypenny".
-    Returns the switches as they are now. Exits with why."""
+    An off by him (a call, a chat or the page, with --said his words when there are any) is kept as his decision (F201, hold_off); the
+    line's own off (by="line") is not. Returns the switches as they are now. Exits with why."""
     label = label.strip().upper()
     kinds = GO_KINDS if which == "both" else (which,)
     if any(k not in GO_KINDS for k in kinds):
@@ -352,6 +390,8 @@ def set_go(label, which, on, by="him", words=None):
         e[k] = rec if on else None
     if not any(e.get(k) for k in GO_KINDS):
         g.pop(label, None)
+    if not on and by == "him":
+        hold_off(label, which, words, d=d)
     d["set"] = int(time.time())
     _save(RANKS, d)
     return go_of(label, d)
@@ -364,9 +404,13 @@ def go_clear_closed(rows=None):
     d = _load(RANKS)
     g = d.get("go") or {}
     gone = [l for l in g if l not in have]
-    if gone:
+    offs = d.get("offs") or {}
+    gone_off = [l for l in offs if l not in have]
+    if gone or gone_off:
         for l in gone:
             g.pop(l, None)
+        for l in gone_off:
+            offs.pop(l, None)
         d["go"] = g
         _save(RANKS, d)
     return gone
@@ -375,10 +419,14 @@ def go_clear_closed(rows=None):
 def go_words(label, g=None):
     """The switches in a few plain words: "prepare on (his words, 5 Nov 20:10), build off"."""
     g = go_of(label) if g is None else g
+    try:
+        o = off_of(label)
+    except (OSError, ValueError):
+        o = {}
     def one(k, v):
         name = {"prep": "prepare", "build": "build"}[k]
         if not v:
-            return f"{name} off"
+            return f"{name} off (by him, {o[k].get('at', '')})" if (o.get(k) or {}).get("by") == "him" else f"{name} off"
         who = "his words" if v.get("by") == "him" else "Moneypenny"
         return f"{name} on ({who}, {v.get('at', '')})"
     return ", ".join(one(k, g.get(k)) for k in GO_KINDS)
@@ -2106,6 +2154,20 @@ def main(argv):
         with q.locked():
             g = set_go(label, which, onw == "on", by=(by or "him"), words=said)
         print(f"{label}: {go_words(label, g)}.")
+    elif cmd == "held-off":  # F201: an off he gave before offs were kept (or elsewhere), held as his decision; no switch is written
+        rest = list(argv[1:])
+        said = at = None
+        if "--said" in rest:
+            i = rest.index("--said"); said = rest[i + 1] if i + 1 < len(rest) else ""; rest = rest[:i] + rest[i + 2:]
+        if "--at" in rest:
+            i = rest.index("--at"); at = rest[i + 1] if i + 1 < len(rest) else ""; rest = rest[:i] + rest[i + 2:]
+        which = rest.pop() if rest and rest[-1] in ("prep", "build", "both") else "both"
+        if not rest or not said:
+            sys.exit("held-off LABEL… [prep|build|both] --said \"HIS WORDS\" [--at \"YYYY-MM-DD HH:MM\"]")
+        with q.locked():
+            for label in rest:
+                hold_off(label, which, said, at=at)
+                print(f"{label.strip().upper()}: his off is held ({which}, {at or 'now'}): the Must pickup leaves it off until he turns it on.")
     elif cmd == "check":  # H272: why a row isn't ready, for a call or the page; H298: and the fields
         rows = {r["label"]: r for r in open_rows()}
         for l in [a.strip().upper() for a in argv[1:]]:

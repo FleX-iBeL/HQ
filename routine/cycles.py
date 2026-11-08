@@ -2885,7 +2885,9 @@ def new_work(now: dt.datetime | None = None, base: Path | None = None, log=None)
 # only asked her to put a row in her prep, and rows there before its first minute never got one. Every minute the routine switches
 # prepare on, by Moneypenny, for each open Must row that is new or whose words changed, also the ones there before, so the line
 # takes it into her prep even while her look waits. A prepare already on (his or hers) is left as it is; one he switched off stays
-# off for the same wording. A switch that can't be written leaves the row as it was, her ledger says so, and it's tried the next
+# off for the same wording. F201 (8 November 2026, his text: "do not switch on any item I switched off, and switch F189 off again"):
+# a prepare he switched off (his words, a call, the page: sprint.py off_of) stays off whatever its wording, until he turns it on;
+# the pickup only takes Musts nobody decided on. When that record can't be read, the row is left as it is and tried the next minute. A switch that can't be written leaves the row as it was, her ledger says so, and it's tried the next
 # minute. A Must whose prepare is still off an hour after the row's first dated line shows on the status page (must_waiting).
 
 MUST_WAIT = 60  # minutes from the row's first dated line before the status page names it (his yes, 7 November 2026)
@@ -2929,6 +2931,13 @@ def must_go(now: dt.datetime | None = None, base: Path | None = None, log=None) 
                 refused.pop(label, None)
                 continue
             try:
+                his_off = (sp.off_of(label) or {}).get("prep")
+            except (SystemExit, Exception) as e:
+                did.append(f"{aid}: {label} prepare left ({' '.join(str(e).split())[:80] or type(e).__name__}: his offs can't be read)")
+                continue  # F201: tried again the next minute
+            if his_off:
+                continue  # F201: he switched it off; it stays off until he turns it on
+            try:
                 sp.set_go(label, "prep", True, by="moneypenny")
                 ok = bool(sp.go_of(label).get("prep"))
                 why = "" if ok else "the switch didn't stay on"
@@ -2963,7 +2972,8 @@ def must_waiting(now: dt.datetime | None = None, base: Path | None = None) -> li
     ws = base or folder()
     try:
         text = (ws / "HQ" / "roadmap.md").read_text(encoding="utf8")
-        go = json.loads((ws / "HQ" / "sprint.json").read_text(encoding="utf8")).get("go") or {}
+        spj = json.loads((ws / "HQ" / "sprint.json").read_text(encoding="utf8"))
+        go, offs = spj.get("go") or {}, spj.get("offs") or {}
     except (OSError, ValueError):
         return []
     musts = {r["label"] for r in _must_rows(base)}
@@ -2971,7 +2981,7 @@ def must_waiting(now: dt.datetime | None = None, base: Path | None = None) -> li
     out = []
     for ln in text.splitlines():
         m = _OPEN_ROW.match(ln)
-        if not m or m.group(1) not in musts or (go.get(m.group(1)) or {}).get("prep"):
+        if not m or m.group(1) not in musts or (go.get(m.group(1)) or {}).get("prep") or (offs.get(m.group(1)) or {}).get("prep"):
             continue
         cells = ln.split(" | ")
         f = _FIRST_DATED.search(cells[2] if len(cells) > 2 else ln)
