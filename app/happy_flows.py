@@ -40655,6 +40655,7 @@ async def _h342_flow499(self) -> str:
     commit("F9302: far uses b", **{"b.py": "B = 2\n"})
     commit("F9303: always red, uses a", **{"a.py": "STATE = 'ok'  # old\n"})
     commit("F9304: on a road, uses a", **{"a.py": "STATE = 'ok'  # road\n"})
+    commit("F9306: all new on its road, uses a", **{"a.py": "STATE = 'ok'  # new road\n"})
     commit(f"{label}: the build", **{"a.py": "STATE = 'broken'\n", "app__happy_flows.py": "# flows\n"})
     (repo / "workspace").symlink_to(ws)
     rm = ws / "HQ/roadmap.md"
@@ -40667,8 +40668,9 @@ async def _h342_flow499(self) -> str:
     mk("F9302", "t('far', False, 'always red, never run')\n")
     mk("F9303", "t('old', False, 'red before the build too')\n")
     mk("F9304", "t('r_old', True, '')\nt('r_new', False, 'the road is still open')\n")
+    mk("F9306", "t('n_new', False, 'its fix is still to come')\n")
     mk("F9305", "sys.path.insert(0, str(hq))\nimport a\nt('imp', a.STATE in ('ok', 'broken'), 'a.py has no state')\n")
-    names = {label: ["t_own"], "F9301": ["near"], "F9302": ["far"], "F9303": ["old"], "F9304": ["r_old", "r_new"], "F9305": ["imp"]}
+    names = {label: ["t_own"], "F9301": ["near"], "F9302": ["far"], "F9303": ["old"], "F9304": ["r_old", "r_new"], "F9305": ["imp"], "F9306": ["n_new"]}
     for lab, ns in names.items():
         k = seals / lab / "s"
         (k / "tests.json").write_text(json.dumps({"sentences": [], "tests": {n: "x" for n in ns}}))
@@ -40676,7 +40678,8 @@ async def _h342_flow499(self) -> str:
         w.mkdir(parents=True, exist_ok=True)
         for f in ("test.py", "tests.json"):
             (w / f).write_text((k / f).read_text())
-        road = ", 'qa_fails': [{'at': 1, 'finding': 'x', 'tests_before': ['r_old']}]" if lab == "F9304" else ""
+        road = {"F9304": ", 'qa_fails': [{'at': 1, 'finding': 'x', 'tests_before': ['r_old']}]",
+                "F9306": ", 'qa_fails': [{'at': 1, 'finding': 'x', 'tests_before': ['gone']}]"}.get(lab, "")
         _h342_put(env, lab, f"e.update({{'sealed': {{'fp': qatests.fingerprint_of({str(k)!r}), 'at': 1, 'copy': {str(k)!r}, 'tests': {ns!r}, 'his': 1, 'cycle': 0}}{road}}})")
     r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import qatests\n"
                  "print('RESULT ' + json.dumps(qatests.end_run(sys.argv[2], sys.argv[3])))", str(ROOT / "routine"), label, str(repo)],
@@ -40690,6 +40693,8 @@ async def _h342_flow499(self) -> str:
     need(set(nb) == {"F9301", "F9303", "F9304", "F9305"}, f"the neighbours run: {sorted(nb)} (F9302 only touched b.py)")
     need(nb["F9303"].get("already_red") == ["old"] and not nb["F9303"].get("broken"), f"a red from before the build counted: {nb['F9303']}")
     need(nb["F9304"]["ran"] == 1 and not nb["F9304"]["failed"], f"a fix road's new test counted: {nb['F9304']}")
+    sk = {x["label"]: x for x in rec.get("neighbours_skipped") or []}
+    need(list(sk) == ["F9306"] and "fix road is open" in sk["F9306"]["why"], f"a touched item on an open road isn't named as not run: {rec.get('neighbours_skipped')}")
     need(not (ws / "HQ" / "h342-neighbour.marker").exists(), "the neighbour's test wrote into the workspace the build's copy points to")
     return "the broken neighbour turns the run red with its flows; a red from before, a road's new test and an untouched item don't"
 

@@ -983,8 +983,9 @@ def build_files(label: str, wt: str) -> set[str]:
     return {f for f in files if not f.startswith(qa.FREE_FILES)}
 
 
-def neighbours(label: str, wt: str, most: int | None = None) -> list[dict]:
-    """The items whose sealed tests a build for label runs too: [{"label", "files", "imports", "tests"}], the most touched first."""
+def neighbours(label: str, wt: str, most: int | None = None, skipped: list | None = None) -> list[dict]:
+    """The items whose sealed tests a build for label runs too: [{"label", "files", "imports", "tests"}], the most touched first.
+    skipped, when given, gets the touched items that aren't run, each with why (a fix road open: its tests are red by design)."""
     import qa
     label = label.strip().upper()
     mine = build_files(label, wt)
@@ -1013,6 +1014,10 @@ def neighbours(label: str, wt: str, most: int | None = None) -> list[dict]:
         if road:  # a fix road's new tests are red by design until that fix lands: only the ones from before it are guarded
             before = set(road.get("tests_before") or [])
             tests = [n for n in tests if n in before]
+            if not tests and skipped is not None:
+                skipped.append({"label": lab, "files": files, "imports": imports,
+                                "why": f"its fix road is open (QA failed it): its {len(s.get('tests') or [])} sealed test(s) are new on that road, "
+                                       "red by design until its fix lands, so none is known green to guard"})
         if tests:
             found.append({"label": lab, "files": files, "imports": imports, "tests": tests, "copy": s["copy"], "at": s.get("at") or 0})
     found.sort(key=lambda x: (-(2 * len(x["files"]) + len(x["imports"])), -x["at"]))
@@ -1022,8 +1027,9 @@ def neighbours(label: str, wt: str, most: int | None = None) -> list[dict]:
 def _neighbours_run(label: str, wt: str, out: dict) -> None:
     """The neighbours' sealed tests on the built copy, each on its own throwaway copy; a red one makes this build's run red, named."""
     import proof
+    skipped: list = []
     try:
-        near = neighbours(label, wt)
+        near = neighbours(label, wt, skipped=skipped)
     except Exception as ex:  # a neighbour that can't be found is said, never a silent green
         out.update(green=False, why=f"the items this build touches couldn't be found: {ex!r}"[:300])
         return
@@ -1063,6 +1069,8 @@ def _neighbours_run(label: str, wt: str, out: dict) -> None:
                 proof._uncopy(bwt)
     red = [d for d in done if d.get("broken")]
     out["neighbours"] = done
+    if skipped:
+        out["neighbours_skipped"] = skipped
     out["neighbour_flows"] = sorted({f for d in done for f in d["flows"]})
     if red:
         out["green"] = False
@@ -1076,11 +1084,13 @@ def _neighbours_run(label: str, wt: str, out: dict) -> None:
 
 
 def neighbours_words(label: str, wt: str) -> str:
-    near = neighbours(label, wt)
-    if not near:
-        return f"A build for {label} touches no item with sealed QA tests: no neighbours to run."
-    return "\n".join([f"A build for {label} also runs the sealed QA tests of {len(near)} item(s) it touches:"] + [
-        f"- {n['label']}: {len(n['tests'])} test(s), through " + ", ".join(n["files"] + [f"import {m}" for m in n["imports"]]) for n in near])
+    skipped: list = []
+    near = neighbours(label, wt, skipped=skipped)
+    out = ([f"A build for {label} also runs the sealed QA tests of {len(near)} item(s) it touches:"] if near else
+           [f"A build for {label} runs no neighbour's sealed QA tests."])
+    out += [f"- {n['label']}: {len(n['tests'])} test(s), through " + ", ".join(n["files"] + [f"import {m}" for m in n["imports"]]) for n in near]
+    out += [f"- {n['label']}: touched through " + ", ".join(n["files"] + [f"import {m}" for m in n["imports"]]) + f", not run: {n['why']}" for n in skipped]
+    return "\n".join(out)
 
 
 def _why(log: str, name: str) -> str:
