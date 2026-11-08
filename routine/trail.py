@@ -48,7 +48,11 @@ def path() -> str | None:
             return None
         return os.path.join(os.path.dirname(hqpaths.ROADMAP), "trail.jsonl")
     if hqpaths.under_test() and not os.environ.get("HQ_WORKSPACE"):
-        return None
+        # F186: a whole throwaway HQ on a copy of the real workspace (her QA tests' realcase) keeps its own record in that copy;
+        # a copy whose workspace is the live one (a link to it) still writes none
+        live = os.environ.get("HQ_REAL_ROADMAP")
+        if not live or os.path.realpath(hqpaths.ROADMAP) == hqpaths.real_roadmap():
+            return None
     return os.path.join(hqpaths.FOLDER, REL)
 
 
