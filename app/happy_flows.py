@@ -40804,6 +40804,86 @@ FLOW_LIMITS.update({501: 600})
 # == end of H342's block ==
 
 
+# == H340: the schedule listing keeps the agents inside their hours (QA's finding, job 9418) ==
+H340_CHECK = r"""
+import sys, os, re, json, subprocess, datetime as dt
+sys.path.insert(0, HQ_ROOT + '/routine')
+import cycles, tick
+DAYS = cycles.DAYS
+LINE = re.compile(r"^Item (\d+) · (\w+) \d+ \w+, (\d\d:\d\d) · ([^·]*?)(?: · repeats every (\w+)[^·]*)? · (.*)$")
+def sched(*a):
+    return subprocess.run([sys.executable, HQ_ROOT + '/routine/schedule.py', *a], capture_output=True, text=True, timeout=120)
+def listing():
+    rows = []
+    for l in sched('list').stdout.split('Looking back:')[0].splitlines():
+        m = LINE.match(l.strip())
+        if m:
+            rows.append({'n': m.group(1), 'day': m.group(2).lower(), 'at': m.group(3), 'every': (m.group(5) or '').lower(), 'text': m.group(6)})
+    return rows
+def judge(rows):
+    bad = []
+    s = cycles.settings()['agents']
+    for r in rows:
+        days = DAYS if r['every'] == 'day' else [r['every'] or r['day']]
+        g = re.match(r"Agent cycle: (\w+)", r['text'])
+        if g:
+            a = s[g.group(1)]
+            h, m = map(int, r['at'].split(':'))
+            # one every day is held on the weekend by the hours wall: its time of day is hers; any other on her working day
+            ok = cycles._at_hour(a, r['at']) if r['every'] == 'day' else \
+                all(cycles.in_hours(a, dt.datetime(2026, 11, 9 + DAYS.index(d), h, m)) for d in days)
+            if not ok:
+                bad.append(f"item {r['n']} ({g.group(1)}) every {r['every'] or 'once'} on a {r['day']} at {r['at']}")
+        elif r['every'] != 'day' and days[0] in ('saturday', 'sunday'):
+            bad.append(f"item {r['n']} (maintenance) on a {days[0]}")
+    return bad
+o = {}
+# the routine's own planning of the agents' runs from the shipped hours, on Monday 9 November 2026
+o['planned'] = cycles.reconcile(dt.datetime(2026, 11, 9, 7, 0))
+# the maintenance runs where HQ keeps them: the night at tick's own minute, the release after it, the sweep on tick's sweep day
+nh = '%02d:%02d' % tick.NIGHT_AT
+sched('add', nh, 'H169: the nightly run of every detailed flow', '--every', 'day')
+sched('add', '05:05', 'H178: the daily release after the nightly', '--every', 'day')
+sched('add', DAYS[tick.SWEEP_DAY] + ' ' + nh, "H162: the weekly sweep, in the nightly's place", '--every', DAYS[tick.SWEEP_DAY])
+sched('add', 'friday 05:40', 'H180: the weekly rules check, after the release', '--every', 'friday')
+rows = listing()
+o['night_at'], o['sweep_day'], o['rows'] = nh, DAYS[tick.SWEEP_DAY], len(rows)
+o['agents'] = sorted({re.match(r"Agent cycle: (\w+)", r['text']).group(1) for r in rows if r['text'].startswith('Agent cycle')})
+o['maint'] = sorted(r['text'][:4] for r in rows if re.match(r"H1(69|78|62|80)\b", r['text']))
+o['bad'] = judge(rows)
+# the check sees a wrong one: a sweep on a Sunday and a run of Pepper's at 20:00 on a Friday
+sched('add', 'sunday 05:00', 'H162: a sweep on a Sunday (made up)', '--every', 'sunday')
+sched('add', 'friday 20:00', cycles.cycle_text('pepper', 'bigger session') + ' (made up)', '--every', 'friday')
+o['caught'] = judge(listing())
+print(json.dumps(o))
+"""
+
+
+async def _h340_flow502(self) -> str:
+    """H340, no Claude: the schedule listing (schedule.py list) on a fresh HQ with the shipped hours shows each agent's
+    own runs inside her hours (Donna weekdays 08:00-17:00, Pepper 17:00-18:00, Moneypenny 18:00-08:00), planned by the
+    routine itself, and no maintenance run (the nightly, its release, the weekly sweep, the rules check) on a Saturday or
+    Sunday: the nightly at 05:00 every day, the sweep on Monday at 05:00. A sweep on a Sunday or a run of Pepper's at 20:00
+    shows up as wrong, so the check isn't empty."""
+    import shutil as _sh
+    ws, env = self._h298_ws("h340sched")
+    _sh.copy(ROOT / "template/HQ/agents/cycles.json", ws / "HQ/agents/cycles.json")  # the shipped hours, not the benches'
+    o = json.loads(self._h298_py(env, f"HQ_ROOT = {str(ROOT)!r}\n" + H340_CHECK).strip().splitlines()[-1])
+    need(o["agents"] == ["donna", "moneypenny", "pepper"], f"the listing hasn't every agent's runs: {o}")
+    need(o["maint"] == ["H162", "H169", "H178", "H180"], f"the listing hasn't the four maintenance runs: {o}")
+    need(o["night_at"] == "05:00" and o["sweep_day"] == "monday", f"the night isn't at 05:00 with the sweep on Monday: {o}")
+    need(o["bad"] == [], f"the listing shows runs outside the hours or on a weekend: {o['bad']}")
+    need(len(o["caught"]) == 2 and any("sunday" in x for x in o["caught"]) and any("pepper" in x and "20:00" in x for x in o["caught"]),
+         f"a run on a Sunday or out of hours wasn't seen as wrong: {o['caught']}")
+    return f"{o['rows']} planned runs listed: the agents' inside their hours, the maintenance on weekdays at 05:00; a wrong one is seen"
+
+
+setattr(Run, "flow502", _h340_flow502)
+FLOWS.update({502: ("H340: the schedule listing shows the agents' runs inside their weekday hours and no maintenance run on a weekend", False, "flow502")})
+FLOW_LIMITS.update({502: 300})
+# == end of H340's block ==
+
+
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
