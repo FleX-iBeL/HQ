@@ -2771,8 +2771,10 @@ console.log(JSON.stringify({{problems: r.problems, w: r.queue.jobs.filter((j) =>
 U=@TAG@; T="$HOME/$U"; D="$HOME/.config/systemd/user"
 for s in $(tmux ls -F '#S' 2>/dev/null | grep "^$U-"); do tmux kill-session -t "=$s"; done
 systemctl --user stop "$U-*" 2>/dev/null
-P=$(ss -Hltnp "sport = :@PORT@" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
-[ -n "$P" ] && case "$(readlink /proc/$P/cwd)" in "$T"*) kill "$P";; esac
+# its status server: on its old port, or on any port (F203: flow 61 picks a free port per run), found by its folder, never by port alone
+for P in $(ss -Hltnp 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
+  case "$(readlink /proc/$P/cwd)" in "$T"|"$T"/*) kill "$P";; esac
+done
 rm -rf "$T" "$D/$U"-* "$D"/*.wants/"$U"-*
 systemctl --user daemon-reload 2>/dev/null
 exit 0
@@ -2839,7 +2841,10 @@ exit 0
         r = run_there(f'T="$HOME/{tag}"; mkdir -p "$T/HQ" && tar -xzf - -C "$T/HQ"', input=tar.stdout, capture_output=True)
         need(r.returncode == 0, f"couldn't unpack HQ on the Linux machine: {r.stderr.decode()[:200]}")
         script = r"""
-T="$HOME/@TAG@"; H="$T/HQ"; S="$T/state"; U="@TAG@"; CP=7899; SP=4799
+T="$HOME/@TAG@"; H="$T/HQ"; S="$T/state"; U="@TAG@"
+# F203: its own ports, free ones picked now: a fixed 4799 failed the night whenever another status server held it (job 9381's)
+free() { python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1])"; }
+CP=$(free); SP=$(free); while [ "$SP" = "$CP" ]; do SP=$(free); done
 export HQ_UNIT=$U HQ_SUPPORT=$S HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_PORT=$CP HQ_STATUS_PORT=$SP
 spid() { ss -Hltnp "sport = :$SP" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; }
 SERVER_BEFORE=$(spid)
