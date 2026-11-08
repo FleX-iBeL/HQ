@@ -52,12 +52,44 @@ async function readNight(key) {
   } catch { return null; }
 }
 
+// H339 (QA, 8 November 2026 00:35): a row is a plain name with the item's label ("QA of H339", "F197 build"), never the queue's
+// raw job text, a job number or the scheduler's minute ticks. A row's own key (the job it came from) is kept in the night's file,
+// so two jobs with the same plain name stay two rows; the key is never shown.
+const LABEL = '([A-Z]{1,2}\\d{1,4}(?:\\.\\d+)?)';
+const PLAIN = [
+  [new RegExp(`^QA(?: check)? of ${LABEL}\\b`), (m) => `QA of ${m[1]}`],
+  [new RegExp(`^Prep of ${LABEL}\\b`), (m) => `Prep of ${m[1]}`],
+  [new RegExp(`^${LABEL} fix\\b`), (m) => `${m[1]} fix`],
+  [new RegExp(`^Read the ${LABEL} row\\b`), (m) => `${m[1]} build`],
+  [new RegExp(`^${LABEL}(?: on the HQ roadmap| fresh build|:)`), (m) => `${m[1]} build`],
+];
+const KEPT_PLAIN = new RegExp(`^(?:(?:${LABEL} (?:build|fix|work)|QA of ${LABEL}|Prep of ${LABEL}|A team job)$|${LABEL} (?:QA (?:failed|passed)|review round)\\b|Release |Went wrong: |An item )`);
+/** A job's text, or a row name kept before plain names, as the plain name a person reads; '' for a scheduler tick (no row). */
+export function plainName(text) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || /^Scheduled item \d+/i.test(t)) return '';
+  if (KEPT_PLAIN.test(t)) return scrub(t);
+  for (const [re, f] of PLAIN) { const m = re.exec(t); if (m) return f(m); }
+  const l = new RegExp(`\\b${LABEL}\\b`).exec(t);
+  if (l) return `${l[1]} work`;
+  // no label: a short first clause with no number in it is already plain; anything longer is the queue's own text
+  const c = t.split(/[.:;(]/)[0].trim();
+  return c && c.length <= 28 && !/\d{3,}/.test(c) ? c : 'A team job';
+}
+/** Words a person reads, without a job number. */
+export const scrub = (s) => String(s ?? '').replace(/\b[Jj]obs? #?\d+(?:\s*(?:,|and|to)\s*#?\d+)*/g, 'a job').replace(/#\d{3,}\b/g, '').replace(/\s+/g, ' ').trim();
+const rawOf = (j) => String(j?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+const jobKey = (j) => `job:${j.n}`;
+/** One row and another are the same row: by the job they came from, or (a row kept before keys) by its old name. */
+const same = (x, r) => x.key === r.key || (x.alias != null && x.alias === r.key) || (r.alias != null && r.alias === x.key);
+
 /** The queue's jobs as timeline rows: done when they really ran, running from their start, coming from earliest to latest. */
 export function jobRows(jobs, now = Date.now()) {
   const out = [];
   for (const j of jobs ?? []) {
-    const name = String(j.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    const name = plainName(j.text);
     if (!name) continue;
+    const id = { key: jobKey(j), alias: rawOf(j) };
     const [ad, at] = String(j.agreed ?? '').split(' ');
     let agreed = local(ad, at);
     if (agreed != null && agreed > now + 6e4 && !/^ready/.test(j.state)) agreed -= 864e5;  // agreed at a time to come: the day before
@@ -67,21 +99,21 @@ export function jobRows(jobs, now = Date.now()) {
       if (end == null) continue;
       if (end > now + 6e4) end -= 864e5;  // done at a time still to come on that date: that time the day before
       const start = agreed != null && agreed <= end && end - agreed < 12 * 36e5 ? agreed : end - JOB_MIN * 6e4;
-      out.push({ name, kind: 'done', start, end });
+      out.push({ name, ...id, kind: 'done', start, end });
     } else if ((m = /^(?:running|stop asked)(?: since)? (\d\d:\d\d)/.exec(j.state))) {
       let start = local(day(new Date(now)), m[1]);
       if (start > now) start -= 864e5;
-      out.push({ name, kind: 'running', start, end: Math.max(start + JOB_MIN * 6e4, now + 5 * 6e4) });
+      out.push({ name, ...id, kind: 'running', start, end: Math.max(start + JOB_MIN * 6e4, now + 5 * 6e4) });
     } else if (/^boxed/.test(j.state)) {
       // ran past its box: found broken, from its start to about where its box ran out (never past now)
       const start = agreed ?? now - JOB_MIN * 6e4;
-      out.push({ name, kind: 'broken', start, end: Math.max(start + 6e4, Math.min(now, start + JOB_MIN * 6e4)) });
+      out.push({ name, ...id, kind: 'broken', start, end: Math.max(start + 6e4, Math.min(now, start + JOB_MIN * 6e4)) });
     } else if (/^held/.test(j.state)) {
-      out.push({ name, kind: 'you', start: agreed ?? now, end: Math.max(now + 60 * 6e4, (agreed ?? now) + 6e4) });
+      out.push({ name, ...id, kind: 'you', start: agreed ?? now, end: Math.max(now + 60 * 6e4, (agreed ?? now) + 6e4) });
     } else if (/^ready/.test(j.state)) {
       // the earliest a waiting job starts is the routine's next whole-minute tick after this one
       const start = Math.ceil(now / 6e4) * 6e4 + 6e4 + ((j.place ?? 1) - 1) * JOB_MIN * 6e4;
-      out.push({ name, kind: 'expected', start, end: start + JOB_MIN * 6e4 });
+      out.push({ name, ...id, kind: 'expected', start, end: start + JOB_MIN * 6e4 });
     }
   }
   return out;
@@ -89,15 +121,21 @@ export function jobRows(jobs, now = Date.now()) {
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const FACT_MIN = 5;  // a fact's bar (a verdict, a release, a round): from its own time, a few minutes wide
-const fact = (name, kind, at) => ({ name: `${name} at ${hm(at)}`, kind, start: at, end: at + FACT_MIN * 6e4 });
-const jobName = (j) => String(j?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
-const plainWhy = (s) => String(s ?? '').replace(/\b[Jj]ob \d+/g, 'a job').replace(/\s+/g, ' ').trim().slice(0, 80);
+const fact = (name, kind, at) => { const n = `${name} at ${hm(at)}`; return { name: n, key: n, kind, start: at, end: at + FACT_MIN * 6e4 }; };
+const plainWhy = (s) => scrub(s).slice(0, 80);
 
 async function trailLines() {
   try {
     return (await readFile(join(dirname(ROADMAP), 'trail.jsonl'), 'utf8')).split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
       .filter((x) => x && typeof x.at === 'number');
   } catch { return []; }
+}
+
+/** Each job's own end in HQ's record (done, or ended at its box), keyed by the job: what closes a kept night's running row
+ * once the queue no longer lists the job. */
+async function jobEnds() {
+  return (await trailLines()).filter((x) => x.step === 'job' && ['done', 'boxed'].includes(x.state) && x.job != null)
+    .map((x) => ({ key: `job:${x.job}`, kind: x.state === 'done' ? 'done' : 'broken', end: Math.round(x.at * 1000) }));
 }
 
 /** Every other fact HQ records, each a row of its own at its real time (done example 1): each check's verdict (QA failed or
@@ -133,45 +171,49 @@ export async function factRows(parsed, now = Date.now()) {
     else if (x.step === 'job' && x.state === 'boxed' && jobs.has(Number(x.job))) {
       const j = jobs.get(Number(x.job)), [ad, t] = String(j.agreed ?? '').split(' ');
       const start = x.start ? Math.round(x.start * 1000) : local(ad, t);
-      out.push({ name: jobName(j), kind: 'broken', start: start != null && start < at ? start : at - JOB_MIN * 6e4, end: at, boxed: true });
+      const name = plainName(j.text);
+      if (name) out.push({ name, key: jobKey(j), alias: rawOf(j), kind: 'broken', start: start != null && start < at ? start : at - JOB_MIN * 6e4, end: at, boxed: true });
     }
   }
   return out;
 }
 
 const overlaps = (r, [s, e]) => r.end >= s && r.start <= e;
-const fromFile = (r) => ({ name: String(r.name ?? ''), kind: KINDS.includes(r.kind) ? r.kind : 'done', start: ms(r.start), end: ms(r.end) });
-const toFile = (r) => ({ name: r.name, kind: r.kind, start: new Date(r.start).toISOString(), end: new Date(r.end).toISOString() });
+// a row kept before plain names: its old name is its key, so it still meets the job it came from (alias) and keeps its place
+const fromFile = (r) => ({ name: plainName(r.name), key: String(r.key ?? r.name ?? ''), ...(r.alias ? { alias: String(r.alias) } : {}),
+  kind: KINDS.includes(r.kind) ? r.kind : 'done', start: ms(r.start), end: ms(r.end) });
+const toFile = (r) => ({ name: r.name, key: r.key, ...(r.alias ? { alias: r.alias } : {}), kind: r.kind, start: new Date(r.start).toISOString(), end: new Date(r.end).toISOString() });
 
 /** Takes one fresh row from HQ's records into a night's rows. What went wrong and then right keeps both: the found-broken row
  * stays with its real time and a new row follows it, never one row overwritten to green. Running and expected rows move on. */
 export function takeRow(rows, r) {
   if (r.boxed) {
-    if (rows.some((y) => y.name === r.name && y.kind === 'broken' && y.end === r.end)) return false;
+    if (rows.some((y) => same(y, r) && y.kind === 'broken' && y.end === r.end)) return false;
     const { boxed, ...b } = r;
-    const after = rows.findIndex((y) => y.name === r.name && y.kind !== 'broken' && y.end > b.end);
+    const after = rows.findIndex((y) => same(y, r) && y.kind !== 'broken' && y.end > b.end);
     if (after < 0) { rows.push(b); return true; }
     rows.splice(after, 0, b);
     rows[after + 1] = { ...rows[after + 1], start: Math.max(rows[after + 1].start, b.end) };
     return true;
   }
   let last = -1;
-  rows.forEach((x, i) => { if (x.name === r.name) last = i; });
+  rows.forEach((x, i) => { if (same(x, r)) last = i; });
   if (last < 0) { rows.push(r); return true; }
   const x = rows[last];
   if (x.kind === 'broken' && r.kind !== 'broken') {
     rows.push({ ...r, start: Math.max(r.start, x.end), end: Math.max(r.end, x.end + 6e4) });
     return true;
   }
-  const before = rows.slice(0, last).filter((y) => y.name === r.name && y.kind === 'broken').pop();
+  const before = rows.slice(0, last).filter((y) => same(y, r) && y.kind === 'broken').pop();
   if (before && r.kind !== 'broken') r = { ...r, start: Math.max(r.start, before.end), end: Math.max(r.end, before.end + 6e4) };
-  if (x.kind === r.kind && x.end === r.end && x.start === r.start) return false;
-  rows[last] = x.kind === 'broken' ? { ...x, end: r.end } : r;
+  if (x.kind === r.kind && x.end === r.end && x.start === r.start && x.name === r.name && x.key === r.key) return false;
+  rows[last] = x.kind === 'broken' ? { ...x, end: r.end } : { ...r, key: x.key, ...(x.alias ?? r.alias ? { alias: x.alias ?? r.alias } : {}) };
   return true;
 }
 
 const readKept = (kept) => ({ title: kept?.title || 'The night', updated: ms(kept?.updated), running: kept ? kept.running !== false : true,
   rows: (Array.isArray(kept?.rows) ? kept.rows : []).map(fromFile).filter((r) => r.name && r.start != null && r.end != null),
+  ticks: (Array.isArray(kept?.rows) ? kept.rows : []).some((r) => !plainName(r?.name)),
   log: (Array.isArray(kept?.log) ? kept.log : []).filter((x) => x && x.text).map((x) => ({ at: ms(x.at), text: String(x.text) })),
   usage: (Array.isArray(kept?.usage) ? kept.usage : []).map((u) => ({ at: ms(u.at), week: Number(u.week) })).filter((u) => u.at != null && Number.isFinite(u.week)),
   reset: kept?.reset ?? null,
@@ -191,7 +233,7 @@ async function closeKept(key, kept, n, records) {
   let changed = false;
   for (const r of n.rows) {
     if (r.kind !== 'running') continue;
-    const end = records.find((x) => x.name === r.name && ['done', 'broken'].includes(x.kind) && x.end >= r.start);
+    const end = records.find((x) => same(x, r) && ['done', 'broken'].includes(x.kind) && x.end >= r.start);
     if (!end) continue;
     r.kind = end.kind;
     r.end = end.end;
@@ -206,15 +248,21 @@ async function theNight(key, parsed, now) {
   const kept = await readNight(key);
   const n = readKept(kept);
   const facts = await factRows(parsed, now);
-  const boxedNames = new Set(facts.filter((r) => r.boxed).map((r) => r.name));
+  const boxedKeys = new Set(facts.filter((r) => r.boxed).map((r) => r.key));
   // a run ended at its box is its own found-broken row (the record's real end), so the job's own boxed state adds none
-  const records = [...facts, ...jobRows(parsed?.queue?.jobs, now).filter((r) => !(r.kind === 'broken' && boxedNames.has(r.name)))];
-  if (key !== await currentNight(now)) return closeKept(key, kept, n, records.filter((r) => !r.boxed));
+  const records = [...facts, ...jobRows(parsed?.queue?.jobs, now).filter((r) => !(r.kind === 'broken' && boxedKeys.has(r.key)))];
+  if (key !== await currentNight(now)) {
+    n.running = false;  // a night that's over: its still-running rows stay running until their own record has an end (2)
+    return closeKept(key, kept, n, [...records.filter((r) => !r.boxed), ...await jobEnds()]);
+  }
   // a job a kept night already holds stays on the night it started
   const older = new Set();
-  for (const k of (await nights()).filter((d) => d < key)) for (const r of (await readNight(k))?.rows ?? []) older.add(r.name);
-  let changed = false;
-  for (const r of records.filter((x) => overlaps(x, windowNow(key, now)) && !older.has(x.name))) changed = takeRow(n.rows, r) || changed;
+  for (const k of (await nights()).filter((d) => d < key)) for (const r of (await readNight(k))?.rows ?? []) {
+    older.add(String(r.key ?? r.name));
+    if (r.alias) older.add(String(r.alias));
+  }
+  let changed = n.ticks;  // a scheduler tick kept as a row before: written out of the night
+  for (const r of records.filter((x) => overlaps(x, windowNow(key, now)) && !older.has(x.key) && !older.has(x.alias))) changed = takeRow(n.rows, r) || changed;
   if (changed || (!kept && n.rows.length)) await keep(key, kept, n);
   return n;
 }
@@ -343,7 +391,7 @@ export async function nightPage(key, parsed, { now = Date.now(), markdown = '', 
   const log = [...n.log].sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
   const going = n.rows.filter((r) => kind(r) === 'running');
   const ahead = n.rows.filter((r) => ['running', 'expected'].includes(kind(r)));
-  const step = log[0]?.text ?? (going[0] ? going[0].name : 'Nothing running');
+  const step = log[0] ? scrub(log[0].text) : (going[0] ? going[0].name : 'Nothing running');
   const usedNow = n.usage.length ? [...n.usage].sort((a, b) => b.at - a.at)[0].week : null;
   const finished = n.rows.filter((r) => ['done', 'broken'].includes(kind(r))).length;
   const pct = n.rows.length ? Math.round((100 * finished) / n.rows.length) : 0;
@@ -362,7 +410,7 @@ export async function nightPage(key, parsed, { now = Date.now(), markdown = '', 
 <h2>The week's usage</h2>${usageHtml(n, now, markdown, reset)}
 <h2>Now</h2><ul>${going.map((r) => `<li>${esc(r.name)}, since ${hm(r.start)}</li>`).join('') || '<li>Nothing running.</li>'}</ul>
 ${parts ? `<h2>The parts of the night</h2><ul class="nr-parts">${parts}</ul>` : ''}
-<h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(x.text)}</li>`).join('') || (n.rows.length ? '<li>No words logged yet: the timeline above is what ran.</li>' : '<li>A quiet night: nothing to do.</li>')}</ul>
+<h2>The log</h2><ul class="nr-log">${log.map((x) => `<li>${x.at != null ? hm(x.at) : ''} ${esc(scrub(x.text))}</li>`).join('') || (n.rows.length ? '<li>No words logged yet: the timeline above is what ran.</li>' : '<li>A quiet night: nothing to do.</li>')}</ul>
 <h2>The nights</h2><ul>${all.map((d) => `<li><a href="/night-road/${d}">${d}${d === key ? ' (this one)' : ''}</a></li>`).join('')}</ul>
 <p><a href="/">Back to HQ</a></p>
 <script>(function(){var u=document.getElementById('nr-updated');if(!u||!u.dataset.at)return;function f(){var t=Number(u.dataset.at),m=Math.max(0,Math.floor((Date.now()-t)/6e4)),d=new Date(t);u.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+' ('+m+' min ago)';if(u.dataset.live==='1'&&m>${STALE_MIN}&&!document.querySelector('.nr-warn')){var w=document.createElement('span');w.className='nr-warn';w.textContent=' Not updated for '+m+' min';u.after(w);}}setInterval(f,30000);if(u.dataset.live==='1')setInterval(function(){location.reload();},60000);})();</script>

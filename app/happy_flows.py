@@ -40422,8 +40422,9 @@ async def _night_flow490(self) -> str:
                   rows=f"| ⬜ | H901 The Ibis page | The Ibis page shows its parts. | Built (job 71). QA failed (job 72, "
                        f"{lq.tm_mday} {time.strftime('%B %Y %H:%M', lq)}): a part is missing. |\n")
     html = _road(f"process.stdout.write(await R.nightPage(null, PR({json.dumps(md)}), {{now: NOW}}));", md, trail=trail)
-    kinds = _road_bars(html, name)
+    kinds = _road_bars(html, "H901 build")  # QA (8 November 2026): a row is a plain name with the item's label, never the raw job text
     need(kinds[:2] == ["broken", "done"], f"the boxed run isn't a found-broken row and then a done one: {kinds}")
+    need("sent to the team" not in html and "Job 71" not in html and "job 71" not in html, "the queue's raw job text or its number shows")
     need(_road_bars(html, f"H901 QA failed at {_hm(qa)}") == ["broken"], "QA's failed verdict isn't its own found-broken row at its time")
     need(_road_bars(html, f"Release 9.9.9 out at {_hm(now - 600)}") == ["done"], "the release isn't a row of its own")
     return "a boxed run then done is two rows, red then green; QA's verdict and the release are rows of their own"
