@@ -341,6 +341,15 @@ def _killgroup(p) -> None:
             pass
 
 
+def _known_flows(wt: str) -> set[int]:
+    """F188: the flow numbers the copy's happy_flows.py has (its FLOWS entries); empty when it can't be read."""
+    try:
+        with open(os.path.join(wt, "app", "happy_flows.py"), encoding="utf8") as f:
+            return {int(x) for x in re.findall(r"(?m)^    (\d+): \(", f.read())}
+    except OSError:
+        return set()
+
+
 def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
     runner = os.environ.get("HQ_PROOF_RUNNER")
     cmd = [runner] if runner else [nightly._python(), os.path.join(wt, "app", "happy_flows.py")]
@@ -438,6 +447,9 @@ def _run(n: int) -> int:
                     log.write(f"== a neighbour, {nb['label']}: {nb['ran'] - len(nb['failed'])} of {nb['ran']} of its sealed tests pass\n")
             # H342: the flows around the items this build touches (their rows' own flows) run with the row's, on the same copy
             around = [x for x in (rec.get("qa_tests") or {}).get("neighbour_flows") or [] if x not in named]
+            known = _known_flows(wt)  # F188: a neighbour's row can mention a made-up flow (F155's 9102); one unknown stops the run
+            if known:
+                around = [x for x in around if x in known]
             if around:
                 rec["around"] = around
             if (named or around) and not rec["failed"]:
