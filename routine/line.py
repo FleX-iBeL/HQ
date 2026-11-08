@@ -39,6 +39,9 @@ the record, never anyone's word, and does the next step:
     still aren't found. Once one of the row's quotes is in a line of his said since (a call, a quick note, a text), one prep starts with
     the words that landed in its text, and the stop is marked answered: the prep puts it back on the list with one text, sent now
     (review.sitdown), and the line waits again until his next answer lands or the row changes.
+  - Prepare switched off while the line's prep of the item waits (F208, 8 November 2026: F124's prep, job 664, started at 11:42 though
+    its prepare went off at 11:16): the pick keeps it back (wall.why_not, switched_off), the line's log says so once with the item
+    and the switch, and switched on again the same job goes back in line, once: no second prep is queued. A running one finishes.
 
 His pause of the team (jobs.py off) holds the line too.
 
@@ -92,6 +95,39 @@ def prep_of(jobs, label):
         if prep_label(j["text"]) == label and not j["state"].startswith(q.FINISHED + ("boxed", "paused: ended, no record")):
             return j
     return None
+
+
+def switched_off(job):
+    """F208: why the line's own prep JOB, waiting, doesn't start now: its item's prepare switch is off; else None. A prep queued by
+    hand (its text without "(the line)") is left to its own road."""
+    text = job.get("text") or ""
+    label = prep_label(text)
+    if not label or not text.startswith(f"{PREP}{label} (the line)") or str(job.get("state", "")).startswith(("running",) + q.FINISHED):
+        return None
+    if S.go_of(label).get("prep"):
+        return None
+    return f"{label}'s prepare switch is off: its prep waits in its place in line and starts once the switch is on again"
+
+
+def _kept_back(st, jobs):
+    """F208: the line's log, once per prep job: kept back while its item's prepare is off, back in line once it's on again."""
+    kept, out = st.setdefault("_kept", {}), []
+    now = {}
+    for j in jobs:
+        if is_prep(j.get("text")) and not str(j.get("state", "")).startswith(("running",) + q.FINISHED + ("boxed",)):
+            label = prep_label(j["text"])
+            now[str(j["n"])] = (label, switched_off(j))
+    for n, (label, why) in now.items():
+        if why and n not in kept:
+            kept[n] = label
+            out.append(f"{label}: its prepare switch is off, so her waiting prep job {n} is kept back in the line, not started, "
+                       f"until the switch is on again")
+        elif not why and n in kept:
+            kept.pop(n)
+            out.append(f"{label}: its prepare switch is on again, so her prep job {n} goes back in line, once (no second prep)")
+    for n in [n for n in kept if n not in now]:  # finished or gone meanwhile
+        kept.pop(n)
+    return out
 
 
 def _night(now=None):
@@ -568,6 +604,7 @@ def tick(now=None):
             if line:
                 done.append(line)
                 _, jobs, on = q.read()
+    done += _kept_back(st, jobs)
     _save(st)
     return done
 

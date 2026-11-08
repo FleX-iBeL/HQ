@@ -129,7 +129,7 @@ def why_not(job, jobs, now=None) -> str | None:
     day = daytime(now)
     if job["state"].startswith("held") and not day and not job["state"].startswith(("held: resumed", "held: paused")) and not planned_night(job):
         return "held, and a held job doesn't restart at night unless it was planned for the night; it can go on in the morning"
-    held = _held(job)
+    held = _held(job) or _switched_off(job)
     if held:
         return held
     if not is_build(job):
@@ -158,6 +158,15 @@ def _held(job) -> str | None:
     except Exception:
         return None
     return f"{label} is {held}; it starts once that's through, or she lifts it" if held else None
+
+
+def _switched_off(job) -> str | None:
+    """F208: the line's prep of an item whose prepare switch is off waits in its place in line (line.switched_off)."""
+    try:
+        import line as L
+        return L.switched_off(job)
+    except Exception:
+        return None
 
 
 def order(line) -> list:
