@@ -147,10 +147,10 @@ def when(words, now=None):
     s = " ".join(words).strip().lower()
     if s == "now":
         return now
-    m = re.fullmatch(r"(?:at )?(\d{1,2}):(\d\d)", s)  # H171: a time alone: the next one, today or tomorrow
+    m = re.fullmatch(r"(?:at )?(\d{1,2}):(\d\d)", s)  # H171: a time alone: the next one, today or tomorrow (F179: in its own minute, tomorrow)
     if m and int(m.group(1)) <= 23 and int(m.group(2)) <= 59:
         base = now.replace(hour=int(m.group(1)), minute=int(m.group(2)))
-        return base if base >= now else base + dt.timedelta(days=1)
+        return base if base > now else base + dt.timedelta(days=1)
     m = re.fullmatch(r"(\d{4}-\d\d-\d\d) (\d{1,2}):(\d\d)", s)
     if m:
         return dt.datetime.strptime(f"{m.group(1)} {int(m.group(2)):02d}:{m.group(3)}", FMT)
