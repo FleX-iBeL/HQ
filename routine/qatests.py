@@ -400,16 +400,25 @@ def run_on(d: str, hqdir: str, info: dict | None = None) -> tuple[dict, str]:
             for f in ("test.py", "tests.json"):
                 if os.path.exists(os.path.join(d, f)):
                     shutil.copyfile(os.path.join(d, f), os.path.join(run_d, f))
+        # F193: her test runs in a session of its own, and whatever ends this run (its end, a timeout, a stop) stops it and every
+        # process it started, wherever they went, before the box is removed: nothing writes into a box half removed
+        p = subprocess.Popen([py if os.path.exists(py) else sys.executable, os.path.join(run_d, "test.py"), hqdir], cwd=hqdir, env=env,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, start_new_session=True)
         try:
-            r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(run_d, "test.py"), hqdir], cwd=hqdir, env=env, text=True,
-                               capture_output=True, timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
-            out = (r.stdout + r.stderr)
+            so, se = p.communicate(timeout=RUN_TIMEOUT)
+            out = so + se
             if info is not None:
-                info.update({"code": r.returncode, "crashed": crashed(out, r.returncode)})
+                info.update({"code": p.returncode, "crashed": crashed(out, p.returncode)})
         except subprocess.TimeoutExpired:
             if info is not None:
                 info.update({"code": None, "crashed": f"it didn't finish in {RUN_TIMEOUT} s"})
             return {}, f"her tests didn't finish in {RUN_TIMEOUT} s"
+        finally:
+            _stop_all(p.pid if p.returncode is None else None, box)
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
         got = {}
         for ln in out.splitlines():
             m = _LINE.match(ln)
@@ -425,7 +434,91 @@ def run_on(d: str, hqdir: str, info: dict | None = None) -> tuple[dict, str]:
         return got, out[-3000:]
     finally:
         _relink(link, was)
-        shutil.rmtree(box, ignore_errors=True)
+        _stop_all(None, box)
+        for _ in range(3):  # F193: a box removed in full, never a stub left (a file still being let go of on the first try)
+            shutil.rmtree(box, ignore_errors=True)
+            if not os.path.exists(box):
+                break
+            time.sleep(0.2)
+
+
+def _procs() -> dict:
+    """F193: every process here, {pid: parent pid}."""
+    out = {}
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                with open(f"/proc/{d}/stat", encoding="utf8", errors="replace") as f:
+                    out[int(d)] = int(f.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, IndexError, ValueError):
+                pass
+    return out
+
+
+def _in_box(pid: int, box: str) -> bool:
+    """F193: a process working in the box: its folder, its command line or its HQ_QA_BOX is the box (a test's orphan under init too)."""
+    try:
+        if os.readlink(f"/proc/{pid}/cwd").startswith(box):
+            return True
+    except OSError:
+        pass
+    for part, mark in (("cmdline", box.encode()), ("environ", b"HQ_QA_BOX=" + box.encode() + b"\0")):
+        try:
+            with open(f"/proc/{pid}/{part}", "rb") as f:
+                if mark in f.read():
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def _stop_all(root: int | None, box: str) -> None:
+    """F193: the test run at root and every process it started, followed by parent wherever its process group went, and any process
+    still working in the box, held still (so none starts another) and then killed. Never this run itself or what it runs under."""
+    import signal
+    mine, ps = set(), _procs()
+    p = os.getpid()
+    while p > 1 and p not in mine:
+        mine.add(p)
+        p = ps.get(p, 0)
+    seen: set = set()
+    for _ in range(20):
+        ps = _procs()
+        got = {root} if root and root in ps else set()
+        todo = list(got | seen)
+        while todo:
+            x = todo.pop()
+            for c, pp in ps.items():
+                if pp == x and c not in got:
+                    got.add(c)
+                    todo.append(c)
+        if box:
+            got |= {c for c in ps if c not in got and _in_box(c, box)}
+        got = {c for c in got if c in ps} - mine
+        if not got - seen:
+            break
+        for c in got - seen:
+            try:
+                os.kill(c, signal.SIGSTOP)
+            except OSError:
+                pass
+        seen |= got
+    for c in seen:
+        try:
+            os.kill(c, signal.SIGKILL)
+        except OSError:
+            pass
+    end = time.time() + 5
+    while time.time() < end and any(_state(c) not in ("", "Z") for c in seen - {root}):
+        time.sleep(0.05)
+
+
+def _state(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf8", errors="replace") as f:
+            return f.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return ""
 
 
 def _relink(link: str, to: str) -> None:
@@ -1211,7 +1304,17 @@ def main(argv) -> int:
         print(new(lab) if argv[0] == "new" else show(lab))
         return 0
     if len(argv) >= 3 and argv[0] == "run":
-        print(json.dumps(end_run(argv[1].upper(), os.path.realpath(argv[2])), ensure_ascii=False))
+        import proof
+        was = proof._on_stop()  # F193: a run stopped like a timeout ends like a stopped check: its tests stopped, its copies removed
+        try:
+            res = end_run(argv[1].upper(), os.path.realpath(argv[2]))
+        except proof.Stopped as e:
+            print(json.dumps({"ran": 0, "passed": 0, "failed": [], "green": False, "stopped": True,
+                              "why": f"the run of her tests was stopped ({e}): its tests are stopped, its throwaway copies removed"}))
+            return 143
+        finally:
+            proof._off_stop(was)
+        print(json.dumps(res, ensure_ascii=False))
         return 0
     if len(argv) >= 2 and argv[0] == "neighbours":
         import proof
