@@ -189,6 +189,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import collections
 import json
 import os
 import re
@@ -14869,19 +14870,30 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.flag("F9301", "no size named")
             cap = _night_rounds()  # H318: the rounds before the last three seeded
             _seed_rounds(b.sj, "F9301", cap - 3)
+            def added(old, now):  # F183: the lines of now that weren't in old (each counted), so a note under an old section is no rewrite of the whole
+                left, out = collections.Counter(old.splitlines()), []
+                for x in now.splitlines():
+                    if left[x] > 0:
+                        left[x] -= 1
+                    elif x.strip():
+                        out.append(x)
+                return out
+            def trips():  # F183: every tripwire line in the ledger and every new line that names one, from the ledger itself
+                now = b.ledger() if led else re.sub(r"\A.*?(?=^## \d{4}-|\Z)", "", b.ledger(), count=1, flags=re.S | re.M)  # F161/F167: the header names the word
+                return list(dict.fromkeys([x for x in b.ledger().splitlines() if "tripwire (" in x] + [x for x in added(led, now) if "tripwire" in x]))
             before, led = b.texts(), b.ledger()
             for i, code in enumerate((noise + many, many, noise + many)):  # boxed three times in a row
                 b.minute()
                 need(b.items() == [f"F9301 round {cap - 2 + i}"], f"round {cap - 2 + i}: {b.items()}")
                 s = b.go(code)
                 need(s["note"] and s["note"]["boxed"] == "turns", f"not boxed: {s['note']}")
-            need(b.texts() == before, f"a text from a round's own noise: {b.texts()[len(before):][-400:]}")
-            new = lambda: (b.ledger()[len(led):] if b.ledger().startswith(led) else b.ledger()) if led else re.sub(r"\A.*?(?=^## \d{4}-|\Z)", "", b.ledger(), count=1, flags=re.S | re.M)  # noqa: E731  (F161: the ledger's own header names the word; F167: also when the rounds made the ledger, its header is no round's)
-            need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise: {new()[-600:]}")
+            need(not added(before, b.texts()), f"a text from a round's own noise: {added(before, b.texts())[-6:]}")
+            need(not trips(), f"a tripwire from a round's own noise: {' | '.join(trips())[:1200]}")
+            capped = b.texts()
             b.minute()
-            need("tripwire (" not in b.ledger() and "tripwire" not in new(), f"a tripwire from a round's own noise, the minute after the cap: {new()[-600:]}")
-            got = b.texts()[len(before):]
-            need(got.count("If you tell me what F9301 should say") == 1 and "tripwire" not in got.lower(), f"the one text: {got[-300:]}")
+            need(not trips(), f"a tripwire from a round's own noise, the minute after the cap: {' | '.join(trips())[:1200]}")
+            got = added(capped, b.texts())
+            need(len(got) == 1 and "If you tell me what F9301 should say" in got[0] and "tripwire" not in got[0].lower(), f"the one text, and nothing else, the minute after the cap: {got[-6:]}")
             mist = b.ws / "HQ/mistakes.jsonl"
             need(not mist.exists() or "F9301" not in mist.read_text(), "a round's noise on the mistakes ledger")
 
