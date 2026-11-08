@@ -457,6 +457,8 @@ def _qa_box(hqdir: str) -> tuple[str | None, str]:
     except OSError as ex:
         return None, f"no throwaway copy could be made ({ex.strerror or ex})"
     try:
+        import proof
+        proof.mark_owner(box)  # F193: names this run, so a later one sweeps the box if this one is killed before it tidies up
         testwall._copy_workspace(live, os.path.join(box, "workspace"))
         paths = {live} | {os.path.realpath(p) for _, _, p in testwall.real_places(os.path.dirname(live), live)}
         try:  # a run already behind a wall keeps that wall's real places too
@@ -529,6 +531,7 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
         return False, f"Refused: {label}'s QA tests don't cover his words: " + "; ".join(miss) + ". Nothing sealed."
     names = named_tests(t)
     import proof
+    proof.clean_stale()  # F193: what earlier runs left (a killed check's box and copy, old QA leftovers) goes before a new copy is made
     head = named or _head()
     where = f"the commit {head[:7]} from before the build" if named else f"HQ's code as it is ({head[:7]})"
     wt = proof._copy(head)
@@ -1190,7 +1193,15 @@ def main(argv) -> int:
             if "--before" in argv and (argv.index("--before") + 1 >= len(argv) or not argv[argv.index("--before") + 1].strip()):
                 print("Refused: --before needs a commit. Nothing sealed.")
                 return 1
-            ok, words = check(lab, before=argv[argv.index("--before") + 1] if "--before" in argv else None)
+            import proof
+            was = proof._on_stop()  # F193: a stop (a timeout's SIGTERM, the runner's stop) is a normal end: its copies are removed
+            try:
+                ok, words = check(lab, before=argv[argv.index("--before") + 1] if "--before" in argv else None)
+            except proof.Stopped as e:
+                print(f"Stopped ({e}): its throwaway copies are removed. Nothing sealed.")
+                return 143
+            finally:
+                proof._off_stop(was)
             print(words)
             return 0 if ok else 1
         if argv[0] == "review":

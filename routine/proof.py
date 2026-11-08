@@ -227,32 +227,83 @@ def _alive(pid) -> bool:
         return False
 
 
+def _started(pid) -> str | None:
+    """F193: when a process started (its /proc start tick), so an owner.json naming a pid that came back as something else isn't alive."""
+    try:
+        with open(f"/proc/{int(pid)}/stat", encoding="utf8") as f:
+            return f.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, ValueError, TypeError, IndexError):
+        return None
+
+
+def mark_owner(base: str) -> None:
+    """F193: a throwaway copy's owner.json names the run that made it (its pid and start), so a later run knows when it's left behind."""
+    p = os.path.join(base, "owner.json")
+    try:
+        d = json.load(open(p, encoding="utf8"))
+    except (OSError, ValueError):
+        d = {}
+    d.update(pid=os.getpid(), start=_started(os.getpid()))
+    with open(p + ".tmp", "w", encoding="utf8") as f:
+        json.dump(d, f)
+    os.replace(p + ".tmp", p)
+
+
+def _owner_alive(own: dict) -> bool:
+    if not _alive(own.get("pid")):
+        return False
+    return not own.get("start") or _started(own.get("pid")) in (None, own.get("start"))
+
+
+# F193: the throwaway copies HQ makes itself, by the names its code gives them (qatests' hq-qa- box, proof's proof- copy, realcase's
+# copy, and what QA tests of earlier rows planted in the temp folder); only these are ever swept, and never one whose run is still going
+KINDS = re.compile(r"(hq-qa-|proof-|realcase-|f152-|f174-evening-).+|qa\d+|f67")
+
+
 STALE_NO_OWNER = 6 * 3600  # a copy from before owner.json counts as left behind after this long
 
 
+def _left_behind(base: str) -> bool:
+    """F193: a copy whose run is over: its owner.json names a run that's gone, or it has none and is older than STALE_NO_OWNER."""
+    try:
+        own = json.load(open(os.path.join(base, "owner.json"), encoding="utf8"))
+    except (OSError, ValueError):
+        own = None
+    if isinstance(own, dict) and own.get("pid"):
+        return not _owner_alive(own)
+    try:
+        return time.time() - os.path.getmtime(base) >= STALE_NO_OWNER
+    except OSError:
+        return False
+
+
 def clean_stale() -> list[str]:
-    """F121: what a killed run left: its copy (in git and in scratch), its flows still running there, its clock's since."""
+    """F121: what a killed run left: its copy (in git and in scratch), its flows still running there, its clock's since.
+    F193: also every other throwaway copy of HQ's own (KINDS) in scratch and in the temp folder whose run is over."""
     gone = []
     scratch = os.path.join(hqpaths.HQ, "scratch")
+    for where in dict.fromkeys((scratch, tempfile.gettempdir())):
+        try:
+            names = [n for n in os.listdir(where) if KINDS.fullmatch(n) and not n.startswith("proof-")]
+        except OSError:
+            names = []
+        for nm in names:
+            base = os.path.join(where, nm)
+            if os.path.isdir(base) and not os.path.islink(base) and _left_behind(base):
+                shutil.rmtree(base, ignore_errors=True)
+                gone.append(nm)
     try:
         names = [n for n in os.listdir(scratch) if n.startswith("proof-")]
     except OSError:
         names = []
     for nm in names:
         base = os.path.join(scratch, nm)
+        if not os.path.isdir(base) or not _left_behind(base):
+            continue
         try:
             own = json.load(open(os.path.join(base, "owner.json"), encoding="utf8"))
         except (OSError, ValueError):
             own = None
-        if own is not None:
-            if _alive(own.get("pid")):
-                continue
-        else:
-            try:
-                if time.time() - os.path.getmtime(base) < STALE_NO_OWNER:
-                    continue
-            except OSError:
-                continue
         wt = os.path.join(base, "hq")
         grp = (own or {}).get("group")
         if grp and _alive(grp):
@@ -294,8 +345,13 @@ def _copy(head: str = "HEAD") -> str:
     Its owner.json names the run (and, while they run, the flows' process group) so a later run knows it's left behind."""
     base = tempfile.mkdtemp(prefix="proof-", dir=os.path.join(hqpaths.HQ, "scratch"))
     wt = os.path.join(base, "hq")
-    _owner(wt, pid=os.getpid(), head=head)
-    r = subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach", wt, head], capture_output=True, text=True)
+    try:  # F193: a stop while it's being made leaves nothing either
+        mark_owner(base)
+        _owner(wt, head=head)
+        r = subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach", wt, head], capture_output=True, text=True)
+    except BaseException:
+        _uncopy(wt)
+        raise
     if r.returncode:
         shutil.rmtree(base, ignore_errors=True)
         raise RuntimeError(f"no copy: {r.stderr.strip()[:200]}")

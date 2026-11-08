@@ -59,6 +59,15 @@ def live_paths() -> set[str]:
         return set()
 
 
+def _started(pid: int) -> str | None:
+    """F193: when a process started, as proof.py's owner.json keeps it (a pid that came back as something else isn't this run)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf8") as f:
+            return f.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -100,6 +109,11 @@ class Case:
         self.code, self.workspace = hqdir, ws
         self.root = tempfile.mkdtemp(prefix="realcase-")
         atexit.register(self.close)
+        try:  # F193: names this run, so a later run sweeps the copy if this one is killed before it tidies up
+            with open(os.path.join(self.root, "owner.json"), "w", encoding="utf8") as f:
+                json.dump({"pid": os.getpid(), "start": _started(os.getpid())}, f)
+        except OSError:
+            pass
         self.hq = os.path.join(self.root, "hq")
         _copy_code(hqdir, self.hq)
         for nm in (".venv", "models"):
