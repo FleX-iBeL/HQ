@@ -377,8 +377,29 @@ def with_label(text: str, item: str = "", sender: str = "") -> str:
     return f"{str(item).strip()}: {text}"
 
 
+TURN_KINDS = ("reply", "team")  # F186: her own words on her line (her reply, her team command), which carry no F103 item
+NOT_HERS = ("job ", "the night run", "older than the record")  # F186: a record write that isn't her turn's (a job's, a label looked up)
+
+
+def turn_label(where: Path | None = None) -> str:
+    """F186: the one item her turn wrote, as HQ's record keeps it (trail.written): the labels written since the newest line on her line
+    (his text she answers, or her own line before), not by a job or the night run. Exactly one: its label; none or two: ""."""
+    try:
+        rows = read_lines(where or folder())
+        since = max((float(m.get("at") or 0) for m in rows), default=0.0)
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+        import trail
+        labels = {str(d.get("label") or "").strip() for d in trail.lines() if d.get("step") == "written"
+                  and float(d.get("at") or 0) > since and not str(d.get("by") or "").startswith(NOT_HERS)}
+    except Exception:
+        return ""
+    labels = {x for x in labels if _LABEL.fullmatch(x)}
+    return labels.pop() if len(labels) == 1 else ""
+
+
 def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", quiet: bool = False) -> dict:
-    m = {"at": round(time.time(), 3), "from": sender, "text": with_label(text, item, sender), "why": why, "id": mid or secrets.token_hex(8),
+    about = item if item or sender == "me" or why not in TURN_KINDS else turn_label()  # F186: her reply or team text about one item
+    m = {"at": round(time.time(), 3), "from": sender, "text": with_label(text, about, sender), "why": why, "id": mid or secrets.token_hex(8),
          **({"item": item} if item else {}), **({"quiet": True} if quiet else {})}  # F103: the id of the work it's about, carried as an argument
     import outbox  # H338: the style filter, the claim check, no question already answered, one text per topic, her batches
     m = outbox.check(m, folder(), read_lines(folder()), agent()["id"])
