@@ -33,6 +33,27 @@ failure opens a fix road (fix_why): a new test of hers that fails on the build, 
     python3 routine/qatests.py review LABEL    one round of their own review (the real reviewer), ROUNDS at most
     python3 routine/qatests.py show LABEL      where they stand
     python3 routine/qatests.py run LABEL HQDIR the sealed tests on HQDIR (what proof.py does at the end)
+    python3 routine/qatests.py neighbours LABEL [HQDIR]
+                                               H342: the items whose sealed tests a build for LABEL also runs, and why
+
+H342 (8 November 2026, his yes): her tests replay the real case, on a copy of the real data, where he would see it, and fail first;
+every build also checks what it touches. Why: that week her check sent work back 14 times against 55 passes, and in 13 of the 14 her
+own sealed tests had passed while the row's own example failed on real data (a state file instead of the status page, the program's
+texts instead of her replies, made-up nights). So, held by the program:
+  - the real case: run_on gives her test a throwaway copy of the real workspace (HQDIR/workspace) and of HQ's real .status
+    (HQ_QA_STATUS); routine/realcase.py makes a whole throwaway HQ of them, with HQ's own status server, a headless browser's view of
+    the page and the lines' threads as the texts land (realcase.Case);
+  - fail first, for a reason: on the code from before the build every test must print its FAIL line and the run must end by itself:
+    a test that passes there, or only crashes there (a traceback, an exit that isn't 0), or fails without saying what he'd see
+    instead, is refused and named; the seal keeps each FAIL line, and the review reads them;
+  - the review asks the real-case probe: does this test replay the row's own example on real data, where he would see it; a stand-in
+    the program can see itself (a file behind the status page read instead of the page as served, realcase.stand_in_holes) is a hole
+    whatever the model says;
+  - seals and reviews carry RULES: tests sealed or reviewed before these rules hold the Ready mark until they're checked and reviewed
+    again under them (the rest of the sprint goes through this);
+  - neighbours: a build's sealed-test run (end_run) also runs the sealed tests of the items whose own commits touched the files this
+    build changed (NEIGHBOURS_MOST, the most overlap first), each on its own copy; a red there makes the record red and names the
+    item and its flows, which proof.py runs with the build's. A fix road's new tests (red by design until that fix lands) don't count.
 """
 from __future__ import annotations
 
@@ -60,6 +81,10 @@ MODEL = os.environ.get("HQ_QA_REVIEW_MODEL") or os.environ.get("HQ_REVIEW_MODEL"
 EFFORT = os.environ.get("HQ_QA_REVIEW_EFFORT") or "medium"
 READS = 20000
 _LINE = re.compile(r"^\s*(PASS|FAIL)\s+([A-Za-z0-9_.-]+)\s*(?::\s*(.*))?$")
+RULES = "H342"  # the rules a seal and a review were made under; older ones hold the Ready mark until checked and reviewed again
+NEIGHBOURS_MOST = int(os.environ.get("HQ_QA_NEIGHBOURS_MOST") or 4)  # [Claude's choice] each neighbour's run can take minutes
+_CRASH = re.compile(r"Traceback \(most recent call last\)")
+_BARE_ERROR = re.compile(r"^\W*(?:\w+\.)*\w*(?:Error|Exception|Exit)\b(?:\(.*\))?\W*$")
 
 SYSTEM = (
     "You review the QA tests written for one item of a software project, before the build team starts on it. You did not write them. "
@@ -72,10 +97,21 @@ SYSTEM = (
     "nothing to change, is checked when its tests check the change it gives the reason for. Then look for: a test that would pass "
     "although the sentence isn't met; a test that would fail although it is met (brittle on wording, layout or order the user didn't "
     "ask for); something the item's done means that no test checks. Not a hole: style, naming, the script's length, a case the item "
-    "puts out of scope, a requirement you invent. Answer with JSON only, nothing else: "
+    "puts out of scope, a requirement you invent. "
+    "Then the real-case probe (H342; in one week 13 of 14 send-backs were tests that passed on a stand-in while the row's own example "
+    "failed on real data): does at least one test replay the row's own done example, its real case (the real row, the real text, the "
+    "real job or night it names), on the real data as the test's throwaway copy holds it (HQDIR/workspace is a copy of the real "
+    "workspace; routine/realcase.py gives a whole HQ on it), and read the result where he would see it: a thing on the status page "
+    "from the page as HQ's own server serves it (realcase's serve(), rendered() or get()), never a state file behind it; a text from "
+    "the line's thread as it lands, never the program's own wording of it; a command's result from its real output? Made-up items, "
+    "made-up nights or rows planted only for the test, where the row names a real one, are a stand-in. You also get how each test "
+    "failed on the code from before the build: it should fail there for the reason the row gives (the example not met), not because "
+    "a helper, a file or a module is missing. Answer with JSON only, nothing else: "
     '{"sentences": [{"his": "the sentence", "checked": true or false, "why": "one plain sentence"}, ... one per sentence, in order], '
+    '"real_case": {"replays": true or false, "test": "the test that replays it, or empty", "where": "where it reads the result", '
+    '"hole": "one plain sentence when it doesn\'t, else empty"}, '
     '"pass": true or false, "findings": ["one plain sentence per hole, naming the test", ...]}. pass is false exactly when a sentence '
-    "isn't checked or you found another real hole; at most four findings, the most important first.")
+    "isn't checked, the real-case probe finds no replay, or you found another real hole; at most four findings, the most important first.")
 
 
 # ---------- F151: a fix found by QA goes the same road as a new item ----------
@@ -130,13 +166,13 @@ def fix_why(row) -> str | None:
     k, fp = cycle(label), fingerprint(label)
     finding = road.get("finding") or ""
     sealed = state(label).get("sealed") or {}
-    if not fp or sealed.get("fp") != fp or int(sealed.get("cycle") or 0) != k:
+    if not fp or sealed.get("fp") != fp or int(sealed.get("cycle") or 0) != k or sealed.get("rules") != RULES:
         return (f"{label} isn't ready: QA failed it, and the finding is an open point in the row: {finding}. As for a new item, a new test of "
                 f"hers for it goes first: it must fail on the build as it stands and be sealed by the hard checks (python3 routine/qatests.py "
                 f"check {label}); the fix is held until then")
     rv = in_road(state(label).get("reviews") or [], label)
     last = rv[-1] if rv else {}
-    if not (last.get("fp") == fp and last.get("verdict") == "pass"):
+    if not (last.get("fp") == fp and last.get("verdict") == "pass" and last.get("rules") == RULES):
         flagged = last.get("fp") == fp and last.get("verdict") == "flag"
         return (f"{label} isn't ready: the new version of her QA tests, with the test for the QA finding, needs its own review first"
                 + (f"; it flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(last.get("findings") or []) if flagged else
@@ -290,10 +326,43 @@ def named_tests(t: dict) -> list[str]:
 
 # ---------- running them ----------
 
-def run_on(d: str, hqdir: str) -> tuple[dict, str]:
+def status_source() -> str:
+    """H342: where HQ's real .status is read from for a test's copy: an outer test run's own copy (HQ_QA_STATUS), else this HQ's."""
+    return os.environ.get("HQ_QA_STATUS") or os.path.join(hqpaths.HQ, ".status")
+
+
+def _status_copy(box: str) -> str:
+    """H342: a throwaway copy of HQ's real .status in the box (without the sealed tests, the proofs' logs or the locks), for a test that
+    needs what HQ keeps there (the line's state, the usage, the routines): realcase.Case puts it under its own HQ. "" when there's none."""
+    src, dest = status_source(), os.path.join(box, "status")
+    if not os.path.isdir(src):
+        return ""
+    try:
+        shutil.copytree(src, dest, symlinks=True, ignore_dangling_symlinks=True,
+                        ignore=shutil.ignore_patterns("qa-sealed", "*.log", "*.lock", "*.pid", "__pycache__"))
+    except shutil.Error:
+        pass  # a file that went while it was copied (the live HQ writes on)
+    except OSError:
+        return ""
+    return dest
+
+
+def crashed(out: str, code: int | None) -> str:
+    """H342: why a run of her test.py counts as a crash, or "": a traceback in its output, or an exit that isn't 0."""
+    if _CRASH.search(out or ""):
+        tail = [ln for ln in (out or "").splitlines() if ln.strip()]
+        return "a traceback: " + (tail[-1].strip()[:200] if tail else "")
+    if code not in (0, None):
+        return f"it ended with exit {code}"
+    return ""
+
+
+def run_on(d: str, hqdir: str, info: dict | None = None) -> tuple[dict, str]:
     """Her test.py in folder d on the code at hqdir: ({name: passed}, its output). F9176: only ever on a throwaway copy of the
     workspace (the planning with its jobs, the sprint file), never his live one: hqdir/workspace points to the copy while her test
-    runs, and every Python it starts carries the test wall's hook, which refuses a write to the live files by their own path."""
+    runs, and every Python it starts carries the test wall's hook, which refuses a write to the live files by their own path.
+    H342: the box also holds a copy of HQ's real .status (HQ_QA_STATUS), for realcase.Case; info, when given, gets the run's exit
+    code and whether it crashed."""
     box, why = _qa_box(hqdir)
     if not box:
         return {}, f"Refused: her tests didn't run: {why}. They only ever run on a throwaway copy, never on the live files."
@@ -306,6 +375,17 @@ def run_on(d: str, hqdir: str) -> tuple[dict, str]:
         env["TMPDIR"] = os.path.join(box, "tmp")
         env.update({"HQ_UNDER_TEST": "1", "HQ_QA_TEST_RUN": "1", "PYTHONDONTWRITEBYTECODE": "1", "HQ_WALL": wall,
                     "PYTHONPATH": os.pathsep.join(x for x in (os.path.join(wall, "py"), env.get("PYTHONPATH", "")) if x)})
+        env["HQ_QA_BOX"] = box  # H342: realcase.Case only works on this box's own copies
+        # H342: the program's own realcase, for a test run on code from before it existed (fail first on the old code); a test that puts
+        # HQDIR/routine first on its path gets the code under test's own one when it has it
+        lib = os.path.join(box, "lib")
+        os.makedirs(lib, exist_ok=True)
+        if os.path.exists(os.path.join(HERE, "realcase.py")):
+            shutil.copyfile(os.path.join(HERE, "realcase.py"), os.path.join(lib, "realcase.py"))
+        env["PYTHONPATH"] = os.pathsep.join(x for x in (os.path.join(wall, "py"), lib, os.environ.get("PYTHONPATH", "")) if x)
+        st = _status_copy(box)
+        if st:
+            env["HQ_QA_STATUS"] = st
         py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")  # HQ's own Python, as in tell(): her tests import the app (loguru), the system one can't
         # H339 (job 9333): her test is written to sit in HQ/qa-tests/LABEL of the workspace, and may read the planning next to it
         # (its __file__'s parents[2]/roadmap.md). Sealed it sits in .status/qa-sealed/LABEL/SEAL, where that read finds nothing and the
@@ -323,7 +403,11 @@ def run_on(d: str, hqdir: str) -> tuple[dict, str]:
             r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(run_d, "test.py"), hqdir], cwd=hqdir, env=env, text=True,
                                capture_output=True, timeout=RUN_TIMEOUT, stdin=subprocess.DEVNULL)
             out = (r.stdout + r.stderr)
+            if info is not None:
+                info.update({"code": r.returncode, "crashed": crashed(out, r.returncode)})
         except subprocess.TimeoutExpired:
+            if info is not None:
+                info.update({"code": None, "crashed": f"it didn't finish in {RUN_TIMEOUT} s"})
             return {}, f"her tests didn't finish in {RUN_TIMEOUT} s"
         got = {}
         for ln in out.splitlines():
@@ -444,14 +528,27 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
     head = named or _head()
     where = f"the commit {head[:7]} from before the build" if named else f"HQ's code as it is ({head[:7]})"
     wt = proof._copy(head)
+    info: dict = {}
     try:
-        got, out = run_on(d, wt)
+        got, out = run_on(d, wt, info)
     finally:
         proof._uncopy(wt)
     unrun = [n for n in names if n not in got]
     if unrun:
         return False, (f"Refused: {label}'s test.py never reports {', '.join(unrun)} (a line \"PASS name\" or \"FAIL name: why\" for each), "
                        f"so those tests don't exist. Its output: {out[-400:]!r}. Nothing sealed.")
+    # H342, fail first for a reason: on the code from before the build the run ends by itself, every FAIL line says what he'd see
+    # instead; a test that only crashes there (a traceback, an exit that isn't 0) doesn't show it fails for the row's reason
+    if info.get("crashed"):
+        return False, (f"Refused: {label}'s test.py crashed on {where} ({info['crashed']}). A test that only crashes on the code from "
+                       "before the build doesn't show it fails for the reason the row gives: catch what you need, and end every test with "
+                       "its own line, FAIL saying what he'd see instead of the row's example. Nothing sealed.")
+    whys = {n: _why(out, n) for n in names if not got.get(n)}
+    bare = [n for n, w in whys.items() if w in ("no why given", "it gave no line (it didn't run to it)") or _BARE_ERROR.match(w)]
+    if bare:
+        return False, (f"Refused: {label}'s test(s) {', '.join(bare)} fail on {where} without saying what he'd see instead "
+                       f"({'; '.join(f'{n}: {whys[n]}' for n in bare)[:300]}). Each FAIL line says, in his terms, how the row's own example "
+                       "isn't met yet there. Nothing sealed.")
     road, k = fix_road(label), cycle(label)
     if road:  # F151: after a QA failure her earlier tests stay as they were; what's new is the test for the finding, and it must fail now
         names = names + [n for n in got if n not in names]
@@ -467,18 +564,21 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
     else:
         passing = [n for n in names if got.get(n)]
     if passing:
+        said = "; ".join(f"PASS {n}" for n in passing)[:300]
         if named:
-            return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where}, so they don't test what was "
-                           "built. Each test must fail there and pass on the build. Nothing sealed.")
-        return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where}, before any "
-                       "build, so they don't test what he asked for. Each test must fail now and pass once it's built. Nothing sealed.")
+            return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where} ({said}), so they don't test what was "
+                           "built. Each test must fail there and pass on the build: rewrite it to replay the row's own example. Nothing sealed.")
+        return False, (f"Refused: {label}'s test(s) {', '.join(passing)} already pass on {where} ({said}), before any "
+                       "build, so they don't test what he asked for. Each test must fail now and pass once it's built: rewrite it to replay "
+                       "the row's own example. Nothing sealed.")
     keep = os.path.join(seal_root(), label, fp[:16])
     shutil.rmtree(keep, ignore_errors=True)
     os.makedirs(keep, exist_ok=True)
     for f in ("test.py", "tests.json"):
         shutil.copy2(os.path.join(d, f), os.path.join(keep, f))
-    sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names, "cycle": k,
-              "before": {"head": head, "results": {n: got[n] for n in names}, **({"named": True} if named else {})}}
+    sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names, "cycle": k, "rules": RULES,
+              "before": {"head": head, "results": {n: got[n] for n in names}, "whys": {n: whys[n] for n in names if n in whys},
+                         **({"named": True} if named else {})}}
     _put(label, lambda e: e.update({"sealed": sealed}))
     try:
         import trail
@@ -498,6 +598,10 @@ def why_not(row, now: bool = False) -> str | None:
     fw = fix_why(row)
     if fw:
         return fw
+    old = (state(row["label"]).get("sealed") or {})
+    if old.get("fp") and old.get("rules") != RULES and old.get("fp") == fingerprint(row["label"]):
+        # H342: a seal from before the real-case rules is stale wherever it's read, a test copy of the real data too
+        return _rules_why(row["label"])
     if not gate_on():
         return None
     label = row["label"]
@@ -516,14 +620,25 @@ def why_not(row, now: bool = False) -> str | None:
     if (e.get("sealed") or {}).get("fp") != fp:
         return (f"{label} isn't ready: its QA tests as they stand haven't passed the hard checks (every sentence of his covered, every test "
                 f"failing on the code as it is): python3 routine/qatests.py check {label}")
+    if (e.get("sealed") or {}).get("rules") != RULES:
+        return _rules_why(label)
     rv = in_road(e.get("reviews") or [], label)
     last = rv[-1] if rv else {}
-    if last.get("fp") == fp and last.get("verdict") == "pass":
+    if last.get("fp") == fp and last.get("verdict") == "pass" and last.get("rules") == RULES:
         return None
+    if last.get("fp") == fp and last.get("verdict") == "pass":
+        return (f"{label} isn't ready: its QA tests' review passed them before the real-case probe ({RULES}): python3 routine/qatests.py "
+                f"review {label} asks it again")
     if last.get("fp") == fp and last.get("verdict") == "flag":
         return (f"{label} isn't ready: the review of its QA tests flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(last.get("findings") or [])
                 + f". Answer it in the tests, check them again, then python3 routine/qatests.py review {label}")
     return f"{label} isn't ready: its QA tests haven't had their own review as they stand: python3 routine/qatests.py review {label}"
+
+
+def _rules_why(label: str) -> str:
+    return (f"{label} isn't ready: its QA tests as they stand haven't passed the hard checks of the real-case rules ({RULES}, 8 November "
+            f"2026: the row's own example replayed on a copy of the real data, where he would see it, failing first for the row's reason): "
+            f"python3 routine/qatests.py check {label}, then their review again")
 
 
 def open_points(label: str) -> list[str]:
@@ -548,13 +663,24 @@ def job_words(labels) -> str:
 
 # ---------- their own review ----------
 
+def _before_lines(row) -> str:
+    """H342: how each sealed test failed on the code from before the build, as the seal kept it, for the reviewer."""
+    b = ((state(row["label"]).get("sealed") or {}).get("before") or {})
+    whys = b.get("whys") or {}
+    if not whys:
+        return ""
+    return ("\n\nHow each test failed on the code from before the build (" + str(b.get("head") or "")[:7] + "), its own FAIL line:\n"
+            + "".join(f"- {n}: {w}\n" for n, w in list(whys.items())[:40]))[:4000]
+
+
 def _input(row, d) -> str:
     fs = _files(d)
     sents = his_sentences(row)
     return ("The item, as written on the planning:\n\n" + S.ask_of(row["line"])[:8000]
             + "\n\nThe user's own words in it, sentence by sentence:\n" + "".join(f"{i + 1}. {s}\n" for i, s in enumerate(sents))
             + "\nThe tests' list (tests.json):\n" + (fs["tests.json"] or "")[:4000]
-            + "\n\nThe test script (test.py), run as `python3 test.py HQDIR` on the built code:\n" + (fs["test.py"] or "")[:READS])
+            + "\n\nThe test script (test.py), run as `python3 test.py HQDIR` on the built code:\n" + (fs["test.py"] or "")[:READS]
+            + _before_lines(row))
 
 
 def verdict(a, sents) -> tuple[bool, list[str]] | None:
@@ -563,7 +689,14 @@ def verdict(a, sents) -> tuple[bool, list[str]] | None:
     got = [x for x in a["sentences"] if isinstance(x, dict)]
     if len(got) < len(sents):
         return None
+    rc = a.get("real_case")  # H342: the real-case probe is part of every verdict; without it there's no verdict
+    if not isinstance(rc, dict) or not isinstance(rc.get("replays"), bool):
+        return None
     fs = [re.sub(r"\s+", " ", str(f)).strip()[:400] for f in a.get("findings") or [] if str(f).strip()]
+    if rc["replays"] is not True:
+        why = re.sub(r"\s+", " ", str(rc.get("hole") or "no test replays the row's own example on real data where he would see it"))[:300]
+        if not any("real case" in f.lower() or "real data" in f.lower() or "stand-in" in f.lower() for f in fs):
+            fs.insert(0, "the real-case probe: " + why)
     for s, x in zip(sents, got):
         if x.get("checked") is not True:
             why = re.sub(r"\s+", " ", str(x.get("why") or "no reason given"))[:240]  # no backslash inside an f-string: 3.9 reads these too
@@ -604,7 +737,25 @@ def _fake(d) -> dict | None:
     return {"pass": not holes, "findings": holes, "cost": 0, "s": 0}
 
 
+def program_holes(row, d) -> list[str]:
+    """H342: the stand-ins the program sees itself, whatever the reviewer says (realcase.stand_in_holes)."""
+    try:
+        import realcase
+        return realcase.stand_in_holes(S.ask_of(row["line"]), _files(d).get("test.py") or "")
+    except Exception:
+        return []
+
+
 def ask_reviewer(row, d) -> dict:
+    a = _ask_reviewer(row, d)
+    holes = [] if a.get("failed") else program_holes(row, d)
+    if holes:
+        a = {**a, "pass": False, "findings": (holes + [f for f in a.get("findings") or [] if f not in holes])[:5],
+             "real_case": {"replays": False, "hole": holes[0], "by": "the program"}}
+    return a
+
+
+def _ask_reviewer(row, d) -> dict:
     fake = _fake(d)
     if fake:
         return fake
@@ -620,10 +771,11 @@ def ask_reviewer(row, d) -> dict:
         cost = dd.get("total_cost_usd")
         if dd.get("is_error") or dd.get("subtype") not in (None, "success"):
             raise ValueError(f"the run ended {dd.get('subtype') or 'with an error'}")
-        v = verdict(_last_object(dd.get("result") or ""), sents)
+        obj = _last_object(dd.get("result") or "")
+        v = verdict(obj, sents)
         if v is None:
-            raise ValueError("the answer wasn't a verdict on every sentence")
-        return {"pass": v[0], "findings": v[1], "cost": cost, "s": round(time.time() - t0, 1)}
+            raise ValueError("the answer wasn't a verdict on every sentence with the real-case probe")
+        return {"pass": v[0], "findings": v[1], "cost": cost, "s": round(time.time() - t0, 1), "real_case": obj.get("real_case")}
     except subprocess.TimeoutExpired:
         return {"failed": True, "why": f"timed out after {REVIEW_TIMEOUT} s", "cost": cost}
     except Exception as ex:
@@ -641,11 +793,14 @@ def review(label: str) -> tuple[int, str]:
     e = state(label)
     if not fp or (e.get("sealed") or {}).get("fp") != fp:
         return 2, f"Refused: {label}'s QA tests as they stand aren't sealed: python3 routine/qatests.py check {label} first."
+    if (e.get("sealed") or {}).get("rules") != RULES:
+        return 2, (f"Refused: {label}'s QA tests were sealed before the real-case rules ({RULES}): python3 routine/qatests.py check {label} "
+                   "first, so they're held to fail first for the row's reason; then their review.")
     rv, k_ = in_road(e.get("reviews") or [], label), cycle(label)
     if len(rv) >= ROUNDS:
         return 2, (f"Refused: {ROUNDS} rounds have run on {label}'s QA tests; no round {ROUNDS + 1}. They're his decision now, with the "
                    "open points he has; flagged tests never go to the team, his now neither.")
-    if rv and rv[-1].get("fp") == fp:  # the same version again: the verdict stands, no new look, and it counts as a round
+    if rv and rv[-1].get("fp") == fp and rv[-1].get("rules") == RULES:  # the same version again: the verdict stands, no new look, and it counts as a round
         a = {"pass": rv[-1].get("verdict") == "pass", "findings": list(rv[-1].get("findings") or []), "cost": 0, "same": True}
     else:
         a = ask_reviewer(row, d)
@@ -656,7 +811,7 @@ def review(label: str) -> tuple[int, str]:
     if fingerprint_of(d) != fp:
         return 2, f"{label}'s QA tests changed while they were reviewed; nothing counted."
     entry = {"fp": fp, "at": int(time.time()), "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "cost": a.get("cost"),
-             "cycle": k_}
+             "cycle": k_, "rules": RULES, **({"real_case": a["real_case"]} if a.get("real_case") else {})}
     e = _put(label, lambda x: x.update({"reviews": [y for y in x.get("reviews") or [] if isinstance(y, dict)] + [entry]}))
     _cost_line({**rec, "verdict": entry["verdict"], "findings": len(a["findings"])})
     try:
@@ -753,7 +908,166 @@ def end_run(label: str | None, wt: str) -> dict:
         out["split"] = [n for n in out["failed"] if team.get(n)]
         out["why"] = "her QA tests fail on the built code: " + "; ".join(parts)
         out["log"] = log[-800:]
+    elif out["green"] and os.environ.get("HQ_QA_NEIGHBOURS", "1") != "0":
+        _neighbours_run(label, wt, out)
     return out
+
+
+# ---------- H342: the neighbours, so a fix doesn't break the item next to it ----------
+# His row: "a build also runs the sealed tests of the items it touches and the flows around them on the same copy, and a test can only
+# write into its own copy". Twice on 7 November 2026 a fix broke the item next to it (F192's hold made F197; H339's tests wrote made-up
+# usage into HQ's real file, F198). An item touches this build when its own commits (named at the start of their subject) changed a file
+# this build's commits changed, the shared test and version files left out (qa.FREE_FILES), or its sealed test imports one of the
+# Python files this build changed. Each runs through run_on: its own throwaway copy, behind the wall.
+
+def _git_lines(root: str, *a) -> str:
+    return subprocess.run(["git", "-C", str(root), *a], text=True, capture_output=True).stdout
+
+
+def _commits_files(root: str, rng: str) -> list[tuple[list[str], set[str]]]:
+    """(the rows a commit is for, the files it changed) for each commit in rng, merges left out."""
+    import qa
+    out = []
+    for rec in _git_lines(root, "log", "--no-merges", "--format=%x00%s", "--name-only", rng).split("\x00")[1:]:
+        lines = rec.split("\n")
+        labs = qa.subject_labels(lines[0])
+        files = {f.strip() for f in lines[1:] if f.strip()}
+        if labs and files:
+            out.append((labs, files))
+    return out
+
+
+def _build_range(label: str, wt: str) -> str:
+    """The commits this build is made of: since its tests were sealed when that commit is in its history, else all of it."""
+    head = ((state(label).get("sealed") or {}).get("before") or {}).get("head") or ""
+    if head and not subprocess.run(["git", "-C", wt, "merge-base", "--is-ancestor", head, "HEAD"], capture_output=True).returncode:
+        return f"{head}..HEAD"
+    return "HEAD"
+
+
+def base_commit(label: str, wt: str) -> str | None:
+    """The code from just before this build: the parent of the oldest commit naming the row in its range, or None."""
+    import qa
+    first = None
+    for ln in _git_lines(wt, "log", "--reverse", "--no-merges", "--format=%H%x09%s", _build_range(label, wt)).splitlines():
+        sha, _, subj = ln.partition("\t")
+        if label in qa.subject_labels(subj):
+            first = sha
+            break
+    if not first:
+        return None
+    return _git_lines(wt, "rev-parse", "--verify", "--quiet", f"{first}^").strip() or None
+
+
+def build_files(label: str, wt: str) -> set[str]:
+    """The files this build changed: the commits naming the row since its tests were sealed (else in all of history), the free files out."""
+    import qa
+    rng = _build_range(label, wt)
+    files = set()
+    for labs, fs in _commits_files(wt, rng):
+        if label in labs:
+            files |= fs
+    return {f for f in files if not f.startswith(qa.FREE_FILES)}
+
+
+def neighbours(label: str, wt: str, most: int | None = None) -> list[dict]:
+    """The items whose sealed tests a build for label runs too: [{"label", "files", "imports", "tests"}], the most touched first."""
+    import qa
+    label = label.strip().upper()
+    mine = build_files(label, wt)
+    if not mine:
+        return []
+    by = {}
+    for labs, fs in _commits_files(wt, "HEAD"):
+        for l in labs:
+            by.setdefault(l, set()).update(fs)
+    mods = {os.path.splitext(os.path.basename(f))[0] for f in mine if f.endswith(".py")}
+    found = []
+    for lab, e in _all().items():
+        s = e.get("sealed") or {}
+        if lab == label or not s.get("fp") or not s.get("copy") or fingerprint_of(s["copy"]) != s["fp"]:
+            continue
+        files = sorted(f for f in (by.get(lab) or set()) & mine if not f.startswith(qa.FREE_FILES))
+        body = _files(s["copy"]).get("test.py") or ""
+        imports = sorted(m for m in mods if re.search(rf"^\s*(?:import\s+[\w, ]*\b{re.escape(m)}\b|from\s+{re.escape(m)}\s+import)", body, re.M))
+        if not files and not imports:
+            continue
+        tests = list(s.get("tests") or [])
+        road = None
+        for r in reversed([x for x in e.get("qa_fails") or [] if isinstance(x, dict)]):
+            road = r if not r.get("passed") else None
+            break
+        if road:  # a fix road's new tests are red by design until that fix lands: only the ones from before it are guarded
+            before = set(road.get("tests_before") or [])
+            tests = [n for n in tests if n in before]
+        if tests:
+            found.append({"label": lab, "files": files, "imports": imports, "tests": tests, "copy": s["copy"], "at": s.get("at") or 0})
+    found.sort(key=lambda x: (-(2 * len(x["files"]) + len(x["imports"])), -x["at"]))
+    return found[: NEIGHBOURS_MOST if most is None else most]
+
+
+def _neighbours_run(label: str, wt: str, out: dict) -> None:
+    """The neighbours' sealed tests on the built copy, each on its own throwaway copy; a red one makes this build's run red, named."""
+    import proof
+    try:
+        near = neighbours(label, wt)
+    except Exception as ex:  # a neighbour that can't be found is said, never a silent green
+        out.update(green=False, why=f"the items this build touches couldn't be found: {ex!r}"[:300])
+        return
+    try:
+        text = q.read()[0]
+    except Exception:
+        text = ""
+    done = []
+    for nb in near:
+        got, log = run_on(nb["copy"], wt)
+        failed = [n for n in nb["tests"] if not got.get(n)]
+        flows = proof.named_flows(proof.row_of(text, nb["label"]))
+        done.append({"label": nb["label"], "files": nb["files"], "imports": nb["imports"], "ran": len(nb["tests"]),
+                     "failed": failed, "flows": flows, **({"why": "; ".join(f"{n}: {_why(log, n)}" for n in failed)[:600]} if failed else {})})
+    # a neighbour's red counts against this build only when its test passed on the code from just before it: one already red there
+    # (its own open fault, or a test that can't pass on this computer) is named, not this build's
+    reds = [d for d in done if d["failed"]]
+    if reds:
+        base = base_commit(label, wt)
+        bwt = None
+        try:
+            bwt = proof._copy(base) if base else None
+        except Exception:
+            bwt = None
+        try:
+            for d in reds:
+                if not bwt:
+                    d["broken"] = list(d["failed"])
+                    d["before"] = "the code from before this build couldn't be copied, so every red counts"
+                    continue
+                got_b, _ = run_on(next(nb["copy"] for nb in near if nb["label"] == d["label"]), bwt)
+                d["already_red"] = [n for n in d["failed"] if not got_b.get(n)]
+                d["broken"] = [n for n in d["failed"] if got_b.get(n)]
+                d["before"] = base[:7]
+        finally:
+            if bwt:
+                proof._uncopy(bwt)
+    red = [d for d in done if d.get("broken")]
+    out["neighbours"] = done
+    out["neighbour_flows"] = sorted({f for d in done for f in d["flows"]})
+    if red:
+        out["green"] = False
+        out["why"] = "this build breaks the sealed QA tests of an item it touches: " + "; ".join(
+            f"{d['label']} (touched through {', '.join(d['files'] + d['imports'])[:120]}; "
+            + (f"{', '.join(d['broken'])} passed on the code from before it ({d['before']}) and fail now" if "already_red" in d else d["before"])
+            + f": {d['why']}; "
+            + (f"its flows {', '.join(map(str, d['flows']))} run with the build's" if d["flows"] else "its row names no flows of its own") + ")"
+            for d in red)
+        out["neighbours_red"] = [d["label"] for d in red]
+
+
+def neighbours_words(label: str, wt: str) -> str:
+    near = neighbours(label, wt)
+    if not near:
+        return f"A build for {label} touches no item with sealed QA tests: no neighbours to run."
+    return "\n".join([f"A build for {label} also runs the sealed QA tests of {len(near)} item(s) it touches:"] + [
+        f"- {n['label']}: {len(n['tests'])} test(s), through " + ", ".join(n["files"] + [f"import {m}" for m in n["imports"]]) for n in near])
 
 
 def _why(log: str, name: str) -> str:
@@ -810,11 +1124,18 @@ def new(label: str) -> str:
     if not os.path.exists(os.path.join(d, "test.py")):
         open(os.path.join(d, "test.py"), "w", encoding="utf8").write(
             "#!/usr/bin/env python3\n# Her QA tests for " + label + ": run as `python3 test.py HQDIR` on the built code; one line per test.\n"
-            "import sys, pathlib\nhq = pathlib.Path(sys.argv[1])\n\n\ndef t(name, ok, why):\n"
+            "# H342: the row's own done example is the test, replayed on real data (the real row, the real text, the real job), read where\n"
+            "# he would see it: realcase.Case(HQDIR) is a throwaway HQ of this code on a copy of the real workspace and of HQ's .status;\n"
+            "# with case.serve() as page: page.rendered() is the status page as he sees it; case.thread(\"team\") the texts as they landed.\n"
+            "# It must fail on the code from before the build, for the row's reason, with a FAIL line saying what he'd see instead.\n"
+            "import sys, pathlib\nhq = pathlib.Path(sys.argv[1])\nsys.path.insert(0, str(hq / \"routine\"))\nimport realcase\n\n\n"
+            "def t(name, ok, why):\n"
             "    print((\"PASS \" if ok else \"FAIL \") + name + (\"\" if ok else \": \" + why), flush=True)\n\n\n"
+            "# case = realcase.Case(sys.argv[1])\n"
             "# t(\"name\", what he'd see is right, \"what he'd see instead\")\n")
     return (f"HQ/qa-tests/{label}/ started: his {len(his_sentences(row))} sentence(s) in tests.json, each needing at least one test; write "
-            f"the tests in test.py as he'd see the result, then python3 routine/qatests.py check {label}.")
+            f"the tests in test.py as he'd see the result: the row's own example replayed on the real data of the copy, read where he "
+            f"looks (routine/realcase.py), then python3 routine/qatests.py check {label}.")
 
 
 def show(label: str) -> str:
@@ -857,6 +1178,10 @@ def main(argv) -> int:
         return 0
     if len(argv) >= 3 and argv[0] == "run":
         print(json.dumps(end_run(argv[1].upper(), os.path.realpath(argv[2])), ensure_ascii=False))
+        return 0
+    if len(argv) >= 2 and argv[0] == "neighbours":
+        import proof
+        print(neighbours_words(argv[1].upper(), os.path.realpath(argv[2]) if len(argv) >= 3 else str(proof.ROOT)))
         return 0
     print(__doc__)
     return 2

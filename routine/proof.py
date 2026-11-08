@@ -10,6 +10,10 @@ Here a program runs the tests on a copy and keeps a record; `jobs.py done` and `
     python3 routine/proof.py latest ROW  the newest record for a row (F99, H283)
     python3 routine/proof.py run-rows ROW [ROW ...]  F121: the 17 happy flows once, each row's own flows, a record per row
 
+H342 (8 November 2026): her sealed tests' run (qatests.end_run) also runs the sealed tests of the items this build touches, each on its
+own copy; a red one is in "qa_tests" (its "neighbours", "neighbours_red") and makes the record red, and their rows' flows ("around")
+run with the row's own named flows.
+
 H313 (4 November 2026): the gate is the 17 happy flows he asked for (routine/happy.py), run for real with the real model, plus the
 row's own flows, also for real (no --quick: a pass with stand-ins isn't a pass). The detailed flows (the quick set) run at night, in
 routine/nightly.py, no longer here. A happy flow that can't be driven yet is a "not tried" line in the record (rec["not_tried"]), and
@@ -430,13 +434,20 @@ def _run(n: int) -> int:
                 log.write(f"== her QA tests for {label}: {json.dumps(rec['qa_tests'], ensure_ascii=False)}\n")
                 if not rec["qa_tests"].get("green"):
                     rec["failed"].append(f"her QA tests: {rec['qa_tests'].get('why') or 'not green'}")
-            if named and not rec["failed"]:
+                for nb in rec["qa_tests"].get("neighbours") or []:  # H342: the items it touches, each named in the job's log
+                    log.write(f"== a neighbour, {nb['label']}: {nb['ran'] - len(nb['failed'])} of {nb['ran']} of its sealed tests pass\n")
+            # H342: the flows around the items this build touches (their rows' own flows) run with the row's, on the same copy
+            around = [x for x in (rec.get("qa_tests") or {}).get("neighbour_flows") or [] if x not in named]
+            if around:
+                rec["around"] = around
+            if (named or around) and not rec["failed"]:
                 # F105: a flow with Claude turns needs a live voice and usage; a row that only mentions one doesn't turn the record red
-                code, out = _flows(wt, ["--only", ",".join(map(str, named))], log)  # H313: for real, no --quick
+                both = sorted(set(named) | set(around))
+                code, out = _flows(wt, ["--only", ",".join(map(str, both))], log)  # H313: for real, no --quick
                 p, r_ = nightly.summary(out)
                 rec["ran"], rec["passed"] = r_, p
-                rec["skipped"] = [x for x in skipped_flows(out) if x in named]
-                rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {named} ended with exit {code}, {p} of {r_}{_last_words(out)}"])
+                rec["skipped"] = [x for x in skipped_flows(out) if x in both]
+                rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {both} ended with exit {code}, {p} of {r_}{_last_words(out)}"])
             if not rec["failed"]:
                 code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real; the quick set is the night's
                 p, r_ = nightly.summary(out)

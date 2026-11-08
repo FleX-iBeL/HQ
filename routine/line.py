@@ -363,7 +363,9 @@ def prep_text(label, why, row):
     title = (row.get("title") or "").strip()
     return (f"{PREP}{label} (the line): get item {label} ready for the team. {title[:160]} The next step, from the record: {why}. "
             f"Do that step and every one after it you can, until sprint.py check {label} says it's ready: answer the review in the "
-            f"item's own words (review.py add or reword), write or fix your QA tests (qatests.py new, check, review), fill what's "
+            f"item's own words (review.py add or reword), write or fix your QA tests (qatests.py new, check, review: H342, the row's own "
+            f"done example replayed on the real data of the copy they run on, read where he looks, the status page as served and a text "
+            f"as it lands, with routine/realcase.py, failing first on the code from before the build for the row's reason), fill what's "
             f"missing. Before you end, run python3 routine/qatests.py check {label} once yourself, so tests that pass the hard checks "
             f"are sealed and the line moves on. Never send it to the team, never jobs.py send-row or now: the program sends it once it's ready and its build "
             f"switch is on. Text him only for a real decision, never for a step you can take yourself.")
