@@ -40747,6 +40747,60 @@ FLOWS.update({
     500: ("H342 (4): each week how many items passed her check the first time: counted from the marks, served on the status page, following the planning", False, "flow500"),
 })
 FLOW_LIMITS.update({497: 600, 498: 600, 499: 600})
+async def _h342_flow501(self) -> str:
+    """H342 (5), no Claude: a prep that rewrites an item's tests is a prep, not a build. A prep job whose words read like a build and whose
+    kind says build is done without a record and queues no QA. A rewrite of an item's tests seals while the only builds of it are parked
+    with their work done and no record (they don't build to the old tests any more), and the set it replaces is kept in the history; a
+    build of it that waits or runs still holds them."""
+    import subprocess as _sp
+    ws, env, d, script, label, qd, head = _h342_item(self, "h342prep", "The status page should say zq342 passed, as he reads it there.")
+    env["HQ_PROOF_ON"] = "1"
+    (qd / "test.py").write_text(head + REAL_CASE_TEST)
+    need("are sealed" in script("qatests.py", "check", label).out, "her first tests weren't sealed")
+    first = (_h342_state(env, label).get("sealed") or {}).get("fp")
+    need(script("qatests.py", "review", label).returncode == 0, "her first tests' review didn't pass")
+
+    def add(text, *flags):
+        r = script("jobs.py", "add", *flags, text, HQ_SAYSO_FAKE="yes")
+        m = re.search(r"Job (\d+) is ready", r.stdout)
+        need(m, f"no job for {text[:60]!r}: {r.out[-400:]}")
+        return m.group(1)
+
+    def queue_state(n):
+        return re.search(rf"^- Job {n} · ([^·\n]*)", (ws / "HQ/roadmap.md").read_text(), re.M).group(1).strip()
+
+    # a build of the item, parked with its work done and only its record missing
+    b = add(f"{label} on the HQ roadmap: build it as the {label} row says.", "--kind", "build", "--not-ready", "--said",
+            "The status page should say zq342 passed, as he reads it there.")
+    r = script("jobs.py", "mark", b, "paused: ended, no record: her QA tests: her QA tests fail on the built code: t: old")
+    need(r.returncode == 0 and queue_state(b).startswith("paused: ended, no record"), f"the build wasn't parked: {r.out[-300:]}")
+    # her rewrite, as a prep queued by hand, its kind a build's
+    p = add(f"Prep of {label}: rewrite and seal her QA tests the new way (H342): build them on the real case, push to dev, write the "
+            f"result in the {label} row.", "--prep", "--kind", "build", "--not-ready", "--said",
+            "The status page should say zq342 passed, as he reads it there.")
+    (qd / "test.py").write_text(head + REAL_CASE_TEST + "# rewritten\n")
+    r = script("qatests.py", "check", label)
+    need(r.returncode == 0 and "are sealed" in r.out, f"a rewrite was refused while only a parked build of the item exists: {r.out[-400:]}")
+    st = _h342_state(env, label)
+    need(st["sealed"]["fp"] != first and [x.get("fp") for x in st.get("sealed_before") or []] == [first],
+         f"the replaced set isn't kept in the history: {st.get('sealed_before')}")
+    r = script("jobs.py", "done", p)
+    need(r.returncode == 0 and queue_state(p).startswith("done"), f"the prep wasn't done without a build's record: {r.out[-400:]}")
+    qa_jobs = [ln for ln in (ws / "HQ/roadmap.md").read_text().splitlines() if ln.startswith("- Job ") and f"QA of {label}" in ln]
+    need(not qa_jobs, f"a prep's done queued a QA: {qa_jobs}")
+    # a build of it that waits holds her tests as they were sealed
+    need(script("qatests.py", "review", label).returncode == 0, "the rewritten tests' review didn't pass")
+    w = add(f"{label} on the HQ roadmap: build it as the {label} row says, again.", "--kind", "build", "--not-ready", "--said",
+            "The status page should say zq342 passed, as he reads it there.")
+    (qd / "test.py").write_text(head + REAL_CASE_TEST + "# rewritten twice\n")
+    r = script("qatests.py", "check", label)
+    need(r.returncode != 0 and f"with the team (job {w}" in r.out, f"a waiting build didn't hold her tests: {r.out[-300:]}")
+    return "a by-hand prep with a build's kind done without a record and no QA; the rewrite sealed past a parked build, the old set kept; a waiting build holds"
+
+
+setattr(Run, "flow501", _h342_flow501)
+FLOWS.update({501: ("H342 (5): a prep that rewrites her tests is no build: done without a record, no QA; the rewrite seals past a parked build, the old set kept", False, "flow501")})
+FLOW_LIMITS.update({501: 600})
 # == end of H342's block ==
 
 

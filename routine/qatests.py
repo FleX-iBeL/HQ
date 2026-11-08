@@ -81,6 +81,7 @@ MODEL = os.environ.get("HQ_QA_REVIEW_MODEL") or os.environ.get("HQ_REVIEW_MODEL"
 EFFORT = os.environ.get("HQ_QA_REVIEW_EFFORT") or "medium"
 READS = 20000
 _LINE = re.compile(r"^\s*(PASS|FAIL)\s+([A-Za-z0-9_.-]+)\s*(?::\s*(.*))?$")
+PARKED_DONE = "paused: ended, no record"  # runjob.PARKED: a build whose work is done and only its record is missing
 RULES = "H342"  # the rules a seal and a review were made under; older ones hold the Ready mark until checked and reviewed again
 NEIGHBOURS_MOST = int(os.environ.get("HQ_QA_NEIGHBOURS_MOST") or 4)  # [Claude's choice] each neighbour's run can take minutes
 _CRASH = re.compile(r"Traceback \(most recent call last\)")
@@ -508,7 +509,10 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
         return False, (f"Refused: {label} has no QA tests of hers: HQ/qa-tests/{label}/test.py and tests.json "
                        f"(python3 routine/qatests.py new {label} starts them).")
     _, js, _ = q.read()
-    j = q.with_team(js, label) if gate_on() else None  # F157: part of her gate, so off in a test copy as the rest (its queue is a copy of the live one)
+    # H342: a build parked with its work done and only its record missing ("paused: ended, no record") builds nothing more: it doesn't
+    # hold her tests, so a rewrite can replace them (and the record step then runs on the new ones); a prep builds nothing either
+    busy = [x for x in js if not x["state"].startswith(PARKED_DONE) and not _is_prep(x["text"])]
+    j = q.with_team(busy, label) if gate_on() else None  # F157: part of her gate, so off in a test copy as the rest (its queue is a copy of the live one)
     if j and (state(label).get("sealed") or {}).get("fp"):  # the team builds to them: no new seal while it does, by anyone
         return False, (f"Refused: {label} is with the team (job {j['n']}, {j['state']}): its QA tests stay as they were sealed while it builds. "
                        "A change to them waits until the job is done or stopped.")
@@ -579,7 +583,11 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
     sealed = {"fp": fp, "at": int(time.time()), "copy": keep, "his": len(his_sentences(row)), "tests": names, "cycle": k, "rules": RULES,
               "before": {"head": head, "results": {n: got[n] for n in names}, "whys": {n: whys[n] for n in names if n in whys},
                          **({"named": True} if named else {})}}
-    _put(label, lambda e: e.update({"sealed": sealed}))
+    def _seal(e):  # H342: a rewrite replaces the sealed set; the one it replaces stays in the history
+        if (e.get("sealed") or {}).get("fp") and e["sealed"]["fp"] != fp:
+            e["sealed_before"] = ([x for x in e.get("sealed_before") or [] if isinstance(x, dict)] + [{**e["sealed"], "replaced": int(time.time())}])[-20:]
+        e["sealed"] = sealed
+    _put(label, _seal)
     try:
         import trail
         trail.step(trail.resolve(label), "qa_tests", fp=fp[:16], tests=len(names), before=head[:12])
@@ -590,6 +598,11 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
                       f"should. Next, this version's own review: python3 routine/qatests.py review {label} (round 1 of {ROUNDS}).")
     return True, (f"{label}'s QA tests are sealed: {len(names)} test(s) for his {sealed['his']} sentence(s), every one failing on "
                   f"{where} as it should. Next, their own review: python3 routine/qatests.py review {label}.")
+
+
+def _is_prep(text: str) -> bool:
+    import qa
+    return qa.is_prep(text)
 
 
 def why_not(row, now: bool = False) -> str | None:
