@@ -158,7 +158,9 @@ def _read(backup: bool | None = None) -> dict:
     if not (_backup() if backup is None else backup):
         return s
     mine = _json(local_file())
-    if _newer(mine.get("app"), s.get("app"), "looked"):
+    # F213 (8 November 2026): the backup's own read of the app's weather wins whatever its stamp; by the stamps, a
+    # main's write a few milliseconds later (flow 196's rounds, both at the same moment) showed the main's on the backup
+    if isinstance(mine.get("app"), dict):
         s["app"] = mine["app"]
     if _newer(mine.get("here"), s.get("here"), "at"):
         s["here"] = mine["here"]

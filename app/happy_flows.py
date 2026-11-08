@@ -15419,6 +15419,24 @@ print(json.dumps({"view": W.view(fresh=True, gps=(52.371, 4.899)), "read": W._re
         need(out["read"].get("app", {}).get("now") == {"t": 12} and out["read"].get("told") == {"2026-10-28": ["sun"]},
              f"F58: as the backup, the next read doesn't show its own read over the main's file: {out['read']}")
         need(out["read"].get("here", {}).get("key") == "gps:52.37,4.90", f"F58: the phone's spot isn't kept on the backup: {out['read']}")
+        # F213: the race of flow 196 forced: the backup wrote its own (B 3), then the main its own (A 3) with a later stamp
+        race = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/app"); sys.path.insert(0, sys.argv[1] + "/routine")
+import weather as W
+W._write(W._read(backup=True) | {"app": {"looked": 1.0e10, "by": "B 3"}}, backup=True)
+W._write(W._read(backup=False) | {"app": {"looked": 1.0e10 + 0.004, "by": "A 3"}}, backup=False)
+print(json.dumps({"backup": W._read(backup=True).get("app"), "main": W._read(backup=False).get("app")}))
+"""
+        env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_HERE"}
+        env.update(HQ_DIRECT_DIR=str(d / "synced"), HQ_WEATHER_LOCAL=str(own))
+        r = sp.run([sys.executable, "-c", race, str(ROOT)], capture_output=True, text=True, env=env, timeout=60)
+        need(r.returncode == 0, f"F213: the forced weather race didn't run: {r.stderr[-800:]}")
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        need((got["backup"] or {}).get("by") == "B 3",
+             f"F213: with the main's write a few milliseconds later, the backup reads the main's weather over its own: {got}")
+        need((got["main"] or {}).get("by") == "A 3" and "B 3" not in synced.read_text(),
+             f"F213: in the race the main's weather.json isn't the main's alone: {synced.read_text()}")
         before, out = run("main")
         need(synced.read_bytes() != before and json.loads(synced.read_text()).get("app", {}).get("now") == {"t": 12}
              and json.loads(synced.read_text()).get("told") == {"2026-10-28": ["sun"]},
