@@ -614,9 +614,15 @@ def _run_rows(labels: list[str]) -> int:
                 p, r_ = nightly.summary(out)
                 shared.update(ran=r_, passed=p, not_tried=_not_tried(), failed=nightly.failures(out)
                               or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"]))
+                import qatests  # H342: an item built outside a job is proven like one: her sealed tests on the same copy
                 for label, row in rows.items():
                     row.update(ran=0, passed=0, failed=[], skipped=[])
-                    if row["named"]:
+                    if qatests.gate_on():
+                        row["qa_tests"] = qatests.end_run(label, wt)
+                        log.write(f"== her QA tests for {label}: {json.dumps(row['qa_tests'], ensure_ascii=False)}\n")
+                        if not row["qa_tests"].get("green"):
+                            row["failed"].append(f"her QA tests: {row['qa_tests'].get('why') or 'not green'}")
+                    if row["named"] and not row["failed"]:
                         code, out = _flows(wt, ["--only", ",".join(map(str, row["named"]))], log)  # H313: for real
                         p, r_ = nightly.summary(out)
                         row.update(ran=r_, passed=p, skipped=[x for x in skipped_flows(out) if x in row["named"]], failed=nightly.failures(out)
@@ -632,14 +638,20 @@ def _run_rows(labels: list[str]) -> int:
         for label, row in rows.items():
             ran, passed = shared["ran"] + row["ran"], shared["passed"] + row["passed"]
             failed = shared["failed"] + row["failed"]
-            green = sgreen and not row["failed"] and row["passed"] == row["ran"]
+            green = (sgreen and not row["failed"] and row["passed"] == row["ran"]
+                     and ("qa_tests" not in row or bool(row["qa_tests"].get("green"))))
             rec = {"n": None, "label": label, "item": None, "head": head, "commits": row["commits"][:40], "named": row["named"],
                    "skipped": row["skipped"], "ran": ran, "passed": passed, "failed": failed, "not_tried": shared.get("not_tried") or [],
                    "green": green, "at": at, "t": t,
                    "shared": runid, "rows": list(rows)}
+            if "qa_tests" in row:
+                rec["qa_tests"] = row["qa_tests"]
             _save(rec, os.path.join(folder(), f"rows-{runid}-{label}.json"))
             red += not green
-            print(f"{label}: {passed} of {ran} passed on a copy of {head[:7]}" + (f", named flows {row['named']}" if row["named"] else "")
+            qt = row.get("qa_tests")
+            print(f"{label}: {passed} of {ran} passed on a copy of {head[:7]}"
+                  + (f", her QA tests {qt.get('passed', 0)} of {qt.get('ran', 0)}" if qt else "")
+                  + (f", named flows {row['named']}" if row["named"] else "")
                   + (f", skipped {row['skipped']}" if row["skipped"] else "")
                   + (": green." if green else f". Failed: {'; '.join(failed + (shared.get('not_tried') or []))[:900]}"))
         print(f"One run ({runid}): the happy flows {shared['passed']} of {shared['ran']}, {len(rows)} record{'' if len(rows) == 1 else 's'}"
