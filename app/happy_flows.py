@@ -1540,11 +1540,13 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
         tmp = Path(tempfile.mkdtemp(prefix="usage-", dir=config.SCRATCH))
         try:
             for f in ("routine/usage-check.py", "routine/hqpaths.py", "routine/stream-usage.py", "routine/usagelive.py", "status/save-usage.mjs",
-                      "status/parse.mjs", "status/usage.mjs", "status/paths.mjs", "roadmap.md"):
+                      "status/parse.mjs", "status/usage.mjs", "status/paths.mjs", "status/night-road.mjs", "roadmap.md"):
                 dst = site_roadmap(tmp) if f == "roadmap.md" else tmp / f
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROADMAP if f == "roadmap.md" else jv / f, dst)
             (tmp / ".status").mkdir()
+            # F202: the saver also notes the night's reading (night-road.mjs): in the copy, never on his real night road.
+            env = {**os.environ, "HQ_WORKSPACE": str(tmp / "workspace"), "HQ_ROADMAP": str(site_roadmap(tmp))}
             saved = tmp / ".status/usage.json"
             old = datetime.now().astimezone() - timedelta(hours=2)
             saved.write_text(json.dumps({"checkedAt": old.isoformat(), "by": "a normal chat", "readable": True,
@@ -1558,9 +1560,9 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
                     "seven_day": {"utilization": 0.45, "resetsAt": int(time.time()) + 86400}}}},
                 {"type": "result", "result": "Nothing new."})) + "\n"
             r = subprocess.run(["python3", str(tmp / "routine/stream-usage.py")], input=stream,
-                               capture_output=True, text=True, timeout=30)
+                               capture_output=True, text=True, timeout=30, env=env)
             need("Nothing new." in r.stdout and "usage saved" in r.stdout, f"the mail check's stream wasn't read: {r.stdout}")
-            r = subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60)
+            r = subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60, env=env)
             got = json.loads(saved.read_text())
             fresh = {l["label"]: l["percent"] for l in got["limits"] if not l.get("kept")}
             need(fresh == {"5-hour limit": 17, "Weekly · all models": 45}, f"the mail check's usage wasn't put on the page: {fresh}")
@@ -1571,12 +1573,12 @@ console.log(JSON.stringify({{problems: r.problems, on: r.queue.on, n: r.queue.jo
             newer = dict(got, checkedAt=(datetime.now().astimezone() + timedelta(minutes=1)).isoformat(), by="a normal chat",
                          limits=[dict(l, kept=False) for l in got["limits"] if not l.get("kept")])
             saved.write_text(json.dumps(newer))
-            subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60)
+            subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60, env=env)
             need(json.loads(saved.read_text())["by"] == "a normal chat", "a newer reading from a normal chat was overwritten")
             # An old reading is reported as old.
             saved.write_text(json.dumps(dict(newer, checkedAt=old.isoformat())))
             (tmp / "scratch/routine/usage-live.json").unlink()
-            r = subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60)
+            r = subprocess.run(["python3", str(tmp / "routine/usage-check.py")], capture_output=True, text=True, timeout=60, env=env)
             need("read 2 h 0 min ago" in r.stdout and "These numbers are old" in r.stdout, f"an old reading isn't called old: {r.stdout}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
