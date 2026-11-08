@@ -521,7 +521,8 @@ def _hours(a: dict) -> tuple[dt.time, dt.time]:
 
 
 def _wraps(a: dict) -> bool:
-    """H340: hours past midnight, like Moneypenny's 18:00 to 08:00: the night after a day is that day's."""
+    """H340: hours past midnight, like Moneypenny's 18:00 to 08:00: each part counts on the calendar day it falls on (the row's
+    done example: nobody on Saturday 14 before 08:00, Monday 9 at 03:00 a weekday's; job 9413)."""
     lo, hi = _hours(a)
     return hi <= lo
 
@@ -533,25 +534,24 @@ def _at_hour(a: dict, hhmm: str) -> bool:
     return (t >= lo or t < hi) if _wraps(a) else lo <= t < hi
 
 
-def _shift_day(a: dict, now: dt.datetime) -> dt.date:
-    """The day the hours around now belong to: before 08:00 in hours that run from the evening, the day before."""
-    return now.date() - dt.timedelta(days=1) if _wraps(a) and now.time() < _hours(a)[1] else now.date()
-
-
 def _working_day(a: dict, day: dt.date) -> bool:
     return DAYS[day.weekday()] in (a.get("days") or DAYS)
 
 
 def in_hours(a: dict, now: dt.datetime) -> bool:
     """H340: her hours on her working days (days, Monday to Friday by the template; nobody works at the weekend)."""
-    return _at_hour(a, now.strftime("%H:%M")) and _working_day(a, _shift_day(a, now))
+    return _at_hour(a, now.strftime("%H:%M")) and _working_day(a, now.date())
 
 
 def _shift_end(a: dict, now: dt.datetime) -> dt.datetime:
-    """When the hours that now is in (or the day's, outside them) end: the next morning for hours past midnight."""
-    d = _shift_day(a, now)
-    end = dt.datetime.combine(d, _hours(a)[1])
-    return end + dt.timedelta(days=1) if _wraps(a) else end
+    """When the hours that now is in (or the day's, outside them) end: for hours past midnight, the next morning's end, or
+    midnight when the next day isn't a working one (job 9413: Friday night ends at midnight, Saturday is the weekend's)."""
+    lo, hi = _hours(a)
+    end = dt.datetime.combine(now.date(), hi)
+    if not _wraps(a) or now.time() < hi:
+        return end
+    nxt = now.date() + dt.timedelta(days=1)
+    return end + dt.timedelta(days=1) if _working_day(a, nxt) else dt.datetime.combine(nxt, dt.time(0, 0))
 
 
 def next_start(a: dict, now: dt.datetime) -> dt.datetime:
@@ -561,9 +561,10 @@ def next_start(a: dict, now: dt.datetime) -> dt.datetime:
     lo = _hours(a)[0]
     for k in range(8):
         d = now.date() + dt.timedelta(days=k)
-        at = dt.datetime.combine(d, lo)
-        if at >= now.replace(second=0, microsecond=0) and _working_day(a, d):
-            return at
+        # hours past midnight also start at a working day's midnight after a day off (Monday 00:00 after the weekend)
+        for at in ([dt.datetime.combine(d, dt.time(0, 0))] if _wraps(a) else []) + [dt.datetime.combine(d, lo)]:
+            if at >= now.replace(second=0, microsecond=0) and in_hours(a, at):
+                return at
     return dt.datetime.combine(now.date() + dt.timedelta(days=1), lo)
 
 
