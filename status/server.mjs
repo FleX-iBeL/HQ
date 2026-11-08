@@ -10,7 +10,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, openSync } from 'node:fs';
-import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
@@ -183,6 +183,34 @@ function sprint() {
       resolve(data);
     });
   }));
+}
+
+// H342: how many items passed her check the first time, this week and last (routine/qa.py first-time), counted from the QA marks in
+// the planning; asked again whenever the planning file changes, else at most once a minute.
+const firstTimeKept = { key: '', at: 0, data: null };
+async function firstTime() {
+  let key = '';
+  try { const st = await stat(ROADMAP); key = `${st.mtimeMs}:${st.size}`; } catch { /* no planning: nothing counted */ }
+  if (firstTimeKept.data && firstTimeKept.key === key && Date.now() - firstTimeKept.at < 60000) return firstTimeKept.data;
+  const data = await new Promise((resolve) => {
+    execFile('/usr/bin/python3', [join(root, 'routine/qa.py'), 'first-time', '--json', '--weeks', '2'], { timeout: 30000, cwd: root }, (err, out) => {
+      let d = null;
+      try { d = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+      resolve(d);
+    });
+  });
+  if (data) Object.assign(firstTimeKept, { key, at: Date.now(), data });
+  return data;
+}
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function firstTimeHtml(d) {
+  const ws = d?.weeks ?? [];
+  if (!ws.length) return '<p class="first-time" data-check="first-time">Her check, first time: not counted (the planning couldn\'t be read).</p>';
+  const [now, last] = ws;
+  const line = (w, which) => `<span data-week="${escHtml(w.from)}" data-first="${w.first_time}" data-items="${w.items}">${escHtml(which)} `
+    + `(${escHtml(w.words_week)}): ${w.items ? `<b>${w.first_time} of ${w.items}</b> items passed her check the first time` : 'no item had her check yet'}`
+    + `${w.sent_back ? `, ${w.sent_back} sent back` : ''}${w.checks ? `; ${w.passed} of ${w.checks} checks passed in all` : ''}.</span>`;
+  return `<p class="first-time" data-check="first-time">${line(now, 'This week')}${last ? ' ' + line(last, 'Last week') : ''}</p>`;
 }
 
 // F194: a Must on the planning whose prepare is still off an hour after its first dated line, one line each
@@ -1217,6 +1245,16 @@ const server = createServer(async (req, res) => {
       sendBody(req, res, 200, 'application/json; charset=utf-8', await pageData(have));
     } catch (e) {
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(`The status server couldn't put the page together: ${e?.message ?? e}`);
+    }
+    return;
+  }
+  // H342: the weekly first-time count of her check, as an HTML line for the page (?json for the numbers)
+  if (path0 === '/first-time') {
+    const d = await firstTime();
+    if (new URL(req.url, 'http://x').searchParams.has('json')) {
+      res.writeHead(d ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(d ?? { weeks: [] }));
+    } else {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(firstTimeHtml(d));
     }
     return;
   }

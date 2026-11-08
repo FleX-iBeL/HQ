@@ -40,6 +40,7 @@ usage:
   python3 routine/qa.py state LABEL                             passed, failed or none, with the newest mark
   python3 routine/qa.py queue LABEL                             a QA job for the row now (a call, or by hand)
   python3 routine/qa.py hold                                    what the release would take and what it would hold
+  python3 routine/qa.py first-time [--weeks N] [--json]        H342: each week, how many items passed her check the first time
 """
 from __future__ import annotations
 
@@ -930,6 +931,66 @@ def proof_refuses(label: str, compared: str) -> str | None:
     return None
 
 
+# ---------- H342: how many items pass her check the first time, each week ----------
+# His row (8 November 2026): "each week HQ counts how many items pass her check the first time (now 55 of 69), for the weekly
+# retrospective (H341)". Counted from the record QA writes, the marks in the rows (the newest counts for the row, the first says how its
+# first check went): an item belongs to the week its first mark fell in, Monday to Sunday, and passed the first time when that mark is
+# "QA passed". The week's checks in all (every mark, first or not) are counted next to it: the 55 of 69 of his row is that number.
+
+def _mark_day(when: str) -> dt.date | None:
+    try:
+        return dt.datetime.strptime(" ".join(when.split()[:3]), "%d %B %Y").date()
+    except ValueError:
+        return None
+
+
+def first_time(text: str | None = None, weeks: int = 8, today: dt.date | None = None) -> list[dict]:
+    """The last `weeks` weeks, newest first: {"from", "to", "words_week", "items", "first_time", "sent_back", "back", "checks", "passed"}."""
+    text = q.read()[0] if text is None else text
+    today = today or dt.date.today()
+    monday = today - dt.timedelta(days=today.weekday())
+    out = []
+    for k in range(weeks):
+        lo = monday - dt.timedelta(days=7 * k)
+        out.append({"from": lo.isoformat(), "to": (lo + dt.timedelta(days=6)).isoformat(), "items": 0, "first_time": 0, "back": [],
+                    "checks": 0, "passed": 0})
+    by = {w["from"]: w for w in out}
+
+    def week_of(d):
+        return by.get((d - dt.timedelta(days=d.weekday())).isoformat()) if d else None
+
+    for label, (line, _phase) in rows(text).items():
+        ms = marks(line)
+        if not ms:
+            continue
+        w = week_of(_mark_day(ms[0][1]))
+        if w:
+            w["items"] += 1
+            if ms[0][0] == "passed":
+                w["first_time"] += 1
+            else:
+                w["back"].append(label)
+        for verdict, when, _ in ms:
+            w2 = week_of(_mark_day(when))
+            if w2:
+                w2["checks"] += 1
+                w2["passed"] += verdict == "passed"
+    for w in out:
+        lo, hi = dt.date.fromisoformat(w["from"]), dt.date.fromisoformat(w["to"])
+        w["sent_back"] = w["items"] - w["first_time"]
+        w["words_week"] = (f"{lo.day} to {hi.day} {hi:%B %Y}" if lo.month == hi.month else f"{lo.day} {lo:%B} to {hi.day} {hi:%B %Y}")
+        w["words"] = first_time_words(w)
+    return out
+
+
+def first_time_words(w: dict) -> str:
+    if not w["items"] and not w["checks"]:
+        return f"Week of {w['words_week']}: no item had her check yet."
+    return (f"Week of {w['words_week']}: {w['first_time']} of {w['items']} items passed her check the first time"
+            + (f" ({w['sent_back']} sent back: {', '.join(w['back'][:12])}{'…' if len(w['back']) > 12 else ''})" if w["sent_back"] else "")
+            + f"; {w['passed']} of {w['checks']} checks passed in all.")
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
@@ -997,6 +1058,14 @@ def main(argv: list[str]) -> int:
         return 0
     if cmd == "hold":
         print(hold_words(hold()))
+        return 0
+    if cmd == "first-time":  # H342: the weekly first-time count, for the retrospective (H341) and the status page
+        n = 8
+        if "--weeks" in args:
+            i = args.index("--weeks")
+            n = int(args[i + 1]) if i + 1 < len(args) and args[i + 1].isdigit() else 8
+        ws = first_time(weeks=max(1, min(n, 104)))
+        print(json.dumps({"weeks": ws}, ensure_ascii=False) if "--json" in args else "\n".join(w["words"] for w in ws))
         return 0
     print(__doc__)
     return 2

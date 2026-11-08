@@ -568,9 +568,12 @@
     <!-- H339: the night's road, in Moneypenny's place until her own section comes with the big overhaul (H257); H307: its timeline any time -->
     <section id="moneypenny-night" class="moneypenny-night" aria-label="Moneypenny's night's road">
       <h2>Moneypenny · <a id="night-road-link" href="/night-road">The night's road</a></h2>
-      <style>#moneypenny-night{max-width:960px;margin:1rem auto;padding:0 1rem}</style>
+      <style>#moneypenny-night{max-width:960px;margin:1rem auto;padding:0 1rem}#moneypenny-night .first-time{margin:.5rem 0;font-size:.9rem;opacity:.85}#moneypenny-night .first-time span{display:block}</style>
       <div id="night-timeline"></div>
+      <!-- H342: how many items passed her check the first time, this week and last, from the QA marks in the planning -->
+      <div id="first-time"></div>
     </section>
+    <script>(function(){var box=document.getElementById('first-time');function load(){fetch('/first-time',{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(h){if(h)box.innerHTML=h;}).catch(function(){});}load();setInterval(load,60000);})();</script>
     <script>(function(){var box=document.getElementById('night-timeline');function load(){fetch('/night-road/timeline',{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(h){if(h)box.innerHTML=h;}).catch(function(){});}load();setInterval(load,60000);})();</script>
     <main id="app"><p>Reading the roadmap…</p></main>
     <script src="./update-ui.js"></script>
