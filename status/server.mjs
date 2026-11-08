@@ -1304,6 +1304,8 @@ server.on('error', (err) => {
 });
 
 server.listen(port, '127.0.0.1', () => {
+  // F199: a trial start of a new build (on a spare port) only shows it answers; it writes no history.
+  if (process.env.HQ_STATUS_TRIAL) return;
   sample();
   setInterval(sample, 60000);
   const url = `http://localhost:${port}`;

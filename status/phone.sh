@@ -36,6 +36,7 @@ TS_HTTPS_PORT=8444   # 443 is another service, 8443 is the call line
 mkdir -p scratch
 if ! listening "$PORT"; then
   nohup "$NODE" status/server.mjs --quiet >> scratch/status-server.log 2>&1 &
+  echo $! > scratch/status-server.pid   # F199: its own pid, so a build that changes it can restart this one, and no other
   echo "Status server started."
 fi
 [ -n "$HQ_NO_PHONE" ] && exit 0

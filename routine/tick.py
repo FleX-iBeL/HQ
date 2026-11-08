@@ -1050,6 +1050,8 @@ def status_page():
                   text=text)
     # H30: phone.sh starts whatever was missing; that's the fix, and the next look shows if it worked.
     started = (r.stdout + r.stderr).strip()
+    if "Status server started." in started:
+        _server_code(_code_now())  # F199: the code it was started on, so a build that changes it is seen
     fixed = f"Started again: {started.splitlines()[-1][:120]}" if started else ""
     if up and on_phone:
         if fixed and not incidents.is_down("phone"):
@@ -1068,6 +1070,185 @@ def status_page():
 
 def listening(port):
     return hqpaths.listening(port)
+
+
+# F199: a build that changes the status server is live within minutes. The server's own pid (status/phone.sh keeps it)
+# and the code it was started on (below) say when the code on disk is newer; once a green record stands for that code,
+# a trial start on a spare port shows it answers, then the old one is stopped by its own pid and phone.sh starts the new.
+# Every try is in the routine's log, a failed one too; one try per code, the next build that changes it tries again.
+SERVER_PID = os.path.join(JV, "scratch", "status-server.pid")
+SERVER_STATE = os.path.join(JV, "scratch", "status-server-code.json")
+
+
+def _code_now():
+    import hashlib
+    try:
+        return hashlib.sha256(open(os.path.join(JV, "status", "server.mjs"), "rb").read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _server_state():
+    try:
+        return json.load(open(SERVER_STATE, encoding="utf8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _server_code(code=None, tried=None):
+    st = _server_state()
+    if code is not None:
+        st["code"] = code
+    if tried is not None:
+        st["tried"] = tried
+    os.makedirs(os.path.dirname(SERVER_STATE), exist_ok=True)
+    with open(SERVER_STATE, "w", encoding="utf8") as f:
+        json.dump(st, f)
+
+
+def _green_head_for(code):
+    """The commit of a green record whose status/server.mjs is this code, or ''."""
+    import hashlib
+    import proof
+    folder = proof.folder()
+    try:
+        recs = [os.path.join(folder, n) for n in os.listdir(folder) if n.endswith(".json")]
+    except OSError:
+        return ""
+    for p in sorted(recs, key=lambda p: -os.path.getmtime(p))[:30]:
+        try:
+            rec = json.load(open(p, encoding="utf8"))
+        except (OSError, ValueError):
+            continue
+        if not rec.get("green") or not rec.get("head"):
+            continue
+        r = subprocess.run(["git", "-C", JV, "show", f"{rec['head']}:status/server.mjs"], capture_output=True)
+        if r.returncode == 0 and hashlib.sha256(r.stdout).hexdigest() == code:
+            return rec["head"]
+    return ""
+
+
+def _cmdline(pid):
+    try:
+        return open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf8", "replace")
+    except OSError:
+        return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
+
+
+def _alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _port_pids(port):
+    if hqpaths.IS_MAC:
+        out = subprocess.run(["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True).stdout
+        return re.findall(r"\d+", out)
+    out = subprocess.run(["ss", "-Hltnp", f"sport = :{port}"], capture_output=True, text=True).stdout
+    return re.findall(r"pid=(\d+)", out)
+
+
+def _server_pid():
+    """(pid, why): the running status server's own pid, or '' with why there is none to stop."""
+    try:
+        kept = open(SERVER_PID, encoding="utf8").read().strip()
+    except OSError:
+        kept = ""
+    if kept.isdigit() and _alive(kept) and "status/server.mjs" in _cmdline(kept):
+        return kept, ""
+    for p in _port_pids(hqpaths.status_port()):
+        if "status/server.mjs" in _cmdline(p):
+            return p, ""
+    if kept.isdigit():
+        return "", f"its pid {kept} is stale (that process is gone or isn't the status server), and no status/server.mjs listens on the port"
+    return "", "no pid to stop (none kept, and no status/server.mjs listens on the port)"
+
+
+def _node():
+    import shutil
+    extra = os.pathsep.join([os.path.expanduser("~/.npm-global/bin"), os.path.expanduser("~/.local/bin"),
+                             "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
+    return os.environ.get("HQ_NODE") or shutil.which("node", path=os.environ.get("PATH", "") + os.pathsep + extra) or "node"
+
+
+def _answers(port, wait):
+    import urllib.request
+    import urllib.error
+    end = time.time() + wait
+    while time.time() < end:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3).close()
+            return True
+        except urllib.error.HTTPError:
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def _trial():
+    """'' when the code on disk starts and answers on a spare port, else why not."""
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    env = dict(os.environ, HQ_STATUS_PORT=str(port), HQ_STATUS_TRIAL="1")
+    p = subprocess.Popen([_node(), "status/server.mjs", "--quiet"], cwd=JV, env=env, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        end = time.time() + 15
+        while time.time() < end and p.poll() is None:
+            if _answers(port, 0.6):
+                return ""
+        if p.poll() is None:
+            return "the new code didn't answer within 15 seconds"
+        err = [l for l in p.stderr.read().decode("utf8", "replace").splitlines() if l.strip()]
+        return "the new code didn't start" + (f" ({err[-1].strip()[:120]})" if err else "")
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+
+
+def status_server_build():
+    code = _code_now()
+    st = _server_state()
+    if not code or st.get("code") == code or st.get("tried") == code:
+        return
+    head = _green_head_for(code)
+    if not head:
+        return  # a build whose record isn't green (yet) keeps the server it has
+    _server_code(tried=code)
+    if not listening(hqpaths.status_port()):
+        return  # nothing runs: the every-minute look (status_page) starts it on the new code
+    old, why = _server_pid()
+    if not old:
+        log(f"Status server not restarted after a build changed it (green {head[:8]}): {why}; the old one keeps answering")
+        return
+    bad = _trial()
+    if bad:
+        log(f"Status server restart failed after a build changed it (green {head[:8]}): {bad}; the old one (pid {old}) keeps answering")
+        return
+    os.kill(int(old), signal.SIGTERM)
+    end = time.time() + 10
+    while time.time() < end and (_alive(old) or listening(hqpaths.status_port())):
+        time.sleep(0.3)
+    r = subprocess.run([hqpaths.shell(), os.path.join(JV, "status", "phone.sh")], capture_output=True, text=True)
+    if "Status server started." in r.stdout:
+        _server_code(code)
+    if _answers(hqpaths.status_port(), 15):
+        try:
+            new = open(SERVER_PID, encoding="utf8").read().strip()
+        except OSError:
+            new = "?"
+        log(f"Status server restarted after a build changed it (green {head[:8]}): pid {old} → {new}")
+    else:
+        log(f"Status server restart failed after a build changed it (green {head[:8]}): pid {old} stopped, the new one "
+            "doesn't answer; the every-minute look starts it again")
 
 
 NO_PHONE = bool(os.environ.get("HQ_NO_PHONE"))
@@ -2129,6 +2310,10 @@ if __name__ == "__main__":
             status_page()
         except Exception as e:
             log(f"status page: {e!r}")
+        try:
+            status_server_build()
+        except Exception as e:
+            log(f"status server after a build: {e!r}")
         try:
             call_line()
         except Exception as e:
