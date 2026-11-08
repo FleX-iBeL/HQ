@@ -108,7 +108,11 @@ def label_of(j: dict) -> str | None:
 
 
 def needs(j: dict) -> bool:
-    """Only a build needs a record; a QA, a release or an agent's own run doesn't."""
+    """Only a build needs a record; a QA, a release, a prep (H342: getting an item ready, her tests rewritten and sealed among it; its
+    words read like a build's, its kind may say build) or an agent's own run doesn't."""
+    import qa
+    if qa.is_prep(j.get("text") or ""):
+        return False
     import estimate as E
     kind = (E._load_state().get(str(j["n"])) or {}).get("kind") or E.kind_of(j["text"])
     return kind in BUILDS

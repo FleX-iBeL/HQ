@@ -82,7 +82,8 @@ def prep_of(jobs, label):
     """The waiting, running or held prep job for LABEL, or None. F178: a boxed prep (ran past its box) is over for the line: it
     no longer holds the item, the line starts a fresh one; the boxed job stays as it is, with what it wrote."""
     for j in jobs:
-        if prep_label(j["text"]) == label and not j["state"].startswith(q.FINISHED + ("boxed",)):
+        # H342: a prep parked with no record (before 8 November a prep was judged as a build) is over for the line too
+        if prep_label(j["text"]) == label and not j["state"].startswith(q.FINISHED + ("boxed", "paused: ended, no record")):
             return j
     return None
 

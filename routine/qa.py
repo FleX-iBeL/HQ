@@ -210,6 +210,15 @@ def is_qa(text: str) -> bool:
     return " ".join((text or "").split()).startswith(QA_START)
 
 
+PREP_START = "Prep of "  # the line's prep job (routine/line.py PREP), and one she queues the same way (H342: a rewrite of her tests)
+
+
+def is_prep(text: str) -> bool:
+    """H342 (8 November 2026): a prep job gets an item ready (her tests written, checked, sealed, reviewed); it builds nothing, so it is
+    never judged by a build's record or her tests on "the built code", and its done queues no QA."""
+    return " ".join((text or "").split()).startswith(PREP_START)
+
+
 # F57: the end of every job's text; the done mark is the one thing that is always the very last step.
 DONE_LAST = ("Then the status block, then python3 routine/jobs.py done N as the very last step, nothing after it, "
              "within a minute of the result.")
@@ -266,7 +275,7 @@ def _estimate(j: dict, kind: str) -> None:
 def on_done(jobs: list, j: dict, text: str, kind: str | None) -> dict | None:
     """Inside jobs.py done (its lock held): a finished build for a row in Bugs or Features gets a QA job, at the end
     of the line. Returns the new job (not written yet), or None."""
-    if kind not in ("build", "bigbuild") or is_qa(j["text"]):
+    if kind not in ("build", "bigbuild") or is_qa(j["text"]) or is_prep(j["text"]):  # H342: a prep builds nothing
         return None
     label = (j.get("item") or {}).get("label") or job_label(j["text"])  # F103: the carried id's row, never a sentence again
     if not label or not gated(label, text) or _waiting_for(jobs, label, qa=True):
