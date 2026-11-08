@@ -40959,6 +40959,72 @@ FLOW_LIMITS.update({502: 300})
 # == end of H340's block ==
 
 
+# == F201: a switch-off he gave stays off while her Must pickup runs (QA's finding, job 9506) ==
+F201_CHECK = r"""
+import sys, json, subprocess, datetime as dt
+sys.path.insert(0, HQ_ROOT + '/routine')
+import cycles, sprint
+cycles.on = lambda base=None: True
+_s = cycles.agent_settings
+cycles.agent_settings = lambda aid, base=None: {**_s(aid, base), "on": True}
+def sp_(*a):
+    r = subprocess.run([sys.executable, HQ_ROOT + '/routine/sprint.py', *a], capture_output=True, text=True, timeout=120)
+    return [r.returncode, ' '.join((r.stdout + r.stderr).split())[-300:]]
+o = {'tag': [sp_('moscow', l, 'must')[0] for l in LABELS]}
+o['off'] = sp_('go', 'F9201', 'both', 'off', '--said', WORDS)            # his off now, with his words
+o['held'] = sp_('held-off', 'F9202', 'both', '--said', WORDS, '--at', '2026-11-08 01:33')  # an off of his from before offs were kept
+o['again'] = [sp_('go', 'F9205', 'both', 'off', '--said', WORDS), sp_('go', 'F9205', 'prep', 'on', '--said', WORDS)]  # off, then on again
+sprint.set_go('F9204', 'prep', True, by='moneypenny')
+sprint.set_go('F9204', 'both', False, by='line')                       # the line's own off after her check: not his
+o['line_off'] = (getattr(sprint, 'off_of', None) or (lambda l: {'prep': 'no record of offs kept'}))('F9204')
+now = dt.datetime.now().replace(second=0, microsecond=0)
+o['did'] = []
+for m in (0, 1, 5, 60):
+    o['did'] += cycles.must_go(now + dt.timedelta(minutes=m))
+said = subprocess.run([sys.executable, HQ_ROOT + '/routine/line.py', 'show', *LABELS], capture_output=True, text=True, timeout=120).stdout
+o['line'] = {l: next((x.split(': ', 1)[1] for x in said.splitlines() if x.startswith(l + ': ')), '') for l in LABELS}
+print(json.dumps(o))
+"""
+
+
+async def _f201_flow503(self) -> str:
+    """F201, no Claude: a Must he switched off stays off while her Must pickup (cycles.must_go, F194) runs, and one nobody decided
+    on is still picked up. On a throwaway planning with five open Must rows: F9201 switched off now with his words (sprint.py go
+    ... off --said), F9202 an off of his from before offs were kept (sprint.py held-off), F9203 nobody touched, F9204 her own on
+    that the line switched off after her check (not his), F9205 switched off and then on again by his words. Her cycle's minute
+    now, a minute on, five minutes and an hour on: his two offs say "prepare off (by him, TIME)" on the line, the untouched one
+    and the line's off are picked up by Moneypenny, and his later on stays his. On the code before F201 his offs came back on."""
+    ws, env = self._h298_ws("f201offs")
+    words = "Yes, only those"
+    th = ws / "HQ/team-line"
+    th.mkdir(parents=True, exist_ok=True)
+    (th / "thread.jsonl").write_text(json.dumps({"at": time.time() - 60, "from": "me", "text": words}) + "\n")
+    env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+    labels = ["F9201", "F9202", "F9203", "F9204", "F9205"]
+    rm = ws / "HQ/roadmap.md"
+    rows = "".join(f"| ⬜ | {l} A made-up bug {l[-1]} | [The made-up card {l[-1]} is wrong. 8 November 2026.] | |\n" for l in labels)
+    head, bugs = rm.read_text().split("## Phase F · Bugs", 1)
+    rm.write_text(head + "## Phase F · Bugs" + bugs.replace("|---|---|---|---|\n", "|---|---|---|---|\n" + rows, 1))
+    o = json.loads(self._h298_py(env, f"HQ_ROOT = {str(ROOT)!r}\nLABELS = {labels!r}\nWORDS = {words!r}\n" + F201_CHECK).strip().splitlines()[-1])
+    need(o["tag"] == [0] * 5, f"the rows couldn't be tagged Must: {o}")
+    need(o["off"][0] == 0 and o["held"][0] == 0 and all(r[0] == 0 for r in o["again"]), f"his switches weren't taken: {o}")
+    L = o["line"]
+    for l in ("F9201", "F9202"):
+        need(L[l].startswith("prepare off (by him, "),
+             f"{l}, switched off by him, the line says '{L[l] or 'no answer'}' after an hour of her pickup ({[x for x in o['did'] if l in x]})")
+    need(L["F9203"].startswith("prepare on (Moneypenny"), f"the Must nobody decided on wasn't picked up: '{L['F9203']}' ({o['did']})")
+    need(not (o["line_off"] or {}).get("prep") and L["F9204"].startswith("prepare on (Moneypenny"),
+         f"the line's own off counted as his: kept {o['line_off']}, the line says '{L['F9204']}'")
+    need(L["F9205"].startswith("prepare on (his words"), f"his on after his off didn't stay his: '{L['F9205']}'")
+    return "his offs (now with his words, and held from before) stay 'prepare off (by him)' through an hour of her pickup; the untouched Must and the line's own off are picked up; his on again stays on"
+
+
+setattr(Run, "flow503", _f201_flow503)
+FLOWS.update({503: ("F201: a prepare he switched off (his words, or held-off from before) stays off through an hour of her Must pickup, shown as his on the line; an untouched Must and the line's own off are still picked up", False, "flow503")})
+FLOW_LIMITS.update({503: 300})
+# == end of F201's block ==
+
+
 def limit_of(n: int) -> int:
     return FLOW_LIMITS.get(n, FLOW_LIMIT)
 
