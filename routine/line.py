@@ -34,6 +34,12 @@ the record, never anyone's word, and does the next step:
     no longer holds the item: the line starts a fresh one with the record's next step, each one a try (F178, 7 November 2026). Before
     it gives up on her tests not through the hard checks, it runs qatests.py check itself once: sealed, it moves on with no text.
 
+  - On her sit-down list for a point only he can answer (F207, 8 November 2026: H336 was prepared twice in a row, each prep stopping on
+    the same laptop-chat quotes): no prep while its row is unchanged, nor after the one prep its changed words get, while its quotes
+    still aren't found. Once one of the row's quotes is in a line of his said since (a call, a quick note, a text), one prep starts with
+    the words that landed in its text, and the stop is marked answered: the prep puts it back on the list with one text, sent now
+    (review.sitdown), and the line waits again until his next answer lands or the row changes.
+
 His pause of the team (jobs.py off) holds the line too.
 
     python3 routine/line.py tick         one pass (the routine runs it every minute on the main)
@@ -104,7 +110,7 @@ def _review_waiting(row):
         return False
 
 
-def next_step(row, g, jobs, now=None):
+def next_step(row, g, jobs, now=None, e=None):
     """(what, detail) the line does for ROW with switches G: wait, send, mark, prep, rerun, hold, or none."""
     label = row["label"]
     try:  # passed her check: the line is through with it, the release takes it (a second send built it twice, 5 November 22:54)
@@ -145,11 +151,54 @@ def next_step(row, g, jobs, now=None):
         return "mark", why
     if _review_waiting(row) and "review" in why and "QA tests" not in why:
         return "wait", "the review hasn't run on its new words yet"
+    stop = _on_list(row, e, why)
+    if stop:  # F207: on her sit-down list for his answer, its row unchanged: prepared again it changes nothing, until his answer lands
+        got = landed(row, stop)
+        if not got:
+            return "wait", f"on her sit-down list for his answer: {q.one_line(stop.get('why') or why)[:200]}"
+        if not g.get("prep"):
+            return "none", f"his answer landed, but prepare is off: {why}"
+        return "prep", (f"{why}; his answer landed since it went on her sit-down list, his words word for word: "
+                        + "; ".join(f'"{x[:300]}"' for x in got)
+                        + ". Take what landed into the row; when the rest still only waits on his words, put it back on the sit-down list "
+                        "with one text (review.py sitdown)")
     if WAITS_ON_HIM.search(why):  # H338 (Part C 4): only his answer moves it; prepared again it changed nothing (H324, three times on 6 November)
         return "wait", f"waits on his answer: {why}"
     if not g.get("prep"):
         return "none", f"not ready and prepare is off: {why}"
     return "prep", why
+
+
+HIS_WORDS_MISSING = "not found in the calls, the notes, the log, his texts or his laptop chats"
+
+
+def _on_list(row, e=None, why=""):
+    """F207: the stop that holds ROW for his answer, or None. On her sit-down list as its words stand; or its words changed since, the
+    line's one prep on the new words has run (E, the line's state for these words), and its quotes still aren't found."""
+    try:
+        import review
+        stop = review.on_list(row)
+        if stop:
+            return stop
+        stop = review.on_list(row, any_words=True)
+    except Exception:
+        return None
+    if stop and (e or {}).get("prepped", 0) > float(stop.get("at") or 0) and HIS_WORDS_MISSING in (why or ""):
+        return stop
+    return None
+
+
+def landed(row, stop):
+    """F207: the row's quotes that are in a line of his (a call, a quick note, a text) said since it went on her sit-down list, or since
+    his last answer the line already took; [] while none has."""
+    since = max(float(stop.get("at") or 0), float(stop.get("answered") or 0))
+    quotes = [m.group(1).strip() for m in S._QUOTES.finditer(S.field_texts(row["line"])["his_words"])]
+    out = []
+    for qt in quotes:
+        parts = [p for p in (S._bare(x) for x in re.split(r"\s*(?:…|\.\.\.)\s*", qt)) if p]
+        if parts and any(h["at"] > since for h in S.his_said(parts, S._ws())):
+            out.append(qt)
+    return out
 
 
 # F192 (7 November 2026): a hold she gives is the item's own Waits on (point 8 of ready); she lifts it with "Waits on: nothing".
@@ -466,6 +515,13 @@ def act(label, what, detail, row, st, jobs):
             return None
         code, out = _run([os.path.join(HERE, "jobs.py"), "add", prep_text(label, detail, row), "--prep", "--item", label, "--kind", "research"])
         e["last"] = "prep"
+        if code == 0:
+            e["prepped"] = time.time()
+        stop = _on_list(row, e, detail)
+        got = landed(row, stop) if stop and code == 0 else []
+        if got:  # F207: this one prep takes his answer; the line starts no other until his next answer lands or the row changes
+            import review
+            review.answered(label, got)
         return f"{label}: a prep job for Moneypenny ({out.splitlines()[-1][:120] if out else code})"
     return None
 
@@ -493,7 +549,7 @@ def tick(now=None):
         e = st.setdefault(label, {})
         if e.get("row") != fp_row or e.get("go") != json.dumps(g, sort_keys=True):  # his words or the switches changed: start fresh
             st[label] = e = {"row": fp_row, "go": json.dumps(g, sort_keys=True)}
-        what, detail = next_step(row, g, jobs, now)
+        what, detail = next_step(row, g, jobs, now, e)
         e["seen"] = f"{what}: {detail}"[:300]
         if what == "hold" and "it would wait forever: " in detail:  # F197: once per hold, not every minute
             stuck = detail.split("it would wait forever: ", 1)[1]
@@ -520,6 +576,7 @@ def show(labels=None):
     _, jobs, on = q.read()
     rows = {r["label"]: r for r in S.open_rows()}
     go = S.go_all()
+    st = _load()
     out = [] if on else ["The team is paused, so the line waits too."]
     for label in labels or sorted(go):
         row = rows.get(label)
@@ -527,7 +584,8 @@ def show(labels=None):
             out.append(f"{label}: not an open row.")
             continue
         g = go.get(label) or S.go_of(label)
-        what, detail = next_step(row, g, jobs)
+        e = st.get(label) or {}
+        what, detail = next_step(row, g, jobs, e=e if e.get("row") == S.ask_fp(row["line"]) else {})
         out.append(f"{label}: {S.go_words(label, g)}. Next: {what}, {detail}")
     return "\n".join(out) or "No item has a switch on."
 

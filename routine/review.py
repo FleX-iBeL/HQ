@@ -969,6 +969,27 @@ def _stopped(e, fp):
     return st if st and (st.get("ask") == fp or st.get("kind") == "no") else None
 
 
+def on_list(row, any_words=False):
+    """F207: the stop of hers that holds ROW on the sit-down list for his answer, as its words stand (any_words: whatever they are now), or None."""
+    e = (_state()[1].get("rows") or {}).get(row["label"]) or {}
+    st = (e.get("fix") or {}).get("stop") if any_words else _stopped(e, S.ask_fp(row["line"]))
+    return st if st and st.get("kind") in ("his", "no") else None
+
+
+def answered(label, quotes, now=None):
+    """F207: his answer to the row's sit-down point landed (QUOTES, his words since the stop): the stop says so, so the one prep the
+    line starts on it may put the row back on the list with one new text."""
+    with q.locked():
+        d, rv = _state()
+        st = (((rv.get("rows") or {}).get(label) or {}).get("fix") or {}).get("stop")
+        if not st:
+            return
+        st["answered"] = int(now or _clock())
+        st["landed"] = list(quotes)
+        d["review"] = rv
+        S._save(S.RANKS, d)
+
+
 def _said_no(row):
     """Her no on this row as its words stand, or None."""
     st = _stopped((_state()[1].get("rows") or {}).get(row["label"]) or {}, S.ask_fp(row["line"]))
@@ -1563,6 +1584,7 @@ def sitdown(label, what, ifthen, now=None, kind="his", instead="", quiet=False):
         fp = S.ask_fp(row["line"])
         had = _stopped(e, fp)
         f = e.setdefault("fix", {})
+        landed = (f.get("stop") or {}).get("answered")  # F207: his answer landed on the stop before this one, and the line's prep took it
         if not (had and had.get("kind") == "no"):  # her no stands: a sit-down after it in the same round doesn't replace it
             f["stop"] = {"ask": fp, "kind": kind, "why": what, "at": int(now), "round": f.get("n")}
             if instead:
@@ -1572,12 +1594,30 @@ def sitdown(label, what, ifthen, now=None, kind="his", instead="", quiet=False):
         rv["rows"] = rs
         d["review"] = rv
         S._save(S.RANKS, d)
-    if had and had.get("kind") in ("his", "no"):
+    if had and had.get("kind") in ("his", "no") and not had.get("answered"):  # F207: after his answer landed, back on it is one new text
         return f"{label} was on the sit-down list already; no second text."
     ledger.note(cycles.FIX_AGENT, f"{label} on the sit-down list: " + (f"she says no: {what} Instead: {instead}" if kind == "no" else what))
     if quiet:
         return f"{label} is on the sit-down list; the caller texts him."
+    if landed:  # F207: back on it right after his answer: what's still open goes now, as one text, not in her next batch
+        if _text_now(label, f"sitdown-{landed}", f"{label}: {what} {ifthen}"):
+            return f"{label} is back on the sit-down list after his answer; one text to him on her line."
     return f"{label} is on the sit-down list. " + cycles.ask(cycles.FIX_AGENT, ifthen)
+
+
+def _text_now(label, mid, words):
+    """F207: one text to him on her line now, once by its id (qatests.tell's way); a test only in its own copy (her test run's box, behind
+    the wall) or with its own line."""
+    if hqpaths.under_test() and not os.environ.get("HQ_DIRECT_DIR") and not os.environ.get("HQ_QA_BOX"):
+        return False
+    py = os.path.join(hqpaths.HQ, ".venv", "bin", "python")
+    try:
+        r = subprocess.run([py if os.path.exists(py) else sys.executable, os.path.join(hqpaths.HQ, "app", "direct_line.py"), "text", "team",
+                            words, "--item", label, "--once", f"qa-{mid}-{label}"], cwd=hqpaths.HQ, env={**os.environ, "HQ_DIRECT_PLAIN": "1"},
+                           text=True, capture_output=True, timeout=120, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
 
 
 def no(label, why, instead, ifthen, now=None):
