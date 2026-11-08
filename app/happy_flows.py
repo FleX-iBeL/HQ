@@ -13570,7 +13570,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         (site / ".status").mkdir()
         for dname in ("routine", "app"):
             (site / dname).symlink_to(ROOT / dname)
-        port = 4799
+        # F206: a port of its own; on a taken fixed port (4799) this server bowed out and a leftover server answered for it.
+        port = _free_port()
         senv = {**env, "HQ_STATUS_PORT": str(port)}
         senv.pop("HQ_ROLE_HERE", None)
         srv = subprocess.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -13590,6 +13591,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                     break
                 except Exception:
                     await asyncio.sleep(0.2)
+            need(srv.poll() is None, f"H272: the flow's own status server didn't stay up (exit {srv.returncode})")
             st, _ = await asyncio.to_thread(call, "/api/sprint-ready", "POST", {"content-type": "application/json"}, b'{"label":"H9004","on":true}')
             need(st == 403, f"H272: the Ready mark is set without the page's header: {st}")
             st, _ = await asyncio.to_thread(call, "/api/sprint-ready", "POST", {"x-hq": "sprint"}, b'{"label":"H9004","on":"yes"}')
