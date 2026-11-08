@@ -381,16 +381,23 @@ TURN_KINDS = ("reply", "team")  # F186: her own words on her line (her reply, he
 NOT_HERS = ("job ", "the night run", "older than the record")  # F186: a record write that isn't her turn's (a job's, a label looked up)
 
 
+IN_A_TEXT = "in a text"  # F186: the by of a write made from her text line (jobs.py)
+_turn_from = 0.0  # F186: when her reply turn's answer started (reply), so a write before it (a call's) isn't her turn's
+
+
 def turn_label(where: Path | None = None) -> str:
     """F186: the one item her turn wrote, as HQ's record keeps it (trail.written): the labels written since the newest line on her line
-    (his text she answers, or her own line before), not by a job or the night run. Exactly one: its label; none or two: ""."""
+    (his text she answers, or her own line before), not by a job or the night run. Her reply path knows when her turn started: only the
+    writes from then count. Without it (her team command, a reply added by itself) only a write marked as made in a text counts, so a
+    call's write in the same stretch never does. Exactly one: its label; none or two: ""."""
     try:
         rows = read_lines(where or folder())
-        since = max((float(m.get("at") or 0) for m in rows), default=0.0)
+        since = max([float(m.get("at") or 0) for m in rows] + [_turn_from], default=0.0)
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
         import trail
         labels = {str(d.get("label") or "").strip() for d in trail.lines() if d.get("step") == "written"
-                  and float(d.get("at") or 0) > since and not str(d.get("by") or "").startswith(NOT_HERS)}
+                  and float(d.get("at") or 0) > since and not str(d.get("by") or "").startswith(NOT_HERS)
+                  and (_turn_from or str(d.get("by") or "").strip() == IN_A_TEXT)}
     except Exception:
         return ""
     labels = {x for x in labels if _LABEL.fullmatch(x)}
@@ -1314,6 +1321,7 @@ def reply() -> str | None:
             if not mine:
                 break
             words = "\n".join(m["text"] for m in mine)
+            _turn(True)
             answer = _answer(words, [m.get("id") for m in mine])
             msg = add("agent", answer, "reply")
             push(msg["text"])
@@ -1322,15 +1330,23 @@ def reply() -> str | None:
             for _k in range(CARRY_MOST):  # H338: on every agent's line, not only Moneypenny's
                 if unanswered() or not _promises(answer):
                     break
+                _turn(True)
                 answer = _answer(CARRY_NOTE, [])  # 4 November 2026: she said she'd do the next step, so she does it now
                 msg = add("agent", answer, "reply")
                 push(msg["text"])
                 _harvest(answer)
                 last = msg["text"]
     finally:
+        _turn(False)
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
     return last
+
+
+def _turn(start: bool) -> None:
+    """F186: her reply turn starts now (its writes count for her line's number), or is over."""
+    global _turn_from
+    _turn_from = time.time() if start else 0.0
 
 
 def history(ids=(), most: int = 16) -> str:
