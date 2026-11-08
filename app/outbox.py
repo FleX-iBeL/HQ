@@ -2,6 +2,8 @@
 before a line is written: the style filter, the claim check, no question already answered, one text per topic, her batches
 (the low-information diet). His words of 6 November 2026: "if we want them to do things, we had to do it through tooling right?"
 """
+from __future__ import annotations
+
 import json
 import re
 import sys
