@@ -14376,11 +14376,18 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
             b.rm.write_text(t)
             return b.fields(label)
 
-        def step(name, fn):
+        import concurrent.futures as _cf
+        pool, runs = _cf.ThreadPoolExecutor(4), []  # F183: the steps side by side, each on a bench of its own, so the flow fits the night's load
+
+        def one(i, name, fn):
             try:
-                fn(self._f86_bench(f"f86b{len(fails)}-{re.sub(r'[^a-z]', '', name)[:12]}"))
+                fn(self._f86_bench(f"f86b{i}-{re.sub(r'[^a-z]', '', name)[:12]}"))
             except Exception as e:
-                fails.append(f"{name}: {e}")
+                return f"{name}: {e}"
+            return ""
+
+        def step(name, fn):
+            runs.append(pool.submit(one, len(runs), name, fn))
 
         def one_price(b):
             b.flag("F9301", "no size named")
@@ -15163,6 +15170,8 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
                          ("a lost mark", mark_lost), ("one text", one_text), ("a grep's words", reading), ("sit-down, then an addition", stop_first), ("the review off", review_off), ("a smaller plan", small_plan),
                          ("two rows", two_rows), ("the cap for good", for_good)):
             step(name, fn)
+        pool.shutdown(wait=True)
+        fails += [x for x in (r.result() for r in runs) if x]  # in the steps' order
         need(not fails, "\n  ".join([f"{len(fails)} steps failed:"] + fails))
         return "one price, a round only adds, his quotes his own, the review reads her addition, no is an ending, the box, no false alarms, marks can't be lost or forged, the hook, the ready fields, held counts and starts again, one text, nothing with the review off, a small plan said once, two rows in turn, the cap for good"
 
