@@ -8031,7 +8031,23 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         tag = f"hqflow66-{os.getpid()}"
         script = FLOW66_SCRIPT.replace("@TAG@", tag)
         notes = []
-        places = [("this Mac" if hqpaths.IS_MAC else "here", lambda cmd, **k: sp.run(["bash", "-c", cmd], **k), "/tmp")]
+        # F205: as flow 65 (F204), on this computer the throwaway HQs go on the disk, not in /tmp: /tmp can be a memory
+        # disk with a quota per user that other runs' leftovers fill up (8 November 2026). A run that was stopped leaves
+        # its folder; the next one clears those of flow 66's runs that no longer run (here and in /tmp, where they were
+        # before), and nothing else.
+        base = os.path.join(os.path.expanduser("~"), ".cache", "hq-flows")
+        os.makedirs(base, exist_ok=True)
+        for old in [*Path(base).glob("hqflow66-*"), *Path("/tmp").glob("hqflow66-*")]:
+            pid = old.name[len("hqflow66-"):]
+            if not pid.isdigit() or int(pid) == os.getpid() or old.is_symlink() or not old.is_dir():
+                continue
+            try:
+                os.kill(int(pid), 0)
+            except ProcessLookupError:
+                shutil.rmtree(old, ignore_errors=True)
+            except OSError:
+                pass
+        places = [("this Mac" if hqpaths.IS_MAC else "here", lambda cmd, **k: sp.run(["bash", "-c", cmd], **k), base)]
         host = os.environ.get("HQ_TEST_LINUX")
         if host and not hqpaths.IS_LINUX:
             places.append((host, lambda cmd, **k: sp.run(["ssh", "-o", "BatchMode=yes", host, cmd], **k), "$HOME"))
@@ -39298,10 +39314,12 @@ cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null; done; sleep 1; for p in $P
 trap cleanup EXIT
 command -v syncthing >/dev/null || fail "Syncthing isn't installed here"
 command -v git >/dev/null || fail "git isn't installed here"
+# F205: what the throwaway HQs write to a temporary place stays in their own folder too, and goes with it.
+mkdir -p "$T/tmp" && export TMPDIR="$T/tmp"
 NOW=$(date +%s)
 git init -q --bare -b main "$T/origin.git" 2>/dev/null || fail "couldn't make the throwaway origin"
 for X in A B; do
-  mkdir -p "$T/$X/HQ" "$T/$X/state" "$T/$X/mem" && tar -xzf "$T/hq.tgz" -C "$T/$X/HQ" 2>/dev/null || fail "couldn't unpack HQ"
+  mkdir -p "$T/$X/HQ" "$T/$X/state" "$T/$X/mem" && UNPACK=$(tar -xzf "$T/hq.tgz" -C "$T/$X/HQ" 2>&1) || fail "couldn't unpack HQ in $T: $(echo "$UNPACK" | tail -2 | tr '\n' ' ' | cut -c1-200)"
   echo "{\"at\": $NOW}" > "$T/$X/state/watchdog.json"; echo "$NOW" > "$T/$X/state/heartbeat"
 done
 cp -R "$T/A/HQ/template" "$T/A/HQ/workspace"
