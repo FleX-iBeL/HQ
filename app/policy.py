@@ -318,7 +318,7 @@ def outward(tool: str, inp: dict) -> bool:
         s = server.lower()
         if "gmail" in s:
             return name in GMAIL_NEVER or "send" in name
-        return "calendar" in s and name in CALENDAR_ADD | CALENDAR_CHANGE and bool(inp.get("attendees"))
+        return "calendar" in s and name in CALENDAR_ADD | CALENDAR_CHANGE and bool(inp.get("attendees") or inp.get("attendeeEmails"))
     if tool == "WebFetch":
         return not plain_address(str(inp.get("url") or ""))
     return tool == "Bash" and bool(_SHELL_OUT.search(str(inp.get("command") or "")))
@@ -1826,10 +1826,13 @@ def _calendar_question(name: str, inp: dict) -> str:
 
 
 def _has_others(ev: dict) -> bool:
-    """Other people in an event: an attendee who isn't him, or an organizer who isn't one of his calendars."""
+    """Other people in an event: an attendee who isn't him, or an organizer who isn't one of his calendars. F188: the
+    calendar tool takes invites in attendees and in the older attendeeEmails (plain addresses); either one counts."""
     for a in ev.get("attendees") or []:
         if not (isinstance(a, dict) and a.get("self")):
             return True
+    if any(str(e).strip() for e in ev.get("attendeeEmails") or []):
+        return True
     org = ev.get("organizer")
     return isinstance(org, dict) and bool(org.get("email")) and not org.get("self")
 
