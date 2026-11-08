@@ -7966,6 +7966,9 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(iso.stdout.strip() == "{}", f"a test's roadmap copy reads the real pairing: {iso.stdout.strip()[:120]}")
         tag = f"hqflow65-{os.getpid()}"
         script = FLOW65_SCRIPT.replace("@TAG@", tag)
+        # F205: ports of its own; on the fixed ones (4796, 4797) two runs at once (two proofs) answered for each other.
+        for key in ("PA", "PB", "QA", "QB"):
+            script = script.replace(f"@{key}@", str(_free_port()))
         notes = []
         # F204: on this computer the throwaway HQs go on the disk, not in /tmp: /tmp can be a memory disk with a quota
         # per user that other runs' leftovers fill up (8 November 2026). A run that was stopped leaves its folder; the
@@ -8030,6 +8033,9 @@ window.fetch = async (p, o) => { if (o && o.method === "POST") posted.push(p);
         need(tar.returncode == 0, f"couldn't pack HQ: {tar.stderr.decode()[:200]}")
         tag = f"hqflow66-{os.getpid()}"
         script = FLOW66_SCRIPT.replace("@TAG@", tag)
+        # F205: ports of its own, as flow 65's, so two runs at once never share a Syncthing or a status server.
+        for key in ("GA", "GB", "LA", "LB", "PA", "PB", "QA", "QB"):
+            script = script.replace(f"@{key}@", str(_free_port()))
         notes = []
         # F205: as flow 65 (F204), on this computer the throwaway HQs go on the disk, not in /tmp: /tmp can be a memory
         # disk with a quota per user that other runs' leftovers fill up (8 November 2026). A run that was stopped leaves
@@ -39124,7 +39130,7 @@ json.dump({"prompts": seen, "thread": dl.thread()}, open(out, "w"))
 # H56.3: happy flow 65's script, run with bash on this computer (and on a Linux machine with HQ_TEST_LINUX).
 FLOW65_SCRIPT = r"""
 # H56.3, happy flow 65: two throwaway HQs, A (laptop) and B (vps), on spare ports, nothing of the user's.
-T="@BASE@/@TAG@"; PA=4796; PB=4797; SA=; SB=
+T="@BASE@/@TAG@"; PA=@PA@; PB=@PB@; SA=; SB=
 fail() { echo "FAIL $*"; exit 1; }
 cleanup() { [ -n "$SA" ] && kill "$SA" 2>/dev/null; [ -n "$SB" ] && kill "$SB" 2>/dev/null; sleep 0.3; rm -rf "$T"; }
 trap cleanup EXIT
@@ -39137,8 +39143,8 @@ for X in A B; do
   # The throwaway's own watchdog line and heartbeat, so its routine never reaches for the real watchdog.
   echo "{\"at\": $NOW}" > "$T/$X/state/watchdog.json"; echo "$NOW" > "$T/$X/state/heartbeat"
 done
-ENVA="HQ_SUPPORT=$T/A/state HQ_STATUS_PORT=$PA HQ_PORT=7894 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
-ENVB="HQ_SUPPORT=$T/B/state HQ_STATUS_PORT=$PB HQ_PORT=7893 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
+ENVA="HQ_SUPPORT=$T/A/state HQ_STATUS_PORT=$PA HQ_PORT=@QA@ HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
+ENVB="HQ_SUPPORT=$T/B/state HQ_STATUS_PORT=$PB HQ_PORT=@QB@ HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off HQ_ROLE_ONLINE=1 HQ_ROLE_RETRY=0.2"
 NODE=$(command -v node || echo /opt/homebrew/bin/node)
 ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
 rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
@@ -39310,7 +39316,7 @@ echo "ALL OK"
 FLOW66_SCRIPT = r"""
 # H56.4, happy flow 66: two private Syncthings and two throwaway HQs, A (laptop) and B (vps), nothing of the user's.
 T="@BASE@/@TAG@"; export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
-GA=8396; GB=8397; LA=22096; LB=22097; PIDS=""
+GA=@GA@; GB=@GB@; LA=@LA@; LB=@LB@; PIDS=""
 fail() { echo "FAIL $*"; exit 1; }
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null; done; sleep 1; for p in $PIDS; do kill -9 "$p" 2>/dev/null; done; rm -rf "${T:?}"; }
 trap cleanup EXIT
@@ -39330,8 +39336,8 @@ G="git -c user.name=hq-test -c user.email=hq-test@example.invalid"
 $G clone -q "$T/origin.git" "$T/B/HQ/workspace" || fail "couldn't clone B's workspace"
 for X in A B; do (cd "$T/$X/HQ/workspace" && git config user.name hq-test && git config user.email hq-test@example.invalid); done
 WA="$T/A/HQ/workspace"; WB="$T/B/HQ/workspace"
-ENVA="HQ_SUPPORT=$T/A/state HQ_SYNCTHING_HOME=$T/A/st HQ_STATUS_PORT=4795 HQ_PORT=7892 HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off"
-ENVB="HQ_SUPPORT=$T/B/state HQ_SYNCTHING_HOME=$T/B/st HQ_STATUS_PORT=4794 HQ_PORT=7891 HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off"
+ENVA="HQ_SUPPORT=$T/A/state HQ_SYNCTHING_HOME=$T/A/st HQ_STATUS_PORT=@PA@ HQ_PORT=@QA@ HQ_UNIT=@TAG@-a HQ_NO_PHONE=1 HQ_CALL_FIX=off"
+ENVB="HQ_SUPPORT=$T/B/state HQ_SYNCTHING_HOME=$T/B/st HQ_STATUS_PORT=@PB@ HQ_PORT=@QB@ HQ_UNIT=@TAG@-b HQ_NO_PHONE=1 HQ_CALL_FIX=off"
 ra() { (cd "$T/A/HQ" && env $ENVA python3 "$@"); }
 rb() { (cd "$T/B/HQ" && env $ENVB python3 "$@"); }
 st() { X=$1; shift; (cd "$T/$X/HQ" && env HQ_SYNCTHING_HOME="$T/$X/st" python3 -c "
