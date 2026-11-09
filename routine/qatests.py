@@ -1052,6 +1052,23 @@ def to_her_prep(jobs: list, label: str, names, why: str) -> dict:
     qa._estimate(p, "research")
     return p
 
+
+def _broken_to_prep(label: str, raised: dict) -> dict | None:
+    """F190: the end run's broken tests of hers go to her prep of LABEL, under the queue's lock; the prep job, or None (off in a test
+    copy, as the rest of her gate)."""
+    if not gate_on():
+        return None
+    try:
+        with q.locked():
+            text, js, on = q.read()
+            p = to_her_prep(js, label, list(raised), "the end run on the build: " + "; ".join(f"{n}: {w}" for n, w in raised.items())[:300])
+            q.write(text, js, on)
+            return p
+    except Exception as ex:
+        print(f"(her prep of {label} wasn't queued: {ex!r})", file=sys.stderr)
+        return None
+
+
 # ---------- the end: the sealed tests on the built copy ----------
 
 def end_run(label: str | None, wt: str) -> dict:
@@ -1092,6 +1109,13 @@ def end_run(label: str | None, wt: str) -> dict:
             else:
                 parts.append(f"{n}: {why}")
         out["split"] = [n for n in out["failed"] if team.get(n)]
+        raised = broken(log, [n for n in out["failed"] if not team.get(n)])
+        if raised:  # F190: a sealed test that crashes on the build (sealed before this rule, or crashing only there) is hers to fix
+            out["broken"] = raised
+            p = _broken_to_prep(label, raised)
+            to = f"her prep of {label} (job {p['n']})" if p else f"her prep of {label}"
+            parts = [f"{n} is broken, a crash and not its own check ({raised[n]}): sent to {to}, not the team's to fix"
+                     if n in raised else x for n, x in zip(out["failed"], parts)]
         out["why"] = "her QA tests fail on the built code: " + "; ".join(parts)
         out["log"] = log[-800:]
     elif out["green"] and os.environ.get("HQ_QA_NEIGHBOURS", "1") != "0":
