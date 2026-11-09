@@ -1591,7 +1591,7 @@ def tripwire(aid: str, kind: str, detail: str, now: dt.datetime | None = None, b
     now = now or dt.datetime.now()
     with held() as d:
         st_ = _agent_state(d, aid)
-        ledger.note(aid, f"tripwire ({kind}): {detail}" + (" [repeat]" if kind not in NOT_REPEATS else ""))
+        _noted(aid, f"tripwire ({kind}): {detail}" + (" [repeat]" if kind not in NOT_REPEATS else ""))  # F200: a ledger that can't be written never keeps the text from him
         if "refus" in kind:  # F103: a refused try is also on the one ledger the score reads
             import mistakes
             mistakes.add("refused", aid, f"{kind}: {detail}", where="her own cycle", base=base)
@@ -1673,7 +1673,7 @@ def after_run(job: dict, parsed: dict, now: dt.datetime | None = None, base: Pat
         except Exception:
             pass
         line = f"run: {how} · {note.get('minutes', took.get('actual', '?'))} min, {note.get('turns', '?')} turns, {note.get('steps', '?')} tool steps{cost} (job {job['n']})"
-        ledger.entry(aid, f"{parsed['name']} ran (job {job['n']})", [line], now)
+        _noted(aid, f"{parsed['name']} ran (job {job['n']})", [line], now)
         if state.startswith("paused"):
             _jobs("mark", str(job["n"]), f"ended {now:%H:%M}, paused for its usage; an agent's run isn't resumed")
         rec = st_["steps"].get(_step_key(parsed)) if parsed["kind"] == "step" else None
@@ -1817,6 +1817,33 @@ _TO_HIM = ((r"reaching outside|nothing goes out", "I tried to reach outside HQ, 
            (r"shared file", "I tried to write a shared file by hand, and HQ stopped me"))
 
 
+# F200: a refusal is the program's by design when its words name the program as what does it instead (routine/cyclehook.py):
+# one line in her ledger with what does it instead, never a text to him; every other refusal is one she can't place (_TO_HIM).
+_PROGRAMS = ((r"a build's record and its gate are the program's", "the runner makes the record when the job ends (routine/proof.py run N is the runner's, not mine)"),
+             (r"a build's record is written only by routine/proof\.py", "the runner makes the record with routine/proof.py when the job ends"),
+             (r"a job doesn't write the ledger", "the program's pass and the wrap-up write that ledger"),
+             (r"the switches and the two records are never written by hand", "the program's own lines write the records; a switch goes through python3 app/features.py on|off NAME"))
+PROGRAMS_HEAD = "the program's, not mine:"  # her ledger's line for one, the words her next cycle's prompt looks for
+
+
+def _programs(said: str) -> str:
+    """What does it instead, for a refusal that is the program's by design; "" for one she can't place."""
+    s = _plain(said)
+    return next((w for pat, w in _PROGRAMS if re.search(pat, s, re.I)), "")
+
+
+def _noted(aid: str, what: str, lines: list | None = None, now: dt.datetime | None = None) -> bool:
+    """A ledger note (or, with lines, an entry) that can't be written is said by False, never raised: what comes after it still runs."""
+    try:
+        if lines is None:
+            ledger.note(aid, what)
+        else:
+            ledger.entry(aid, what, lines, now)
+        return True
+    except OSError:
+        return False
+
+
 def _to_him(said: str) -> str:
     """The same, told to him: what I tried, in his terms, no tool names."""
     s = _plain(said)
@@ -1834,11 +1861,18 @@ def _what_really_happened(aid: str, parsed: dict, note: dict, now: dt.datetime, 
             plain = _plain(r.get("said", ""))
             mark = "sprint.py ready" in r.get("tool", "") and aid == "moneypenny"
             key = hashlib.sha1(_norm_goal(plain).encode()).hexdigest()[:12]
+            instead = "" if mark else _programs(r.get("said", ""))
+            if instead and _noted(aid, f"{PROGRAMS_HEAD} {plain} What does it instead: {instead}. I don't try it again."):
+                if key not in st_["refusals"]:  # F103: the try itself still counts on her score, once
+                    import mistakes
+                    mistakes.add("refused", aid, f"a refused try: {plain}", where="her own cycle", base=base)
+                st_["refusals"][key] = now.strftime(FMT)  # F200: placed; the repeat is counted here, nothing goes to him
+                continue
             if key in st_["refusals"]:  # the mistake made twice: that's what reaches him
                 tripwire(aid, "a Ready mark refused on its fields" if mark else "a refused command or push", "that's twice now: a row wasn't ready when I marked it" if mark else "that's twice now: " + _to_him(r.get("said", "")), now, base)
             else:
                 st_["refusals"][key] = now.strftime(FMT)
-                ledger.note(aid, f"refused, logged: {plain}")
+                _noted(aid, f"refused, logged: {plain}")
                 import mistakes
                 mistakes.add("refused", aid, f"a refused try: {plain}", where="her own cycle", base=base)
     import cyclehook
