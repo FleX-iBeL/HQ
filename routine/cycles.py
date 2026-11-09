@@ -921,7 +921,7 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
     ctx = agents.context_of(ag)
     head = f"let's go. This is job {job['n']} from the queue: {ag['name']}'s own cycle, {parsed['name']} (H298), run headless as her.\n\n"
     parts = [head + agents.persona(ag, user).replace("on this call", "in this run").replace("call rules", "rules"),
-             _rules(aid, parsed, a, b), _library(aid, ctx)]
+             _rules(aid, parsed, a, b), _library(aid, ctx), _programs_words(aid, now)]
     if parsed["kind"] in ("session", "review"):
         parts.append("Your ledger, a digest HQ computed (what was boxed, stale, skipped, escalated or corrected; your score is below):\n\n" + ledger.digest(aid, 10))
         orders = ledger.orders(aid, ("open", "now"))
@@ -952,6 +952,23 @@ def prompt(job: dict, parsed: dict, base: Path | None = None, now: dt.datetime |
         spec = _step_spec(aid, parsed)
         parts.append(_step_words(aid, parsed, spec, base))
     return "\n\n".join(p for p in parts if p) + "\n"
+
+
+PROGRAMS_MOST = 8  # the program's refusals of the last REPEAT_DAYS carried in a run's prompt
+
+
+def _programs_words(aid: str, now: dt.datetime) -> str:
+    """F200: the refusals of the program's in her ledger of the last REPEAT_DAYS days, in every run's prompt, so she doesn't try them again."""
+    seen = []
+    for sec in ledger.recent(aid, REPEAT_DAYS, now):
+        for l in sec["body"].splitlines():
+            l = l.strip().lstrip("- ").strip()
+            if l.startswith(PROGRAMS_HEAD) and l not in seen:
+                seen.append(l)
+    if not seen:
+        return ""
+    return ("Steps that are the program's, not yours (from your ledger: HQ refused them, and the program does them by itself; don't try them, "
+            "and don't ask him about them):\n" + "\n".join(f"- {l[len(PROGRAMS_HEAD):].strip()}" for l in seen[-PROGRAMS_MOST:]))
 
 
 MONTH_MOST = 60_000  # characters of the month's ledger in a review's prompt
