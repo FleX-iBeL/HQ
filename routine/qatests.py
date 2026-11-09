@@ -89,6 +89,8 @@ RULES = "H342"  # the rules a seal and a review were made under; older ones hold
 NEIGHBOURS_MOST = int(os.environ.get("HQ_QA_NEIGHBOURS_MOST") or 4)  # [Claude's choice] each neighbour's run can take minutes
 _CRASH = re.compile(r"Traceback \(most recent call last\)")
 _BARE_ERROR = re.compile(r"^\W*(?:\w+\.)*\w*(?:Error|Exception|Exit)\b(?:\(.*\))?\W*$")
+# F190: a FAIL why that names a Python exception (TypeError: ..., KeyError('x')) is a run that raised, not a check that said no
+_RAISED = re.compile(r"(?<![\w.])((?:[A-Za-z_]\w*\.)*[A-Z]\w*(?:Error|Exception))(?=\s*[:(]|\s*$)")
 
 SYSTEM = (
     "You review the QA tests written for one item of a software project, before the build team starts on it. You did not write them. "
@@ -359,6 +361,19 @@ def crashed(out: str, code: int | None) -> str:
     if code not in (0, None):
         return f"it ended with exit {code}"
     return ""
+
+
+def broken(log: str, names) -> dict:
+    """F190: her tests among NAMES whose run raised a Python error instead of its own check saying no: {name: the error}. The
+    program tells them apart, not a person: a FAIL why that names an exception (as F174's eleventh, whose stand-in for Popen made
+    subprocess.run raise TypeError before its check). A broken test is hers to fix and seal again, never a red build for the team."""
+    out = {}
+    for n in names:
+        w = _why(log, n)
+        m = _RAISED.search(w) if not w.startswith("it gave no line") else None
+        if m:
+            out[n] = w[m.start():][:200]
+    return out
 
 
 def run_on(d: str, hqdir: str, info: dict | None = None) -> tuple[dict, str]:
@@ -647,6 +662,12 @@ def check(label: str, before: str | None = None) -> tuple[bool, str]:
                        "before the build doesn't show it fails for the reason the row gives: catch what you need, and end every test with "
                        "its own line, FAIL saying what he'd see instead of the row's example. Nothing sealed.")
     whys = {n: _why(out, n) for n in names if not got.get(n)}
+    raised = broken(out, [n for n in names if not got.get(n)])
+    if raised:  # F190: fails first only on its own check; a run that raised there fails for no reason of the row's
+        return False, (f"Refused: {label}'s test(s) {', '.join(raised)} crash on {where} instead of failing on their own check "
+                       f"({'; '.join(f'{n}: {w}' for n, w in raised.items())[:300]}). A broken test: its setup or its run raised before "
+                       "the check said no, so it shows nothing about the row. Fix it so the run reaches its own check, then check again. "
+                       "Nothing sealed.")
     bare = [n for n, w in whys.items() if w in ("no why given", "it gave no line (it didn't run to it)") or _BARE_ERROR.match(w)]
     if bare:
         return False, (f"Refused: {label}'s test(s) {', '.join(bare)} fail on {where} without saying what he'd see instead "
