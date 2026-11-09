@@ -282,7 +282,7 @@ _NONE = re.compile(r"\s*(?:nothing|none|no)\b", re.I)
 
 def _stuck_why(r):
     """F197: "Won't this time" or "parked" for an item a wait on would never end, else None."""
-    if re.match(r"(?:## )?Phase P\b", str(r.get("phase_title") or r.get("phase") or "")) or r.get("parked"):
+    if r.get("state") == "⏸" or re.match(r"(?:## )?Phase P\b", str(r.get("phase_title") or r.get("phase") or "")) or r.get("parked"):
         return "parked"
     try:
         if S.moscow_of().get(r["label"]) == "wont":
@@ -306,8 +306,8 @@ def waits_of(row):
         if other == row.get("label"):
             continue
         r = S.row_of(other)
-        if not r or r.get("state") not in ("⬜", "🔨"):
-            continue  # done or gone: nothing to wait for
+        if not r or r.get("state") not in ("⬜", "🔨", "⏸"):
+            continue  # done or gone: nothing to wait for (a parked one still holds, and would hold forever: F197)
         try:
             if qa and qa.state(other) == "passed":
                 continue
@@ -467,6 +467,9 @@ def _run(args, env=None):
 
 def _tell(label, key, words):
     try:
+        if hqpaths.under_test() and os.environ.get("HQ_QA_BOX") and not os.environ.get("HQ_DIRECT_DIR"):
+            import review  # F197: in her test run's own copy (behind the wall, no phones) the text lands too, as F207's do
+            return review._text_now(label, f"line-{key}", words)
         import qatests
         return qatests.tell(label, f"line-{key}", words)
     except Exception:
