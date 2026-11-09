@@ -1264,6 +1264,12 @@ def _laptop_chat_lines(ws):
     """F171: the lines he typed himself in a chat on his own computer: Claude Code's transcripts of this workspace
     (~/.claude/projects/<its path, each non-letter-or-digit a dash>/*.jsonl), only the user turns he typed; never the
     chat's replies, a tool's output, a meta or summary turn, a headless run (a job's prompt is the routine's) or a pasted block."""
+    return [t for t, _ in laptop_chat_turns(ws)]
+
+
+def laptop_chat_turns(ws, since=None):
+    """F215: the same lines with when he typed each (seconds, 0 when the turn has no time), oldest file first; `since` leaves out
+    the transcripts last written before it."""
     proj = os.path.join(os.path.expanduser("~"), ".claude", "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(ws)))
     try:
         names = sorted(n for n in os.listdir(proj) if n.endswith(".jsonl"))
@@ -1272,6 +1278,8 @@ def _laptop_chat_lines(ws):
     said = []
     for nm in names:
         try:
+            if since and os.path.getmtime(os.path.join(proj, nm)) < since:
+                continue
             fh = open(os.path.join(proj, nm), encoding="utf8", errors="replace")
         except OSError:
             continue
@@ -1294,13 +1302,23 @@ def _laptop_chat_lines(ws):
                 content = msg.get("content")
                 parts = [content] if isinstance(content, str) else [
                     c.get("text") for c in content if isinstance(c, dict) and c.get("type") == "text"] if isinstance(content, list) else []
+                at = _chat_time(d.get("timestamp"))
                 for text in parts:
                     text = _CHAT_TAGS.sub(" ", str(text or "")).strip()
                     if text:
-                        mine.append(text)
-        if not any(_ROUTINE_PROMPT.match(t) for t in mine):  # a chat the routine started or nudged is a job's, never his
+                        mine.append((text, at))
+        if not any(_ROUTINE_PROMPT.match(t) for t, _ in mine):  # a chat the routine started or nudged is a job's, never his
             said.extend(mine)
     return said
+
+
+def _chat_time(stamp):
+    """A transcript's ISO time ("2026-11-08T12:05:00.000Z") in seconds, or 0."""
+    import datetime as dt_
+    try:
+        return dt_.datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def quote_found(quote, texts):

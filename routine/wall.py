@@ -14,7 +14,8 @@ What's here, read by the routine's minute (tick.py), the runner (runjob.py) and 
     the same limit. The usage pause is another stop and doesn't rise: four times the top of the estimate (H220, H221), and a job
     paused for its usage can't be resumed: it stops for good and the item gets split. Held at a usage stop line (H113) is
     a third thing: that job carries on by itself when there's room.
-  - his day: between 8:00 and 22:00 no build starts without his stored say-so, with who and when (jobs.py now N).
+  - his day: between 8:00 and 22:00 no build starts without his stored say-so, with who and when (jobs.py now N). F215: his go for
+    the sprint in a line of his of today (daygo.py) is that say-so for the builds the line sent; the refusal names the line it read.
   - a held job doesn't restart at night unless it was planned for the night, or he resumed it himself.
   - at most WIP items in progress: the next build waits until one is through QA.
   - the order in line: him live, the small routines (neither ever pass a gate), then the agents' cycles, then the team. Near the limit
@@ -134,14 +135,38 @@ def why_not(job, jobs, now=None) -> str | None:
         return held
     if not is_build(job):
         return None
-    if day and not job.get("sayso"):
-        return f"no build starts between {DAY[0]}:00 and {DAY[1]}:00 without his say-so; it waits for the night, or jobs.py now {job['n']}"
+    if day and not job.get("sayso") and not day_yes(job, now):
+        return (f"no build starts between {DAY[0]}:00 and {DAY[1]}:00 without his say-so; {go_why(job, now)}; it waits for the night, "
+                f"or jobs.py now {job['n']}")
     import qa
     busy = in_progress(jobs, leave_out=job["n"])
     label = qa.job_label(job.get("text", ""))
     if len(busy) >= WIP and label not in busy:
         return f"{len(busy)} items are in progress ({', '.join(sorted(busy))}), the most at once; it waits until one is through QA"
     return None
+
+
+def day_yes(job, now=None) -> dict | None:
+    """F215: his go for the sprint today as this build's day yes (daygo.py), or None: only for a build the line sent from the sprint."""
+    try:
+        import daygo
+        if not daygo.sprint_build(job):
+            return None
+        g = daygo.cached(now)["go"]
+        return daygo.sayso_of(g) if g else None
+    except Exception:
+        return None
+
+
+def go_why(job, now=None) -> str:
+    """F215: which line of his the day wall read and why it didn't count."""
+    try:
+        import daygo
+        if not daygo.sprint_build(job):
+            return "it isn't a build the line sent from the sprint, so his go for the sprint isn't its yes"
+        return daygo.refused_words(daygo.cached(now))
+    except Exception as e:
+        return f"his lines of today couldn't be read ({type(e).__name__})"
 
 
 def _held(job) -> str | None:

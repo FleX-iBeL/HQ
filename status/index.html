@@ -2455,6 +2455,8 @@
               });
               const left = el('div', 'jobtext');
               left.append(text);
+              // F100/F215: the say-so it starts on in his day hours: his words and where they stand.
+              if (j.sayso) left.append(el('span', 'jobnote read', `His day yes (${j.sayso.at}): "${j.sayso.words}"`));
               // H283: the notes given to the job while it runs or waits, and whether it has read them.
               for (const nt of j.notes ?? []) left.append(el('span', `jobnote${nt.read ? ' read' : ''}`, `Note ${nt.at.slice(11)}: ${nt.text}${nt.read ? ` · read ${nt.read}` : ' · not read yet'}`));
               // H286: what the running job says it's doing, in plain words, and the estimate it redid when it had to start fixing.
@@ -2499,6 +2501,17 @@
             if (g === 'finished' && etaLearned(E)) card.append(el('div', 'row soft eta-sum', etaLearned(E)));
             part.append(card);
             parts.append(part);
+          }
+          // F215: the builds the routine started today in his day hours on his go for the sprint, each with his words and where they stand
+          // (a finished job leaves the list above after a while; this stays for the day).
+          const dy = routines?.routines?.jobs?.dayyes;
+          const today = new Date();
+          const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+          if (dy?.day === todayKey && dy.jobs?.length) {
+            const list = el('div', 'row soft eta-sum dayyes');
+            list.append(el('b', '', 'Started in his day hours on his go for the sprint:'));
+            for (const x of dy.jobs) list.append(el('span', 'mistake', `Job ${x.n}${x.label ? ` · ${x.label}` : ''} · ${x.at}: his day yes, "${x.words}" (${x.who})`));
+            parts.append(list);
           }
           // H61: how close the estimates have been lately, always in view under the job list.
           if (E) parts.append(el('p', 'soft eta', etaAccuracy(E.accuracy)));

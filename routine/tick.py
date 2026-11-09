@@ -2276,7 +2276,37 @@ def tick():
         os.remove(GATE_NOTE)
     except OSError:
         pass
+    keep_day_yes(job)
     start(job)
+
+
+def keep_day_yes(job):
+    """F215: a build the wall let go in his day hours on his go for the sprint keeps that go as its say-so, his words and where they
+    stand, on its own line of the planning (as jobs.py now writes one), before it starts."""
+    if job.get("sayso") or wall.off() or not wall.daytime() or not wall.is_build(job):
+        return
+    s = wall.day_yes(job)
+    if not s:
+        return
+    import jobs as q_
+    with q_.locked():
+        text, js, on = q_.read()
+        j = q_.find(js, job["n"])
+        if j is None or j.get("sayso"):
+            return
+        j["sayso"] = s
+        q_.write(text, js, on)
+    job["sayso"] = s
+    try:  # the page shows the day's list after a finished job has left the planning's few
+        import qa
+        day = time.strftime("%Y-%m-%d")
+        was = (routines.read().get("jobs") or {}).get("dayyes") or {}
+        kept = [x for x in (was.get("jobs") or []) if was.get("day") == day and x.get("n") != job["n"]]
+        kept.append({"n": job["n"], "label": qa.job_label(job.get("text", "")) or "", "at": s["at"][11:], "who": s["who"], "words": s["words"]})
+        routines.beat("jobs", dayyes={"day": day, "jobs": kept[-40:]})
+    except Exception as e:
+        log(f"day yes: {e!r}")
+    log(f"job {job['n']} may start in the day on his go for the sprint: {s['who']}: {s['words'][:80]}")
 
 
 def gate_for(job):

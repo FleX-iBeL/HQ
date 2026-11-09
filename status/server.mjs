@@ -573,12 +573,13 @@ function writer(p, at) {
   return { kind: 'chat', words: 'A chat said' };
 }
 // The fourth check's 3: a build that waits only for the night (the wall's day hours), said calmly, not as a fault.
-const NIGHT_ONLY = /no build starts between (\d+:00) and (\d+:00) without his say-so; it waits for the night(?:, or jobs\.py now \d+)?\.?\s*$/;
+// F215: between the two the wall may say which line of his it read and why it didn't count.
+const NIGHT_ONLY = /no build starts between (\d+:00) and (\d+:00) without his say-so(?:; (.*?))?; it waits for the night(?:, or jobs\.py now \d+)?\.?\s*$/;
 function nightOnly(gate) {
   const m = NIGHT_ONLY.exec(gate ?? '');
   if (!m) return null;
   const rest = gate.slice(0, m.index).replace(/^Job \d+ waits(?: for the usage line)?:?\s*/, '').trim();
-  return rest ? null : { from: m[1], to: m[2] };
+  return rest ? null : { from: m[1], to: m[2], why: m[3] ?? '' };
 }
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 function whenSaid(at, now) {
@@ -626,7 +627,7 @@ function banner(p, running, his, now = Date.now() / 1000, lines = null) {
   if (inLine.length) {
     const gate = lines?.jobs?.state === 'waiting' && lines.jobs.text ? lines.jobs.text : '';
     const night = nightOnly(gate);
-    if (night) return out('LATER', `Job ${inLine[0].n} waits for the night: no build starts between ${night.from} and ${night.to} without your say-so`);
+    if (night) return out('LATER', `Job ${inLine[0].n} waits for the night: no build starts between ${night.from} and ${night.to} without your say-so${night.why ? `; ${night.why}` : ''}`);
     const line = gate || (said === 'STOPPED' && head ? head.replace(/^(Now|Next):\s*/, '') : `Job ${inLine[0].n} waits in line: nothing has started it yet`);
     return out('STOPPED', line, said === 'STOPPED' ? '' : stale || differs('STOPPED'));
   }
