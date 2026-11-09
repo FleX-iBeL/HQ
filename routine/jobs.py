@@ -533,14 +533,17 @@ def ended_at(j):
 
 def ended_lately(jobs, label, now=None):
     """F189: (job, its end as a datetime) for the newest job of roadmap item LABEL that ended less than RESEND_GAP minutes
-    ago, or None. The line sent F173 six times in twenty minutes (jobs 9224 to 9233), each job ending within a minute or two."""
+    ago, or None. The line sent F173 six times in twenty minutes (jobs 9224 to 9233), each job ending within a minute or two.
+    Only a job sent for the item itself (its build, its research) counts: her prep of it and her QA of it don't (QA, job 9534:
+    F208's build was held an hour behind its own prep 9530)."""
     import datetime as dt
+    import qa
     now = dt.datetime.fromtimestamp(now) if isinstance(now, (int, float)) else (now or dt.datetime.now())
     l = re.escape(label)
     pat = re.compile(rf"(?<![\w.]){l} on the (hq )?roadmap\b|\bthe {l} row\b", re.I)
     best = None
     for j in jobs:
-        if not j["state"].startswith(("done", "ended")):
+        if not j["state"].startswith(("done", "ended")) or qa.is_prep(j["text"]) or qa.is_qa(j["text"]):
             continue
         if not (pat.search(j["text"]) or ((j.get("item") or {}).get("label") or "").upper() == label):
             continue
