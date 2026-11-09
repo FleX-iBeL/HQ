@@ -207,6 +207,9 @@ def next_step(row, g, jobs, now=None, e=None):
             return "none", "ready; build is off"
         if b.get("by") != "him" and not _night(now):
             return "hold", "ready; build is on by her pick, so it goes at night"
+        late = q.ended_lately(jobs, label, now)  # F189: a job of it ended under an hour ago: not sent again yet
+        if late:
+            return "recent", q.ended_lately_words(label, *late)
         return "send", "ready, build on"
     if "it only needs the mark" in why:
         return "mark", why
@@ -619,6 +622,12 @@ def tick(now=None):
                 _tell(label, "wait-stuck", f"{label} is held on its Waits on, and that wait would never end: {stuck}. "
                       f"Lift it (Waits on: nothing) or change what it waits on.")
                 done.append(f"{label}: held on a wait that never ends ({stuck}); told her")
+        if what == "recent":  # F189: the log names the item, the job and when it ended, once per job
+            n = re.search(r"its job (\d+)", detail).group(1)
+            if e.get("recent") != n:
+                e["recent"] = n
+                done.append(f"{label}: not sent again by the line: {detail}")
+            continue
         if what == "passed":  # its switches go: nothing more for the line to do
             with q.locked():
                 S.set_go(label, "both", False, by="line")  # the line's own off, not his decision (F201)
