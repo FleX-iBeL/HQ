@@ -268,6 +268,70 @@ def decide(rel: str, main_text: str | None, other_text: str, who: str = "the oth
     return None, kept, "they differ: the main's stays, the other's differences are kept word for word"
 
 
+# ---- F195: when the two last agreed ----------------------------------------------------------------------------------
+# F195 (7 November 2026): a change made only on the laptop was put aside as a clash and undone, though the main never
+# touched the file. The main now remembers, per file, the version both ended with at its last settle (and the versions
+# of the other's it put aside); the other sends the version it last had from the main ("base", sync.py). A file only one
+# of them changed since they last agreed goes over as it is; only a file both changed is a clash, F115's rule. No
+# agreement on record (a file from before this): F115 as before.
+
+AGREED = os.path.join(hqpaths.SUPPORT, "settle-agreed.json")  # on the main: {"WHAT|REL": {"agreed", "aside", "at"}}
+ASIDE_MOST = 20
+
+
+def sha(text: str) -> str:
+    return hashlib.sha1(text.encode("utf8")).hexdigest()
+
+
+def _agreed_all() -> dict:
+    try:
+        d = json.load(open(AGREED, encoding="utf8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def agreed(what: str, rel: str) -> dict:
+    r = _agreed_all().get(f"{what}|{rel}")
+    return r if isinstance(r, dict) else {}
+
+
+def agree(what: str, rel: str, text: str, aside: str | None = None) -> None:
+    """Both end with TEXT (the main's file as it is now; the other takes it at its revert); ASIDE: the other's version
+    this settle put aside, so the same one sent again never goes over."""
+    import hqlock
+    os.makedirs(os.path.dirname(AGREED), exist_ok=True)
+    with hqlock.locked(AGREED):
+        d = _agreed_all()
+        k = f"{what}|{rel}"
+        was = d.get(k) if isinstance(d.get(k), dict) else {}
+        put = [x for x in was.get("aside") or [] if isinstance(x, str)]
+        if aside and aside not in put:
+            put = (put + [aside])[-ASIDE_MOST:]
+        d[k] = {"agreed": sha(text), "aside": put, "at": time.time()}
+        tmp = f"{AGREED}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf8") as f:
+            json.dump(d, f)
+        os.replace(tmp, AGREED)
+
+
+def since_agreed(rec: dict, base: str | None, main_text: str, other_text: str) -> str | None:
+    """F195: who changed the file since the two last agreed: "other" (only the other: its version goes over as it is),
+    "main" (only the main: the main's stays, nothing to keep), "aside" (the other's is one the main put aside before),
+    or None (no agreement on record, or both changed: F115's rule)."""
+    o = sha(other_text)
+    if o in (rec.get("aside") or []):
+        return "aside"
+    bases = {b for b in (rec.get("agreed"), base) if isinstance(b, str) and b}
+    if not bases:
+        return None
+    if sha(main_text) in bases:
+        return "other"
+    if o in bases:
+        return "main"
+    return None
+
+
 # ---- on the main -----------------------------------------------------------------------------------------------------
 
 def folder_of(what: str) -> str | None:
@@ -366,7 +430,17 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
             mine = None
         except (OSError, UnicodeDecodeError) as e:
             return 1, f"{label}: the main couldn't read its own: {e}"
-        new, extra, said = decide(rel, mine, other, who)
+        rec = agreed(what, rel)
+        base = payload.get("base") if isinstance(payload.get("base"), str) else None
+        way = since_agreed(rec, base, mine, other) if mine is not None and mine != other else None
+        if way == "other":
+            new, extra, said = other, [], "only changed there since the two last agreed: it goes over as it is"
+        elif way == "main":
+            new, extra, said = None, [], "only the main changed it since the two last agreed: the main's stays"
+        elif way == "aside":
+            new, extra, said = None, [], "settled before: the main's stays, the other's differences are in the list already"
+        else:
+            new, extra, said = decide(rel, mine, other, who)
         if new is not None:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp = f"{path}.{os.getpid()}.settle.tmp"
@@ -377,6 +451,8 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
                     os.chmod(tmp, os.stat(path).st_mode & 0o777)
             os.replace(tmp, path)
             changed.append(rel)
+        # F195: what both end with (the other takes the main's copy at its revert), and the other's put aside
+        agree(what, rel, mine if new is None else new, aside=sha(other) if extra or way == "aside" else None)
     if extra:
         keep(rel if ws else f"Claude's memory: {rel}", extra, who,
              f"The two computers had this file differently. The main's version stayed as it is; here is every difference "
