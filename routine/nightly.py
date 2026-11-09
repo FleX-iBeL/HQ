@@ -255,7 +255,9 @@ def rotate(failed: list[str], n: int, night: str) -> dict:
                 "fixed through the whole rotation, never a quick patch: the row, the review, her test, the review, the Ready mark, the team, "
                 "her check. " + (f"Held against {item}'s row as well, so the fix still fits what {item} is for and the bigger picture. " if item
                                  else "Held against the item this flow belongs to as well, and the bigger picture. ")
-                + "The night's next full run starts once every failure of this round passed her check.").replace("|", "/")
+                + "The night's next full run starts once every failure of this round passed her check. "
+                # F163: where it came from, so the row's fields hold once she adds His words: none, found by a check
+                + "Sources: " + "; ".join(x for x in ("app/happy_flows.py" if num else "", H324, item) if x) + ".").replace("|", "/")
         try:
             with jobs.locked():
                 text, queue, on = jobs.read()
