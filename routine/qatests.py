@@ -1072,7 +1072,7 @@ def _broken_to_prep(label: str, raised: dict) -> dict | None:
 # ---------- the end: the sealed tests on the built copy ----------
 
 def end_run(label: str | None, wt: str) -> dict:
-    """For proof.py: the sealed tests on the built copy. {"ran", "passed", "failed", "green", "why"}. A build for a row with no sealed
+    """For proof.py: the sealed tests on the built copy. {"ran", "passed", "failed", "green", "why", "seconds"}. A build for a row with no sealed
     tests, or whose tests changed since they were sealed (in the workspace or in the program's copy), is red."""
     out = {"ran": 0, "passed": 0, "failed": [], "green": False}
     if not label:
@@ -1093,7 +1093,11 @@ def end_run(label: str | None, wt: str) -> dict:
                       "the team can't change them")
         out["changed"] = True
         return out
+    t0 = time.time()
     got, log = run_on(kept, wt)
+    # F218: the run's own seconds, kept with its result in the proof's record, so the estimate learns her sealed-tests step from the
+    # last finished green run (estimate.run_steps); a red or cut-off run keeps its seconds too but teaches nothing
+    out["seconds"] = round(time.time() - t0, 1)
     names = e.get("tests") or []
     out["ran"] = len(names)
     out["passed"] = sum(1 for n in names if got.get(n))
