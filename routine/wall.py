@@ -135,7 +135,7 @@ def why_not(job, jobs, now=None) -> str | None:
         return held
     if not is_build(job):
         return None
-    if day and not job.get("sayso") and not day_yes(job, now):
+    if day and not sayso_today(job, now) and not day_yes(job, now):
         return (f"no build starts between {DAY[0]}:00 and {DAY[1]}:00 without his say-so; {go_why(job, now)}; it waits for the night, "
                 f"or jobs.py now {job['n']}")
     import qa
@@ -144,6 +144,13 @@ def why_not(job, jobs, now=None) -> str | None:
     if len(busy) >= WIP and label not in busy:
         return f"{len(busy)} items are in progress ({', '.join(sorted(busy))}), the most at once; it waits until one is through QA"
     return None
+
+
+def sayso_today(job, now=None) -> bool:
+    """F215: his say-so on the job counts as his day yes on the day he gave it ("his day yes for the sprint's ready builds that day");
+    one kept from an earlier day doesn't open today's day hours."""
+    s = job.get("sayso") or {}
+    return bool(s) and str(s.get("at") or "")[:10] == time.strftime("%Y-%m-%d", time.localtime(now))
 
 
 def day_yes(job, now=None) -> dict | None:

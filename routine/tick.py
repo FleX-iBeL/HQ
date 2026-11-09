@@ -2283,7 +2283,7 @@ def tick():
 def keep_day_yes(job):
     """F215: a build the wall let go in his day hours on his go for the sprint keeps that go as its say-so, his words and where they
     stand, on its own line of the planning (as jobs.py now writes one), before it starts."""
-    if job.get("sayso") or wall.off() or not wall.daytime() or not wall.is_build(job):
+    if wall.sayso_today(job) or wall.off() or not wall.daytime() or not wall.is_build(job):
         return
     s = wall.day_yes(job)
     if not s:
@@ -2292,7 +2292,7 @@ def keep_day_yes(job):
     with q_.locked():
         text, js, on = q_.read()
         j = q_.find(js, job["n"])
-        if j is None or j.get("sayso"):
+        if j is None or wall.sayso_today(j):
             return
         j["sayso"] = s
         q_.write(text, js, on)
