@@ -161,7 +161,7 @@ def _held(job) -> str | None:
 
 
 def _switched_off(job) -> str | None:
-    """F208: the line's prep of an item whose prepare switch is off waits in its place in line (line.switched_off)."""
+    """F208: the line's prep (or the build it sent) of an item whose prepare (or build) switch is off waits in its place in line (line.switched_off)."""
     try:
         import line as L
         return L.switched_off(job)

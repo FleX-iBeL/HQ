@@ -42,6 +42,7 @@ the record, never anyone's word, and does the next step:
   - Prepare switched off while the line's prep of the item waits (F208, 8 November 2026: F124's prep, job 664, started at 11:42 though
     its prepare went off at 11:16): the pick keeps it back (wall.why_not, switched_off), the line's log says so once with the item
     and the switch, and switched on again the same job goes back in line, once: no second prep is queued. A running one finishes.
+    The same for a build the line sent while its item's build switch goes off (QA, 9 November 2026: F197's job 9521).
 
 His pause of the team (jobs.py off) holds the line too.
 
@@ -97,34 +98,58 @@ def prep_of(jobs, label):
     return None
 
 
-def switched_off(job):
-    """F208: why the line's own prep JOB, waiting, doesn't start now: its item's prepare switch is off; else None. A prep queued by
-    hand (its text without "(the line)") is left to its own road."""
+SENT = " on the HQ roadmap, sent to the team by the line"  # the text of a build the line sent (jobs.py send-row --line)
+
+
+def sent_label(text):
+    """The item of a build the line sent to the team (its text "LABEL on the HQ roadmap, sent to the team by the line: ..."), or None."""
+    m = re.match(rf"([A-Z]\d+(?:\.\d+)*){re.escape(SENT)}\b", text or "")
+    return m.group(1) if m else None
+
+
+def _own(job):
+    """(label, switch) for the line's own waiting job: its prep ("prep") or the build it sent ("build"); else (None, None)."""
     text = job.get("text") or ""
+    if str(job.get("state", "")).startswith(("running",) + q.FINISHED + ("boxed",)):
+        return None, None
     label = prep_label(text)
-    if not label or not text.startswith(f"{PREP}{label} (the line)") or str(job.get("state", "")).startswith(("running",) + q.FINISHED):
+    if label and text.startswith(f"{PREP}{label} (the line)"):
+        return label, "prep"
+    label = sent_label(text)
+    return (label, "build") if label else (None, None)
+
+
+def switched_off(job):
+    """F208: why the line's own job, waiting, doesn't start now: its item's prepare switch is off (its prep), or its build switch
+    (the build it sent); else None. A job queued by hand (a prep without "(the line)", a build sent another way) is left to its own road."""
+    label, kind = _own(job)
+    if not label or S.go_of(label).get(kind):
         return None
-    if S.go_of(label).get("prep"):
-        return None
-    return f"{label}'s prepare switch is off: its prep waits in its place in line and starts once the switch is on again"
+    if kind == "prep":
+        return f"{label}'s prepare switch is off: its prep waits in its place in line and starts once the switch is on again"
+    return f"{label}'s build switch is off: its build waits in its place in line and starts once the switch is on again"
 
 
 def _kept_back(st, jobs):
-    """F208: the line's log, once per prep job: kept back while its item's prepare is off, back in line once it's on again."""
+    """F208: the line's log, once per job: kept back while its item's switch is off, back in line once it's on again."""
     kept, out = st.setdefault("_kept", {}), []
     now = {}
     for j in jobs:
-        if is_prep(j.get("text")) and not str(j.get("state", "")).startswith(("running",) + q.FINISHED + ("boxed",)):
-            label = prep_label(j["text"])
-            now[str(j["n"])] = (label, switched_off(j))
-    for n, (label, why) in now.items():
+        label, kind = _own(j)
+        if label:
+            now[str(j["n"])] = (label, kind, switched_off(j))
+    for n, (label, kind, why) in now.items():
         if why and n not in kept:
             kept[n] = label
             out.append(f"{label}: its prepare switch is off, so her waiting prep job {n} is kept back in the line, not started, "
-                       f"until the switch is on again")
+                       f"until the switch is on again" if kind == "prep" else
+                       f"{label}: its build switch is off, so the build the line sent, job {n}, is kept back in the line, not "
+                       f"started, until the switch is on again")
         elif not why and n in kept:
             kept.pop(n)
-            out.append(f"{label}: its prepare switch is on again, so her prep job {n} goes back in line, once (no second prep)")
+            out.append(f"{label}: its prepare switch is on again, so her prep job {n} goes back in line, once (no second prep)"
+                       if kind == "prep" else
+                       f"{label}: its build switch is on again, so its build job {n} goes back in line, once (no second build)")
     for n in [n for n in kept if n not in now]:  # finished or gone meanwhile
         kept.pop(n)
     return out
