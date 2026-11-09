@@ -546,6 +546,51 @@ def remote_need(fid, device):
         page += 1
 
 
+HAD = os.path.join(SUPPORT, "sync-had.json")  # F195: each file as this computer last had it from the main, {"WHAT|REL": [mtime_ns, size, sha1]}
+HAD_MOST = 5_000_000  # a bigger file isn't remembered (the main's rule for it doesn't read a base)
+
+
+def had_from_main(f, changed, save=True):
+    """F195, on the backup: each file of folder f that isn't changed here (Syncthing's list) is the main's copy as this
+    computer has it: its hash is remembered (by its time and size, so a file is only read again when it changed), and
+    the hand-over sends it with the file once it's changed here ("base"), so the main can tell whether only this side
+    changed it since the two last agreed. {rel: sha1}."""
+    import hashlib
+    try:
+        mem = _load(HAD, {})
+        mem = mem if isinstance(mem, dict) else {}
+    except Exception:
+        mem = {}
+    top, pre, seen = f["path"], f"{f['what']}|", set()
+    for d, dirs, files in os.walk(top):
+        dirs[:] = [x for x in dirs if x not in (".git", ".stfolder", ".stversions")]
+        for n in files:
+            full = os.path.join(d, n)
+            rel = os.path.relpath(full, top).replace(os.sep, "/")
+            if rel in changed or CONFLICT.search(rel) or n.endswith(".tmp"):
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            if st.st_size > HAD_MOST:
+                continue
+            k = pre + rel
+            seen.add(k)
+            was = mem.get(k)
+            if isinstance(was, list) and len(was) == 3 and was[:2] == [st.st_mtime_ns, st.st_size]:
+                continue
+            try:
+                with open(full, "rb") as fh:
+                    mem[k] = [st.st_mtime_ns, st.st_size, hashlib.sha1(fh.read()).hexdigest()]
+            except OSError:
+                continue
+    keep = {k: v for k, v in mem.items() if not k.startswith(pre) or k in seen or k[len(pre):] in changed}
+    if save:
+        _save(HAD, keep)
+    return {k[len(pre):]: v[2] for k, v in keep.items() if k.startswith(pre) and isinstance(v, list) and len(v) == 3}
+
+
 def handover(log=print, now=None, dry=False):
     """F115, on the backup with one-way sync: everything this computer has that the main doesn't (its local changes
     and its conflict copies) goes to the main through the door (settle.py file), each with an id (a second time does
@@ -579,6 +624,11 @@ def handover(log=print, now=None, dry=False):
                 rel = os.path.relpath(c["copy"], f["path"])
                 if rel not in names:
                     items.append({"name": rel, "deleted": False})
+        try:
+            had = had_from_main(f, {x["name"].replace(os.sep, "/") for x in items}, save=not dry)
+        except Exception as e:
+            had = {}
+            log(f"sync: handover: couldn't read what {f['what']} last had from the main: {e!r}")
         whole = True
         done = {}  # what was settled, as it was then: a change made after it stops the revert this round
 
@@ -627,6 +677,8 @@ def handover(log=print, now=None, dry=False):
                 except UnicodeDecodeError:
                     payload["b64"] = base64.b64encode(raw).decode()
                 key = hashlib.sha1(raw).hexdigest()
+                if not CONFLICT.search(rel) and had.get(rel):
+                    payload["base"] = had[rel]  # F195: the version this side last had from the main
             hid = "settle-" + hashlib.sha1(f"{f['what']}|{base_rel}|{key}".encode()).hexdigest()[:24]
             if dry:
                 out["handed"].append(rel)
