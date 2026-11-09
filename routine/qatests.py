@@ -49,6 +49,9 @@ texts instead of her replies, made-up nights). So, held by the program:
   - the review asks the real-case probe: does this test replay the row's own example on real data, where he would see it; a stand-in
     the program can see itself (a file behind the status page read instead of the page as served, realcase.stand_in_holes) is a hole
     whatever the model says;
+  - every value a test expects traces to the record (F217): a record time her test takes for her write while the record says a call
+    (or anyone not her) wrote it, or a time it calls real that's on no line of the record, is the review's finding, naming the record
+    line, whatever the model says (realcase.trace_holes), so a wrong expectation is caught before any build;
   - seals and reviews carry RULES: tests sealed or reviewed before these rules hold the Ready mark until they're checked and reviewed
     again under them (the rest of the sprint goes through this);
   - neighbours: a build's sealed-test run (end_run) also runs the sealed tests of the items whose own commits touched the files this
@@ -855,12 +858,24 @@ def program_holes(row, d) -> list[str]:
         return []
 
 
+def trace_holes(d) -> list[str]:
+    """F217: what her tests expect that doesn't trace to the place in the real record it comes from (realcase.trace_holes)."""
+    try:
+        import realcase
+        return realcase.trace_holes(_files(d).get("test.py") or "")
+    except Exception:
+        return []
+
+
 def ask_reviewer(row, d) -> dict:
     a = _ask_reviewer(row, d)
     holes = [] if a.get("failed") else program_holes(row, d)
     if holes:
         a = {**a, "pass": False, "findings": (holes + [f for f in a.get("findings") or [] if f not in holes])[:5],
              "real_case": {"replays": False, "hole": holes[0], "by": "the program"}}
+    traced = [] if a.get("failed") else trace_holes(d)
+    if traced:  # F217: a wrong expectation is the review's finding, before any build
+        a = {**a, "pass": False, "findings": (traced + [f for f in a.get("findings") or [] if f not in traced])[:5]}
     return a
 
 

@@ -298,3 +298,75 @@ def stand_in_holes(ask: str, test_py: str) -> list[str]:
                 + ", ".join(behind)[:160] + ") and never the page as it is served (HQ's own status server on a real-data copy: "
                 "realcase.Case(sys.argv[1]).serve(), then page.rendered() or page.get(...)); a stand-in passes while the page is wrong"]
     return []
+
+
+# F217 (8 November 2026): every value her test expects traces to the place in the real record it comes from. F186's sealed test of that
+# night expected the write of F9185 at 1794020524.356 to be hers, while the record says a call wrote it (trail line 1238); the team only
+# showed it after a whole build and check round. The program reads each record time her test names and looks it up on the real record.
+STAMP = re.compile(r"(?<![\w.])(1[6-9]\d{8}\.\d{1,6})(?![\w.])")
+HERS_SAID = re.compile(r"\b(her|hers|moneypenny)\b", re.I)
+HERS_BY = {"in a text", "moneypenny"}  # who the record names for her own writes: her text line, or her by name
+
+
+def _record() -> tuple[dict, set]:
+    """The real record as the run sees it: {time: (line number, step)} from the trail, and the times on every line's thread."""
+    steps, said = {}, set()
+    try:
+        import trail
+        tp = trail.path()
+    except Exception:
+        tp = None
+    if tp and os.path.isfile(tp):
+        with open(tp, encoding="utf8", errors="replace") as f:
+            for i, ln in enumerate(f, 1):
+                try:
+                    d = json.loads(ln)
+                    steps.setdefault(round(float(d["at"]), 3), (i, d))
+                except (ValueError, KeyError, TypeError):
+                    continue
+        ws = os.path.dirname(os.path.dirname(tp))
+        for rel in sorted(set(LINES.values())):
+            p = os.path.join(ws, rel, "thread.jsonl")
+            if not os.path.isfile(p):
+                continue
+            with open(p, encoding="utf8", errors="replace") as f:
+                for ln in f:
+                    try:
+                        said.add(round(float(json.loads(ln)["at"]), 3))
+                    except (ValueError, KeyError, TypeError):
+                        continue
+    return steps, said
+
+
+def trace_holes(test_py: str) -> list[str]:
+    """F217: what her test expects that doesn't trace to the real record. A record time her test takes for her write, while the record
+    says someone else wrote it, is a finding naming the record line; so is a time she calls real that's on no line of the record.
+    Times on a line that doesn't call them real or hers are left alone (a made-up time in a test of its own isn't a claim on the record),
+    and so is a write whose record line the test names itself (it traced it: F217's own test quotes F186's wrong time to show it)."""
+    t = test_py or ""
+    if not STAMP.search(t):
+        return []
+    steps, said = _record()
+    if not steps and not said:
+        return []
+    out, seen = [], set()
+    for ln in t.splitlines():
+        for m in STAMP.finditer(ln):
+            at = round(float(m.group(1)), 3)
+            if at in seen:
+                continue
+            seen.add(at)
+            hit = steps.get(at)
+            if hit:
+                i, d = hit
+                by = str(d.get("by") or "")
+                named = str(d.get("id") or "-") in t or re.search(rf"trail line {i}(?!\d)", t)  # it names the record line: traced
+                if d.get("step") == "written" and HERS_SAID.search(ln) and by.lower() not in HERS_BY and not named:
+                    who = "a call" if by == "on a call" else (by or "no one named")
+                    out.append(f"a value that doesn't trace to the record: her test takes the write of {d.get('label')} at {m.group(1)} for "
+                               f"hers, while the real record says {who} wrote it (trail line {i}, id {d.get('id')}, by '{by}'); "
+                               "expect what the record holds, or take a write the record marks as hers")
+            elif at not in said and re.search(r"\breal\b", ln, re.I):
+                out.append(f"a value that doesn't trace to the record: her test calls the time {m.group(1)} real, and no line of the record "
+                           "(the trail, the lines' threads) holds it")
+    return out[:5]
