@@ -1408,13 +1408,30 @@ def _source_ok(item, ws, labels):
     return None
 
 
+# F163: a failure row the night run wrote (nightly.rotate, H324) pastes the flow's own message, as the flow said it, between its fixed words
+# "(night run, flow N): " and ". Found on DATE, round K of R (H324)". That message is the program's, never his, however long or quoted.
+_NIGHT_ROW = re.compile(r"^\s*\d{1,2} \w+ \d{4} \(the night run, \d{2}:\d{2}\): ")
+_NIGHT_MSG = re.compile(r"(\(night run, flow (?:\d+|run)\): ).*?(\. Found on \d{4}-\d{2}-\d{2}, round \d+ of \d+ \(H324\))", re.S)
+_NIGHT_TITLE = re.compile(r"(\(night run, flow (?:\d+|run)\): ).*$", re.S)
+
+
+def _without_night_text(line, ask):
+    """The ask without the flow messages the night run pasted into its own row (F163); any other row's ask as it is."""
+    cs = hqpaths.cells(line)
+    if len(cs) < 3 or not _NIGHT_ROW.match(cs[2]):
+        return ask
+    title, _, desc = ask.partition(" | ")
+    return _NIGHT_TITLE.sub(r"\1", title) + " | " + _NIGHT_MSG.sub(r"\1\2", desc)
+
+
 def _no_words_why(found_by, row):
     """F86: "none, found by" holds only where it's true. Any quotation of three words or more in the ask refuses it, wherever it came from, and job N must
-    be a real job of this row: the row names it as where it came from, or the job's text names this row. What her own addition says doesn't count. The one
-    exception is a program's own text quoted in a row (a flow's message, a job's line): short, and with a file name or a row label in brackets."""
+    be a real job of this row: the row names it as where it came from, or the job's text names this row. What her own addition says doesn't count. The
+    exceptions are a program's own text quoted in a row (a flow's message, a job's line): short, and with a file name or a row label in brackets; and the
+    flow's message the night run pasted into its own failure row (F163)."""
     line, ask = row["line"], ask_of(row["line"])
     for marks in QUOTE_MARKS:
-        for m in marks.finditer(ask):
+        for m in marks.finditer(_without_night_text(line, ask)):
             words = len(_bare(m.group(1)).split())
             if words >= HIS_QUOTE_WORDS and not (words <= PROGRAM_WORDS and _PROGRAM_TEXT.search(m.group(1))):
                 return f"none, found by: but this row holds a quotation, {m.group(1)[:50]!r}; his words go in the field, or it goes on the list"
