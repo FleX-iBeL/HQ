@@ -2218,7 +2218,7 @@ def tick():
         line = q.get("waiting") or []
     if not line:
         return
-    line = by_rank(line)
+    line = day_yes_first(by_rank(line))
     # F100: the wall: the cycles before the team; his day hours, a held job at night and the items in progress; the gate then
     # looks at the first that may go, and a job that can't go now never blocks one behind it.
     job, first_why = None, None
@@ -2278,6 +2278,19 @@ def tick():
         pass
     keep_day_yes(job)
     start(job)
+
+
+def day_yes_first(line):
+    """F215: in his day hours the builds he said yes to for today (his say-so of today, or his go for the sprint) go first, in rank
+    order, so his go starts them that afternoon instead of behind every prep in line."""
+    if wall.off() or not wall.daytime():
+        return line
+    try:
+        yes = [j for j in line if wall.is_build(j) and (wall.sayso_today(j) or wall.day_yes(j))]
+    except Exception as e:
+        log(f"day yes first: {e!r}")
+        return line
+    return yes + [j for j in line if j not in yes]
 
 
 def keep_day_yes(job):
