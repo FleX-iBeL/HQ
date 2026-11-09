@@ -24342,14 +24342,20 @@ print(json.dumps({'hits': hits, 'read': len(read)}))
                     "r = settle.send(role, ['file', 'workspace', os.environ['REL']], {'text': t, 'from': 'laptop'}, 'settle-' + os.environ['HID'])\n"
                     "print(json.dumps(r))")
             hand = lambda rel, text, hid: py("B", send, text, {"REL": rel, "HID": hid})
-            # finding 2: the same file sent twice is settled against the main's file as it is now, not answered from memory
+            # finding 2: the same file sent twice is settled against the main's file as it is now, not answered from memory;
+            # F195: the laptop's copy is still the one they agreed on, so only the main changed it: the main's stays, nothing kept
             r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
             need(r.returncode == 0 and a("HQ/twice.md") == "a\nX\n", f"a new file didn't land: {r.stdout} {r.stderr[-300:]}")
             (A["ws"] / "HQ/twice.md").write_text("a\n")  # the main clears X
             r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nX\n", "f115-twice")
+            need(a("HQ/twice.md") == "a\n" and "HQ/twice.md" not in a("HQ/kept-from-both.md"),
+                 f"the same hand-over again undid the main's change or kept the laptop's X ({r.stdout[-200:]})")
+            # F195: a change both made since they agreed is still a clash: the main's stays, the laptop's line in the list
+            (A["ws"] / "HQ/twice.md").write_text("a\nM\n")
+            r = await asyncio.to_thread(hand, "HQ/twice.md", "a\nL\n", "f195-both")
             kept_ = a("HQ/kept-from-both.md")
-            need(a("HQ/twice.md") == "a\n" and seq(kept_[kept_.find("HQ/twice.md"):], ["X"]),
-                 f"the same hand-over again was answered from memory: the laptop's X isn't kept ({r.stdout[-200:]})")
+            need(a("HQ/twice.md") == "a\nM\n" and seq(kept_[kept_.find("HQ/twice.md"):], ["L"]),
+                 f"a change both made isn't a clash with the laptop's line kept ({r.stdout[-200:]})")
             # finding 3: the main's file stays as it is, and every difference goes in the list word for word, as whole blocks
             cases = [
                 ("HQ/moved.md", "## 2. Urgent\n\n| a |\n| b |\n\n## 7. Done\n\n| c |\n",

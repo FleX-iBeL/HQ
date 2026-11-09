@@ -431,8 +431,8 @@ def settle_file(what: str, rel: str, payload: dict, log=None) -> tuple[int, str]
         except (OSError, UnicodeDecodeError) as e:
             return 1, f"{label}: the main couldn't read its own: {e}"
         rec = agreed(what, rel)
-        base = payload.get("base") if isinstance(payload.get("base"), str) else None
-        way = since_agreed(rec, base, mine, other) if mine is not None and mine != other else None
+        theirs = payload.get("base") if isinstance(payload.get("base"), str) else None  # what the other last had from here
+        way = since_agreed(rec, theirs, mine, other) if mine is not None and mine != other else None
         if way == "other":
             new, extra, said = other, [], "only changed there since the two last agreed: it goes over as it is"
         elif way == "main":
