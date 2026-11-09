@@ -2281,8 +2281,8 @@ def tick():
 
 
 def day_yes_first(line):
-    """F215: in his day hours the builds he said yes to for today (his say-so of today, or his go for the sprint) go first, in rank
-    order, so his go starts them that afternoon instead of behind every prep in line."""
+    """F215: in his day hours the builds he said yes to for today (his say-so of today, or his go for the sprint) go first, in the
+    order of how long they waited, so his go starts them that afternoon instead of behind every prep in line."""
     if wall.off() or not wall.daytime():
         return line
     try:
@@ -2290,7 +2290,8 @@ def day_yes_first(line):
     except Exception as e:
         log(f"day yes first: {e!r}")
         return line
-    return yes + [j for j in line if j not in yes]
+    # the longest waiting first: a build sent later (the line sends more every minute) never keeps one he okayed earlier waiting
+    return sorted(yes, key=lambda j: j["n"]) + [j for j in line if j not in yes]
 
 
 def keep_day_yes(job):
