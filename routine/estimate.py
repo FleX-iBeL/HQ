@@ -151,7 +151,7 @@ usage:
                                                does it every minute on the main)
 Used by the background look itself: look-run job|item N (H190).
 """
-import functools, json, math, os, re, statistics, sys, time
+import functools, glob, json, math, os, re, statistics, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1184,6 +1184,11 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=N
             out["steps"] = [n for n, _ in named]
             out["by_steps"] = with_steps(out["est"], named)
             out["est"] = out["by_steps"]
+        # F218: her sealed tests and the proof's run, the runs its work runs, each with its own minutes on top
+        runs = run_steps(kind)
+        if runs:
+            out["runs"] = runs
+            out["by_runs"] = out["est"] = out["est"] + sum(r["min"] for r in runs)
     out["latest"] = latest_of(out["est"], kind, hist)
     return out
 
@@ -1231,6 +1236,81 @@ def steps_of(about):
 def with_steps(est, named):
     """F66: an estimate at least as long as the named steps' own times together, plus STEP_OVERHEAD."""
     return max(est, sum(m for _, m in named) + STEP_OVERHEAD) if named else est
+
+
+# F218 (call of 8 November 2026): QA jobs given about 5 minutes took 25 to 46, a build given 15 took 97. Most of the gap is two runs the
+# kind's past times don't hold apart: her sealed tests (a QA job and a build run them) and the proof's full run (a build). Each is a
+# named step on top of the kind's estimate (a build runs her tests itself while building, and the proof runs them again inside its
+# own run), its minutes from its last finished green run: the proof's seconds kept by the box next to
+# its green record (job-N-proof-time.json next to the proof's job-N.json), her sealed tests' seconds kept with their result in that
+# record (qatests.end_run). A failed, stopped or cut-off run gives no full duration and teaches nothing. With no finished green run,
+# the fixed time measured on the jobs of 8 November 2026.
+SEALED_STEP = "her sealed tests"
+PROOF_STEP = "the proof's run"
+SEALED_FIXED = 24  # minutes: the QA jobs of 8 November 2026 took 29, 27 and 46 against 5, 5 and 6 given; the middle gap, most of it her run
+PROOF_FIXED = 21   # minutes: job 9471's proof spent 1276 seconds on 8 November 2026
+RUN_KINDS = {"qa": (SEALED_STEP,), "build": (SEALED_STEP, PROOF_STEP), "bigbuild": (SEALED_STEP, PROOF_STEP)}
+RUNS_TTL = 30      # seconds the last runs are kept before they're read again
+_RUNS = {}
+
+
+def _proofs_dir():
+    return os.environ.get("HQ_PROOF_DIR") or os.path.join(hqpaths.HQ, ".status", "proofs")
+
+
+def _load_json(path):
+    try:
+        with open(path, encoding="utf8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def last_runs(now=None):
+    """F218: {step: minutes} of the last finished green run of each, as kept; a step with none isn't in it."""
+    now = time.time() if now is None else now
+    if _RUNS.get("at", 0) > now - RUNS_TTL:
+        return _RUNS["runs"]
+    import usagecost
+    proofs, sealed = [], []
+    for f in glob.glob(os.path.join(usagecost.DIR, "job-*-proof-time.json")):
+        n = re.search(r"job-(\d+)-proof-time\.json$", f)
+        spent = _load_json(f).get("spent")
+        # a cut-off run has no record, a failed one a red one
+        if n and isinstance(spent, (int, float)) and spent > 0 and _load_json(os.path.join(_proofs_dir(), f"job-{n.group(1)}.json")).get("green"):
+            proofs.append((os.path.getmtime(f), spent / 60))
+    for f in glob.glob(os.path.join(_proofs_dir(), "job-*.json")):
+        q = _load_json(f).get("qa_tests") or {}
+        secs = q.get("seconds") if isinstance(q, dict) else None
+        if q.get("green") and isinstance(secs, (int, float)) and not isinstance(secs, bool) and secs > 0:
+            sealed.append((os.path.getmtime(f), secs / 60))
+    runs = {}
+    if proofs:
+        runs[PROOF_STEP] = max(1, round(max(proofs)[1]))
+    if sealed:
+        runs[SEALED_STEP] = max(1, round(max(sealed)[1]))
+    _RUNS.update({"at": now, "runs": runs})
+    return runs
+
+
+def run_steps(kind):
+    """F218: [{"name", "min", "how"}] of the runs a job of this kind's work runs: "last" from the last finished green run, "fixed"
+    from the measured time when there's none yet."""
+    names = RUN_KINDS.get(kind or "")
+    if not names:
+        return []
+    try:
+        runs = last_runs()
+    except Exception:
+        runs = {}
+    fixed = {SEALED_STEP: SEALED_FIXED, PROOF_STEP: PROOF_FIXED}
+    return [{"name": n, "min": runs.get(n) or fixed[n], "how": "last" if runs.get(n) else "fixed"} for n in names]
+
+
+def runs_words(runs):
+    """F218: the counted runs in words, for the lists and a call: "counting her sealed tests 24 min and the proof's run 21 min"."""
+    return ("counting " + " and ".join(f"{r['name']} {dur(r['min'])}" for r in runs)) if runs else ""
 
 
 def mistake(h):
@@ -1460,6 +1540,10 @@ def friday_report(hist=None, now=None):
         m = sum(misses.is_miss(h) for h in held)
         words += (f" The last {len(held)} jobs held to the measured latest end: {m} past it (the bar is at most {misses.MOST} in "
                   f"{misses.WINDOW}" + (", so it's broken" if m > misses.MOST else "") + ").")
+    runs = run_steps("bigbuild")  # F218: the runs counted as steps, and where their minutes come from now
+    words += (" Counted as steps of their own: " + " and ".join(
+        f"{r['name']} {dur(r['min'])} ({'its last finished green run' if r['how'] == 'last' else 'the fixed measured time, no finished run kept yet'})"
+        for r in runs) + ".")
     return words + own_words + rounds_week(now)
 
 
@@ -1572,8 +1656,15 @@ def _start_from(e, text, hist=None):
     est = with_guess(d["est"], g, gf)
     x = measured.apply({"est": est, "latest": max(d["latest"], latest_of(est, d["kind"], hist))}, d["kind"], _about(text),
                        e, hist, "start")
+    runs = d.get("runs") or []
+    if runs and x["sure"]["ok"]:  # F218: measured from what jobs like it took, its runs on top, its latest end as wide again
+        add = sum(r["min"] for r in runs)
+        x["latest"] = max(x["est"] + add + 1, math.ceil(x["latest"] * (x["est"] + add) / x["est"]))
+        x["est"] += add
+        if x.get("computed"):
+            x["computed"] += add
     out = {k: x[k] for k in ("est", "latest", "sure", "based", "computed", "guess_used", "group_mid") if k in x}
-    return {**out, "kind": d["kind"]}
+    return {**out, "kind": d["kind"], **({"runs": runs} if runs else {})}
 
 
 def start_estimate(n, text, hist=None):
@@ -2469,6 +2560,8 @@ def plan(now=None):
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind, "eta": int(cursor) if on and not (proj and waits) else None,
                                     "waits": "usage" if (waits or start) and on else ("off" if not on else None),
                                     "latest": lat, **guess_detail(ke)}  # H190
+        if mx.get("runs") and not hl:  # F218: the runs counted in it, each named with its minutes
+            out["jobs"][str(j["n"])]["runs"] = mx["runs"]
         if mx:  # F79: how sure, and what it rests on
             out["jobs"][str(j["n"])]["sure"] = mx["sure"]
             if mx["sure"]["ok"]:
@@ -2727,6 +2820,8 @@ def words(n, p):
         return ""
     gw = guessed_words(e)  # H168, H190
     g = f", {gw}" if gw else ""
+    if e.get("runs") and "left" not in e:  # F218
+        g += f", {runs_words(e['runs'])}"
     if e.get("finished"):
         return (f"estimated {dur(e['est'])}{g}, took {dur(e['actual'])}" if e.get("est") else f"took {dur(e['actual'])}{g}") \
             + (f", {e['turns']} turns" if e.get("turns") else "") + _cost_words(e)
