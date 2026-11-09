@@ -101,6 +101,8 @@ TEAM_KINDS = ("jobs", "paused", "nightly", "estimates", "qa-failed", "release-he
               "down", "back", "feedback-status", "restart", "team-night-summary")
 DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
 KEEP = 400  # messages kept in the thread
+TRIM_AT = 2 * KEEP  # F197: trimmed back to KEEP only past this, in one go: a full thread trimmed one by one swapped its oldest text
+# for each new one, so it never grew and a text landing there looked like none (her test of the one text in the line's first minute)
 SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
 SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push services ask for
 
@@ -339,7 +341,7 @@ def put(where: Path, m: dict) -> bool:
             while i and _at(msgs[i - 1]) > _at(m):
                 i -= 1
             msgs.insert(i, m)
-            _write_lines(where / "thread.jsonl", msgs[-KEEP:])
+            _write_lines(where / "thread.jsonl", msgs[-KEEP:] if len(msgs) > TRIM_AT else msgs)
             have.add(_key(m))
         _prune_here(where, have)
     return new
