@@ -130,7 +130,7 @@ def why_not(job, jobs, now=None) -> str | None:
     day = daytime(now)
     if job["state"].startswith("held") and not day and not job["state"].startswith(("held: resumed", "held: paused")) and not planned_night(job):
         return "held, and a held job doesn't restart at night unless it was planned for the night; it can go on in the morning"
-    held = _held(job) or _switched_off(job)
+    held = _held(job) or (None if day and _go_past_switch(job, now) else _switched_off(job))
     if held:
         return held
     if not is_build(job):
@@ -163,6 +163,20 @@ def day_yes(job, now=None) -> dict | None:
         return daygo.sayso_of(g) if g else None
     except Exception:
         return None
+
+
+def _go_past_switch(job, now=None) -> bool:
+    """F215: his go for the sprint today also starts a build the line sent whose build switch is simply gone (cleared when its row
+    closed), never one he switched off himself (sprint.off_of, F201): that's his decision and it stands."""
+    try:
+        import line as L
+        import sprint as S
+        label, kind = L._own(job)
+        if kind != "build" or S.go_of(label).get("build") or (S.off_of(label).get("build") or {}).get("by") == "him":
+            return False
+        return bool(day_yes(job, now))
+    except Exception:
+        return False
 
 
 def go_why(job, now=None) -> str:
