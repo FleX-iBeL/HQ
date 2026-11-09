@@ -512,6 +512,51 @@ def with_team(jobs, label):
     return None
 
 
+RESEND_GAP = 60  # F189: minutes after a job of an item ended before that item goes to the team again
+
+
+def ended_at(j):
+    """F189: when finished job J ended, as a datetime, or None (a cancelled one, or no time on its line)."""
+    import datetime as dt
+    m = re.match(r"(?:done|ended) (\d\d:\d\d)(?: on (\d{4}-\d\d-\d\d))?", j["state"])
+    if not m:
+        return None
+    try:
+        agreed = dt.datetime.strptime(j["agreed"], "%Y-%m-%d %H:%M")
+        at = dt.datetime.strptime(f"{m.group(2) or j['agreed'][:10]} {m.group(1)}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+    if not m.group(2) and at < agreed:  # a line without its day: it ended past midnight after it was agreed
+        at += dt.timedelta(days=1)
+    return at
+
+
+def ended_lately(jobs, label, now=None):
+    """F189: (job, its end as a datetime) for the newest job of roadmap item LABEL that ended less than RESEND_GAP minutes
+    ago, or None. The line sent F173 six times in twenty minutes (jobs 9224 to 9233), each job ending within a minute or two."""
+    import datetime as dt
+    now = dt.datetime.fromtimestamp(now) if isinstance(now, (int, float)) else (now or dt.datetime.now())
+    l = re.escape(label)
+    pat = re.compile(rf"(?<![\w.]){l} on the (hq )?roadmap\b|\bthe {l} row\b", re.I)
+    best = None
+    for j in jobs:
+        if not j["state"].startswith(("done", "ended")):
+            continue
+        if not (pat.search(j["text"]) or ((j.get("item") or {}).get("label") or "").upper() == label):
+            continue
+        at = ended_at(j)
+        if at and now - at < dt.timedelta(minutes=RESEND_GAP) and (not best or at > best[1]):
+            best = (j, at)
+    return best
+
+
+def ended_lately_words(label, j, at):
+    """F189: the refusal, naming the item, the job and when it ended."""
+    import datetime as dt
+    return (f"{label} is not sent to the team again yet: its job {j['n']} ended at {at:%H:%M} on {at:%Y-%m-%d}, less than "
+            f"{RESEND_GAP} minutes ago (F189); it can go again from {at + dt.timedelta(minutes=RESEND_GAP):%H:%M}.")
+
+
 def mail_words():
     """H149: how often, on the Mail check line."""
     if MAIL_FAST and MAIL_FAST[1] > time.time():
@@ -1048,6 +1093,9 @@ def main(argv):
             j = with_team(jobs, label)
             if j:
                 sys.exit(f"{label} is already with the team: job {j['n']} ({j['state']}).")
+            late = ended_lately(jobs, label)  # F189: a job of it that ended under an hour ago: not sent again yet
+            if late:
+                sys.exit(ended_lately_words(label, *late))
             import sprint as sp_  # H272: only a row marked ready goes to the team from the page
             row = next((r for r in sp_.open_rows(text) if r["label"] == label), None)
             why = sp_.not_ready_why(row) if row else None
