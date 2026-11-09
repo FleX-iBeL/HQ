@@ -311,9 +311,10 @@ HERS_BY = {"in a text", "moneypenny"}  # who the record names for her own writes
 def _record() -> tuple[dict, set]:
     """The real record as the run sees it: {time: (line number, step)} from the trail, and the times on every line's thread."""
     steps, said = {}, set()
-    try:
+    try:  # read only: the record of the workspace this run is on (her test's copy); trail.path() names where a write may go, None under test
+        import hqpaths
         import trail
-        tp = trail.path()
+        tp = os.environ.get("HQ_TRAIL") or os.path.join(os.path.dirname(hqpaths.ROADMAP), os.path.basename(trail.REL))
     except Exception:
         tp = None
     if tp and os.path.isfile(tp):
