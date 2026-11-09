@@ -1011,6 +1011,47 @@ def tell(label: str, kind: str, words: str) -> bool:
     return True
 
 
+
+def her_tests_named(j: dict, note: str) -> tuple[str | None, list[str]]:
+    """F190: (label, her sealed tests of J's row that NOTE names by their exact name) for a team job, else (None, []). Not a judgment
+    of broken: a note to the team that names one of her sealed tests is hers to judge, whatever else it says, since only she may
+    change her tests. Her own jobs (a prep, a QA job) take any note."""
+    import qa
+    if qa.is_qa(j.get("text") or "") or qa.is_prep(j.get("text") or ""):
+        return None, []
+    label = (j.get("item") or {}).get("label") or qa.job_label(j.get("text") or "")
+    e = (state(label).get("sealed") or {}) if label else {}
+    if not e.get("fp"):
+        return None, []
+    names = list(e.get("tests") or [])
+    t, _ = read_list(e.get("copy") or "") if e.get("copy") else (None, "")
+    names += [n for n in (named_tests(t) if t else []) if n not in names]
+    hit = [n for n in names if re.search(rf"(?<![\w]){re.escape(n)}(?![\w])", note or "")]
+    return (label, hit) if hit else (None, [])
+
+
+def broken_prep_text(label: str, names, why: str) -> str:
+    """F190: the text of her prep for LABEL when a sealed test of hers is named or found broken (Prep of LABEL)."""
+    return (f"Prep of {label}: her sealed QA test(s) {', '.join(names)} named as broken ({why}). Only she changes her tests, never "
+            f"the team: read the test(s), fix what makes them crash or test nothing (qatests.py, H342: the row's own done example "
+            f"replayed on the real data of the copy they run on, failing first on the code from before the build for the row's reason, "
+            f"on its own check, not a crash), then python3 routine/qatests.py check {label} to seal them again. Never send it to the team, "
+            f"never jobs.py send-row or now.")
+
+
+def to_her_prep(jobs: list, label: str, names, why: str) -> dict:
+    """F190: her prep of LABEL gets a broken test of hers: the waiting one of the row gets it as a note, else a new prep job is queued
+    (in JOBS, not written: the caller holds the queue's lock and writes it). Returns that prep job."""
+    import qa, line
+    p = line.prep_of(jobs, label)
+    words = q.one_line(broken_prep_text(label, names, why)).replace("⟪", "(").replace("⟫", ")")
+    if p:
+        p.setdefault("notes", []).append({"at": time.strftime("%Y-%m-%d %H:%M"), "read": None, "text": words})
+        return p
+    p = qa._append(jobs, words, label)
+    qa._estimate(p, "research")
+    return p
+
 # ---------- the end: the sealed tests on the built copy ----------
 
 def end_run(label: str | None, wt: str) -> dict:

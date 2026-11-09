@@ -1389,6 +1389,14 @@ def main(argv):
                 sys.exit(f"Job {j['n']} is {j['state']}; a note is for a job that hasn't finished. Give the change "
                          "to the team as a new job instead.")
             note = one_line(" ".join(args[1:])).replace("⟪", "(").replace("⟫", ")")
+            import qatests  # F190: a note to the team naming one of her sealed tests is hers: it goes to her prep of the row, not to the team
+            label, hers = qatests.her_tests_named(j, note)
+            if hers:
+                p = qatests.to_her_prep(jobs, label, hers, f"a note for job {j['n']}: {note}")
+                write(text, jobs, on)
+                sys.exit(f"Refused: the note names her sealed QA test(s) {', '.join(hers)} of {label}, and only she changes her tests, "
+                         f"never the team: job {j['n']} gets no note. It went to her prep of {label} instead (job {p['n']}), to fix and "
+                         "seal again.")
             j.setdefault("notes", []).append({"at": time.strftime("%Y-%m-%d %H:%M"), "read": None, "text": note})
             write(text, jobs, on)
             if j["state"].startswith(("running", "stop asked")):
