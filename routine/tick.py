@@ -2281,12 +2281,12 @@ def tick():
 
 
 def day_yes_first(line):
-    """F215: in his day hours the builds he said yes to for today (his say-so of today, or his go for the sprint) go first, in the
-    order of how long they waited, so his go starts them that afternoon instead of behind every prep in line."""
+    """F215: in his day hours the builds he said yes to (a stored say-so, or his go for the sprint today) go first, in the order of
+    how long they waited, so his go starts them that afternoon instead of behind every prep in line."""
     if wall.off() or not wall.daytime():
         return line
     try:
-        yes = [j for j in line if wall.is_build(j) and (wall.sayso_today(j) or wall.day_yes(j))]
+        yes = [j for j in line if wall.is_build(j) and (j.get("sayso") or wall.day_yes(j))]
     except Exception as e:
         log(f"day yes first: {e!r}")
         return line

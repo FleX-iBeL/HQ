@@ -135,7 +135,7 @@ def why_not(job, jobs, now=None) -> str | None:
         return held
     if not is_build(job):
         return None
-    if day and not sayso_today(job, now) and not day_yes(job, now):
+    if day and not job.get("sayso") and not day_yes(job, now):
         return (f"no build starts between {DAY[0]}:00 and {DAY[1]}:00 without his say-so; {go_why(job, now)}; it waits for the night, "
                 f"or jobs.py now {job['n']}")
     import qa
@@ -147,8 +147,9 @@ def why_not(job, jobs, now=None) -> str | None:
 
 
 def sayso_today(job, now=None) -> bool:
-    """F215: his say-so on the job counts as his day yes on the day he gave it ("his day yes for the sprint's ready builds that day");
-    one kept from an earlier day doesn't open today's day hours."""
+    """F215: his say-so on the job was given today. A stored say-so of any day still opens his day hours for its build, as it did
+    (F100; QA, 9 November 2026: "a stored say-so keeps working as it did"); his go for the sprint of today only widens that, and
+    replaces a say-so of an earlier day on the job with his newer words (tick.keep_day_yes)."""
     s = job.get("sayso") or {}
     return bool(s) and str(s.get("at") or "")[:10] == time.strftime("%Y-%m-%d", time.localtime(now))
 
