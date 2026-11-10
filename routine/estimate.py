@@ -1185,7 +1185,7 @@ def estimate_detail(text, hist=None, kind=None, machine=None, tags=None, about=N
             out["by_steps"] = with_steps(out["est"], named)
             out["est"] = out["by_steps"]
         # F218: her sealed tests and the proof's run, the runs its work runs, each with its own minutes on top
-        runs = run_steps(kind)
+        runs = run_steps(kind, _about(text) if about is None else about)
         if runs:
             out["runs"] = runs
             out["by_runs"] = out["est"] = out["est"] + sum(r["min"] for r in runs)
@@ -1217,11 +1217,14 @@ RANGE_LAST = 30     # F66: the last finished jobs of a kind the spread is taken 
 REPLAY_DAYS = 14
 
 
+_ROW_NAMED = re.compile(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?(?:roadmap|planning)|\bread the ([hfmlj]\d+(?:\.\d+)?) row"
+                        r"|^qa of ([hfmlj]\d+(?:\.\d+)?)\b|^fix for ([hfmlj]\d+(?:\.\d+)?)\b")
+
+
 @functools.lru_cache(maxsize=4096)
 def _steps_cached(about, _key):
     t = (about or "").lower()
-    r = re.search(r"\b([hfmlj]\d+(?:\.\d+)?) on the (?:hq )?(?:roadmap|planning)|\bread the ([hfmlj]\d+(?:\.\d+)?) row"
-                  r"|^qa of ([hfmlj]\d+(?:\.\d+)?)\b|^fix for ([hfmlj]\d+(?:\.\d+)?)\b", t)
+    r = _ROW_NAMED.search(t)
     row = _rows().get(next(g for g in r.groups() if g), "") if r else ""
     qa = bool(r and r.group(3))
     return tuple((name, m) for name, rx, m in STEPS
@@ -1294,11 +1297,14 @@ def last_runs(now=None):
     return runs
 
 
-def run_steps(kind):
+def run_steps(kind, about=None):
     """F218: [{"name", "min", "how"}] of the runs a job of this kind's work runs: "last" from the last finished green run, "fixed"
-    from the measured time when there's none yet."""
+    from the measured time when there's none yet. about: the job's words; work that names no row has no sealed tests of hers and
+    no proof, so it runs neither (None: as for a row's work)."""
     names = RUN_KINDS.get(kind or "")
-    if not names:
+    if os.environ.get("HQ_RUN_STEPS") == "0":  # a test's rows of a known size (the sprint layout's), like HQ_LOOK=0
+        return []
+    if not names or (about is not None and not _ROW_NAMED.search(about.lower())):
         return []
     try:
         runs = last_runs()
@@ -1310,7 +1316,7 @@ def run_steps(kind):
 
 def runs_words(runs):
     """F218: the counted runs in words, for the lists and a call: "counting her sealed tests 24 min and the proof's run 21 min"."""
-    return ("counting " + " and ".join(f"{r['name']} {dur(r['min'])}" for r in runs)) if runs else ""
+    return ("counting " + " and ".join(f"{r['name']} {round(r['min'])} min" for r in runs)) if runs else ""  # a step's own minutes, never hours
 
 
 def mistake(h):
@@ -1542,7 +1548,7 @@ def friday_report(hist=None, now=None):
                   f"{misses.WINDOW}" + (", so it's broken" if m > misses.MOST else "") + ").")
     runs = run_steps("bigbuild")  # F218: the runs counted as steps, and where their minutes come from now
     words += (" Counted as steps of their own: " + " and ".join(
-        f"{r['name']} {dur(r['min'])} ({'its last finished green run' if r['how'] == 'last' else 'the fixed measured time, no finished run kept yet'})"
+        f"{r['name']} {round(r['min'])} min ({'its last finished green run' if r['how'] == 'last' else 'the fixed measured time, no finished run kept yet'})"
         for r in runs) + ".")
     return words + own_words + rounds_week(now)
 

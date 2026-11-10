@@ -1214,7 +1214,7 @@
             ? `About ${etaDur(e.est)} left (held after ${etaDur(e.held.so_far)} of ${etaDur(e.held.of)}, counted on what's left of it${e.held.floor?.length ? ', at least what a picked-up turn costs' : ''})`
             : `About ${etaDur(e.est)}`;
         if (e.latest && !e.over) s += ` to ${etaDur(e.latest)} at the latest`;  // F66: a range, likely and at the latest
-        if (e.runs?.length) s += ` · counting ${e.runs.map((r) => `${r.name} ${etaDur(r.min)}`).join(' and ')}`;  // F218: her sealed tests, the proof's run
+        if (e.runs?.length) s += ` · counting ${e.runs.map((r) => `${r.name} ${Math.round(r.min)} min`).join(' and ')}`;  // F218: her sealed tests, the proof's run
         if (e.based != null && !e.sure?.ok) s += ` · from ${e.based ? `${e.based} finished job${e.based === 1 ? '' : 's'}` : 'no finished jobs yet'}`;  // F103
         if (e.sure) s += ` · ${sureWords(e)}`;  // F79: measured from jobs like it, or too few of them, said
         // F218: no brackets inside the estimate's sentence, so it reads as one line from its likely time to its end

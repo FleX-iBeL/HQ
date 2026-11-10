@@ -10057,6 +10057,7 @@ setTimeout(() => {
             {"label": "5-hour limit", "percent": 0, "resetsAt": iso(now + 3600)},
             {"label": "Weekly · all models", "percent": weekly, "resetsAt": iso(now + 5 * 86400)}]}))
         env.update({"HQ_LOOK": "0", "HQ_USAGE": str(u), "HQ_SPRINT_NOW": str(int(now)), "HQ_SPRINT_ROOM": "22-0"})  # F66: two hours, so four rows fit by the clock at their latest end (30 each with no history)
+        env["HQ_RUN_STEPS"] = "0"  # F218: rows of a known size; her sealed tests and the proof's run are flow 81's and her tests
         return rm, env, now
 
     async def flow145(self) -> str:
@@ -37122,7 +37123,7 @@ console.log(JSON.stringify({{ W, F, long: long.length, five: daysAhead({{ ...l, 
         rm.write_text(ROADMAP.read_text().replace("**Routine:** off", "**Routine:** on"))
         d = self.tmp / "roadmap-H81-estimates"
         d.mkdir(parents=True, exist_ok=True)
-        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d)}
+        env = {**os.environ, "HQ_ROADMAP": str(rm), "HQ_ESTIMATES": str(d), "HQ_RUN_STEPS": "0"}  # F218: the kinds' and likes' own numbers
         env.pop("HQ_ROUTINES_HISTORY", None)
         script = r"""
 import json, sys
