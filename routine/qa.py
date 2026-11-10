@@ -37,6 +37,8 @@ usage:
   python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G [--example ... ] [--job N]
                                                                 QA passed, in the row, each example with its evidence
   python3 routine/qa.py fail LABEL "WHAT'S OFF" [--job N]       QA failed, in the row; the finding an open point, the fix on its road
+                                         F216: when the only open part is a Mac example (said in its words, or --mac-only [--flow N]),
+                                         on a server paired with the laptop, it goes to the laptop instead (routine/machalf.py)
   python3 routine/qa.py state LABEL                             passed, failed or none, with the newest mark
   python3 routine/qa.py queue LABEL                             a QA job for the row now (a call, or by hand)
   python3 routine/qa.py hold                                    what the release would take and what it would hold
@@ -1031,6 +1033,14 @@ def main(argv: list[str]) -> int:
     if cmd in ("pass", "fail", "state", "queue") and not LABEL.fullmatch(label):
         print("Which row? Give its label, like H247.")
         return 2
+    mac_only, mac_flow = False, None
+    if "--mac-only" in args:  # F216: the QA says its only open part is a Mac example (else it's read from its words)
+        args.remove("--mac-only")
+        mac_only = True
+    if "--flow" in args:
+        i = args.index("--flow")
+        mac_flow = int(args[i + 1]) if i + 1 < len(args) and args[i + 1].isdigit() else None
+        args = args[:i] + args[i + 2:]
     compared = ""
     if "--compared" in args:  # F101: what was compared on real data, how many, how many right
         i = args.index("--compared")
@@ -1070,7 +1080,10 @@ def main(argv: list[str]) -> int:
             print(said)
         return 0
     if cmd == "fail":
-        print(fail(label, " ".join(args[1:]), job))
+        # F216: a fail whose only open part is a Mac half goes to the paired laptop (routine/machalf.py), never a fail on the server
+        import machalf
+        said = machalf.takes(label, " ".join(args[1:]), job, force=mac_only, flow=mac_flow)
+        print(said or fail(label, " ".join(args[1:]), job))
         return 0
     if cmd == "state":
         text = q.read()[0]
