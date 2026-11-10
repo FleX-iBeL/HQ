@@ -9,7 +9,7 @@
 // Tailscale serve (tailnet only), set up by status/phone.sh (H13).
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, openSync } from 'node:fs';
+import { existsSync, openSync, readFileSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -92,9 +92,22 @@ const OS_NAME = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[process.pl
 const WHERE = LABEL || `Local · ${OS_NAME}`;
 // H92: a Mac is the laptop; on a server (Linux) the page leaves the Laptop section out. HQ_LAPTOP=1 or 0 overrides (tests).
 const LAPTOP = process.env.HQ_LAPTOP ? process.env.HQ_LAPTOP === '1' : process.platform === 'darwin';
+// F216: the checks handed to the laptop, as routine/machalf.py keeps them (.status/mac-half.json): one line each, in the page as
+// served, under Moneypenny: what waits for the laptop and why, what runs there, and the laptop's result in the verdict.
+const MAC_HALF = process.env.HQ_MAC_HALF_FILE || join(root, '.status/mac-half.json');
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function laptopChecks() {
+  let items = [];
+  try { items = JSON.parse(readFileSync(MAC_HALF, 'utf8')); } catch { return ''; }
+  if (!Array.isArray(items)) return '';
+  const now = Date.now() / 1000;
+  const lines = items.filter((x) => x && x.line && (x.state !== 'done' || now - Number(x.done ?? 0) <= 3 * 86400))
+    .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0)).map((x) => `<span>${esc(x.line)}</span>`);
+  return lines.length ? `<h3>Checks on the laptop</h3>${lines.join('')}` : '';
+}
 function labelled(path, body) {
   if (path === '/' || path === '/index.html') {
-    const page = String(body).replace('<meta name="hq-where" content="" />', `<meta name="hq-where" content="${WHERE}" />`)
+    const page = String(body).replace('<!--hq-laptop-checks-->', laptopChecks()).replace('<meta name="hq-where" content="" />', `<meta name="hq-where" content="${WHERE}" />`)
       .replace('<meta name="hq-laptop" content="" />', `<meta name="hq-laptop" content="${LAPTOP ? 'yes' : 'no'}" />`);
     if (!LABEL) return page;
     return page
@@ -980,6 +993,25 @@ const server = createServer(async (req, res) => {
       try { data = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
       res.writeHead(data ? 200 : 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(data));
     });
+    return;
+  }
+  // F216: the laptop's side of a check that needs the Mac. The server's QA hands it a flow and a commit (POST, x-hq: mac-half);
+  // the laptop runs it on a throwaway worktree of that commit and answers how it went (GET ?id=). All of it is routine/machalf.py's.
+  if (path0 === '/api/mac-half') {
+    if (req.headers['x-hq'] !== 'mac-half') {
+      res.writeHead(403).end('Only another HQ can ask this');
+      return;
+    }
+    const post = req.method === 'POST';
+    const id = String(new URL(req.url, 'http://x').searchParams.get('id') ?? '').replace(/[^0-9a-f]/g, '').slice(0, 32);
+    const body = post ? await readBody(req) : '';
+    const child = execFile('/usr/bin/python3', [join(root, 'routine/machalf.py'), 'serve', post ? 'start' : 'get', ...(post ? [] : [id])],
+      { timeout: 60000, cwd: root }, (err, out) => {
+        let d = null;
+        try { d = JSON.parse(String(out).trim().split('\n').pop()); } catch {}
+        res.writeHead(d?.code ?? 500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify(d?.data ?? null));
+      });
+    child.stdin.end(body);
     return;
   }
   if (path0 === '/api/role' || path0 === '/api/forward') {

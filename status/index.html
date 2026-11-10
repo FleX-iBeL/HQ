@@ -572,6 +572,8 @@
       <div id="night-timeline"></div>
       <!-- H342: how many items passed her check the first time, this week and last, from the QA marks in the planning -->
       <div id="first-time"></div>
+      <!-- F216: the checks that need the Mac, handed to the laptop: filled in by the server, in the page as served -->
+      <div id="laptop-checks" class="first-time" data-check="laptop-checks"><!--hq-laptop-checks--></div>
     </section>
     <script>(function(){var box=document.getElementById('first-time');function load(){fetch('/first-time',{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(h){if(h)box.innerHTML=h;}).catch(function(){});}load();setInterval(load,60000);})();</script>
     <script>(function(){var box=document.getElementById('night-timeline');function load(){fetch('/night-road/timeline',{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).then(function(h){if(h)box.innerHTML=h;}).catch(function(){});}load();setInterval(load,60000);})();</script>

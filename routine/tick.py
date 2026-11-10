@@ -1976,6 +1976,13 @@ def tick():
         heartbeat.tick(routines=routines, incidents=incidents, log=log)
     except Exception as e:
         log(f"heartbeat: {e!r}")
+    # F216: a check that needs the Mac, waiting for the laptop: handed over once it answers, its result asked after. Alone: nothing.
+    try:
+        import machalf
+        for said in machalf.tick():
+            log(f"mac half: {said}")
+    except Exception as e:
+        log(f"mac half: {e!r}")
     # H81: the other HQ's finished jobs, for estimates on both computers (at most every two minutes, F34). Alone: nothing.
     try:
         estimate.pull(log=log)
