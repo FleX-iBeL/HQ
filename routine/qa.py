@@ -906,7 +906,11 @@ def prompt_extra(text: str) -> str:
             "reaches anyone; not done is not done.\n" + body
             + "A feature built in pieces (F56, piece 2): from its first piece it's in app/features-in-pieces.json, so "
             "only the maker's HQ shows it. Check that it is, while pieces are left (HQ_MAKER=0 hides it); when the "
-            "row's last piece passes, qa.py pass takes it off that list: commit that file too.\n")
+            "row's last piece passes, qa.py pass takes it off that list: commit that file too.\n"
+            "A check that only runs on a Mac (F216): on the server, don't fail the row for that alone. When the Mac example is the only "
+            "open part, say so in qa.py fail (\"Not run: the Mac example ... nothing broken\", or --mac-only --flow N): the program hands "
+            "that flow to the paired laptop at the row's build commit and writes the laptop's result as your verdict, or waits for the "
+            "laptop while it's off.\n")
 
 
 _PIECE = re.compile(r"\bpiece \d+ of (\d+)\b", re.I)

@@ -31215,6 +31215,145 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
         need("done N --at HH:MM" in config.VOICE_RULES, "the call rules don't say how to tick off a job")
         return "the nudge names the done mark; a never-ending wait loop stops counting after 15 minutes, output keeps a shell alive; every job's text ends with the done mark; done --at ticks off at the real time"
 
+    async def flow479(self) -> str:
+        """F216, no Claude: a check whose example only runs on a Mac goes to the paired laptop by itself, never a fail on the server.
+        On a throwaway workspace with a made-up row built on this commit and a throwaway pairing: with the laptop off, a QA fail whose
+        only open part is the Mac half isn't written as a fail: the row and the status page's line say it waits for the laptop and that
+        the laptop is off; once a stand-in laptop answers, the routine's minute hands it over (flow 61 and the commit), and the laptop's
+        PASS is the same verdict, QA passed, with the laptop and the commit named; the laptop's FAIL goes the fail road with its words;
+        a fail with more than the Mac off stays a fail. The laptop's door refuses a hand-over without a flow and a commit. On the Mac
+        (the laptop itself): the real Mac half, flow 61 run through the laptop's side on a throwaway worktree of this commit, PASS."""
+        import subprocess as _sp, http.server, threading, importlib, socket
+        sys.path.insert(0, str(ROOT / "routine"))
+        hqpaths = importlib.import_module("hqpaths")
+        sha = _sp.run(["git", "-C", str(ROOT), "rev-parse", "--short=7", "HEAD"], capture_output=True, text=True).stdout.strip()
+        need(re.fullmatch(r"[0-9a-f]{7}", sha or ""), f"no commit to check: {sha!r}")
+        ws, env = self._h298_ws("f216")
+        sup = self.tmp / "f216-support"
+        sup.mkdir(exist_ok=True)
+        store, runs = self.tmp / "f216-mac-half.json", self.tmp / "f216-mac-half-runs"
+        env.update({"HQ_SUPPORT": str(sup), "HQ_UNDER_TEST": "1", "HQ_MAC_HALF_FILE": str(store), "HQ_MAC_HALF_RUNS": str(runs),
+                    "HQ_DIRECT_PLAIN": "1", "HQ_LOOK": "0", "HQ_REVIEW": "0", "HQ_NO_WALL": "1", "HQ_MAC_HALF_RETRY": "0"})
+        run = lambda tool, *a, stdin=None: _sp.run([sys.executable, str(ROOT / tool), *a], capture_output=True, text=True, env=env,
+                                                   cwd=str(ROOT), timeout=180, input=stdin)
+        rm = ws / "HQ/roadmap.md"
+
+        def row(label):
+            m = re.search(rf"^\|[^|\n]*\|\s*\**{label}\b[^\n]*$", rm.read_text(), re.M)
+            return m.group(0) if m else ""
+
+        def pair(peer):
+            (sup / "role.json").write_text(json.dumps({"name": "server", "peer": peer, "main": "server", "chosen_at": time.time() - 3600}))
+
+        def new_row(words):
+            r = run("routine/jobs.py", "write-row", "--bug", words)
+            label = re.search(r"([FH]\d+) is on the planning", r.stdout or "")
+            need(label, f"no made-up row: {r.stdout} {r.stderr[-300:]}")
+            r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import machalf; machalf._note_row(sys.argv[2], sys.argv[3])",
+                         str(ROOT / "routine"), label.group(1), f"Built (job 1), on HQ's dev as {sha} (pushed)."], capture_output=True, text=True, env=env)
+            need(r.returncode == 0 and f"dev as {sha}" in row(label.group(1)), f"the made-up build isn't in the row: {r.stderr[-300:]}")
+            return label.group(1)
+
+        mac_words = ("One example not run, nothing broken. Flow 61 on dev passed here. Not run: the Mac example (on the Mac the flow's "
+                     "Mac checks unchanged). What closes it: one run of flow 61 on the laptop (python3 app/happy_flows.py --only 61 on dev).")
+        notes = []
+        # the laptop's door: a hand-over without a flow and a commit is refused
+        r = run("routine/machalf.py", "serve", "start", stdin=json.dumps({"id": "abc123", "flow": "61; rm -rf /", "commit": "HEAD"}))
+        need('"code": 400' in r.stdout, f"the laptop's door took a hand-over without a flow number and a commit: {r.stdout} {r.stderr[-200:]}")
+        if hqpaths.IS_MAC:
+            # the laptop itself: the real Mac half, flow 61 through the laptop's side on a throwaway worktree of this commit
+            cid = "f216" + format(os.getpid(), "x")
+            r = run("routine/machalf.py", "serve", "start", stdin=json.dumps({"id": cid, "flow": 61, "commit": sha, "label": "F216"}))
+            need('"code": 200' in r.stdout, f"the laptop's side didn't take flow 61: {r.stdout} {r.stderr[-300:]}")
+            d = {}
+            for _ in range(600):
+                d = json.loads(run("routine/machalf.py", "serve", "get", cid).stdout.strip().splitlines()[-1])["data"]
+                if d.get("state") == "done":
+                    break
+                await asyncio.sleep(2)
+            need(d.get("result") == "PASS" and d.get("platform") == "macOS" and f"worktree of {sha}" in str(d.get("how")),
+                 f"the Mac half on this Mac: {json.dumps(d)[:600]}")
+            notes.append(f"on this Mac the laptop's side ran flow 61 on a throwaway worktree of {sha}: PASS in {d.get('seconds')} s")
+            return "the laptop's door holds; " + "; ".join(notes) + " (a QA on the Mac runs its Mac half itself, so the hand-over is the server's)"
+        # 1. the laptop off: it waits, never a fail
+        a = new_row("A made-up check with a Mac half. Done means: flow 61 passes, its Mac part on the Mac too.")
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            dead = s.getsockname()[1]
+        pair(f"http://127.0.0.1:{dead}")
+        r = run("routine/qa.py", "fail", a, mac_words, "--job", "41")
+        need(r.returncode == 0 and "waits for the laptop" in r.stdout, f"the Mac half with the laptop off: {r.stdout} {r.stderr[-300:]}")
+        need("QA failed" not in row(a) and f"QA waits for the laptop (job 41" in row(a), f"the row with the laptop off: {row(a)[-600:]}")
+        shown = run("routine/machalf.py", "show").stdout
+        need(re.search(rf"{a} · QA \(job 41\) waits for the laptop.*off or can't be reached", shown), f"the page's line with the laptop off: {shown}")
+        notes.append("with the laptop off the row and the page say it waits for the laptop, which is off, and nothing is failed")
+        # 2. a stand-in laptop answers: the routine's minute hands it over; its PASS is the verdict
+        calls, answer = [], {"result": "PASS"}
+
+        class Laptop(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _go(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                calls.append((self.command, self.path, body, self.headers.get("x-hq")))
+                if self.headers.get("x-hq") != "mac-half" or not self.path.startswith("/api/mac-half"):
+                    self.send_response(403)
+                    self.end_headers()
+                    return
+                cid = json.loads(body).get("id") if body else self.path.split("id=")[-1]
+                d = {"said": f"flow 61 on stand-in (macOS): {answer['result']} in 3 s, on a throwaway worktree of {sha}", "id": cid,
+                     "state": "done", "result": answer["result"], "flow": 61, "commit": sha, "where": "stand-in", "platform": "macOS",
+                     "seconds": 3, "how": f"a throwaway worktree of {sha}", "tail": "61  H56.1 " + answer["result"]}
+                if self.command == "POST":
+                    d = {"said": f"flow 61 at {sha} is under way on stand-in", "id": cid, "state": "started", "flow": 61, "commit": sha}
+                out = json.dumps(d).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            do_GET = do_POST = _go
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Laptop)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            pair(f"http://127.0.0.1:{srv.server_address[1]}")
+            r = run("routine/machalf.py", "tick")
+            need(f"{a}: flow 61's Mac half went to the laptop" in r.stdout, f"the routine's minute didn't hand it over: {r.stdout} {r.stderr[-300:]}")
+            posted = [c for c in calls if c[0] == "POST"]
+            need(posted and json.loads(posted[0][2]).get("flow") == 61 and json.loads(posted[0][2]).get("commit") == sha,
+                 f"the hand-over doesn't name flow 61 and {sha}: {calls[:3]}")
+            for _ in range(60):
+                if "QA passed (job 41" in row(a):
+                    break
+                await asyncio.sleep(1)
+            got = row(a)
+            need("QA passed (job 41" in got and f"flow 61 on the laptop stand-in (macOS): PASS in 3 s, on a throwaway worktree of {sha}" in got
+                 and "QA failed" not in got, f"the laptop's PASS isn't the verdict: {got[-700:]}")
+            shown = run("routine/machalf.py", "show").stdout
+            need(f"{a} · QA (job 41): flow 61 on the laptop stand-in (macOS): PASS" in shown, f"the page's line after the laptop's PASS: {shown}")
+            notes.append(f"once the laptop answers, the routine's minute hands it flow 61 at {sha} and its PASS is QA passed, laptop and commit named")
+            # 3. the laptop's FAIL goes the fail road, with its words
+            b = new_row("Another made-up check with a Mac half. Done means: flow 61 passes, its Mac part on the Mac too.")
+            answer["result"] = "FAIL"
+            r = run("routine/qa.py", "fail", b, mac_words, "--job", "42")
+            need("went to the laptop" in r.stdout, f"the second Mac half wasn't handed over: {r.stdout} {r.stderr[-300:]}")
+            for _ in range(60):
+                if "QA failed (job 42" in row(b):
+                    break
+                await asyncio.sleep(1)
+            need("QA failed (job 42" in row(b) and "on the laptop stand-in (macOS): FAIL" in row(b), f"the laptop's FAIL: {row(b)[-700:]}")
+            notes.append("the laptop's FAIL is QA failed, with its words")
+        finally:
+            srv.shutdown()
+        # 4. more than the Mac off: an ordinary fail, paired or not
+        c = new_row("A third made-up check. Done means: the button works.")
+        r = run("routine/qa.py", "fail", c, "The button does nothing when pressed, on this machine.", "--job", "43")
+        need("QA failed (job 43" in row(c) and "laptop" not in r.stdout, f"an ordinary fail went to the laptop: {r.stdout} {row(c)[-400:]}")
+        notes.append("a fail with more than the Mac off stays a fail")
+        return "the laptop's door holds; " + "; ".join(notes)
+
     async def flow480(self) -> str:
         """F145, no Claude: Moneypenny's big work goes to the team, and she settles a team job on his words. On a call and in a text,
         Claude's own helpers (Agent, Task, SendMessage) are refused through the session's own hook with the two right roads named
@@ -39703,6 +39842,7 @@ FLOWS = {
     473: ("H301: one writer with one-way sync on, as a fresh HQ has it: synced files are the main's on the backup, its own stay local; a Write of 90 KB or less goes over whole as put, a bigger one is a not yet", False, "flow473"),
     474: ("H309: the walkthrough on keeping HQ running: its sections, its index in Moneypenny's start only (briefing on and off), each section printed, every command it names in its script's usage or argv, a rename goes red", False, "flow474"),
     476: ("F138: a test run inside a job's tmux pane ends only its own server; a job whose window closes under it runs again once, its item carried; the chain driver types a say-so once per job and stops in one line on a job that ended without a done mark", False, "flow476"),
+    479: ("F216: a check whose example only runs on a Mac goes to the paired laptop by itself: the laptop off, it waits and says so, never a fail; the laptop on, its result is the same verdict", False, "flow479"),
     480: ("F145: Claude's own helpers refused on a call and in a text with the two right roads; a report asked on a call is a research job for the team, its row first, its report named back on her line; a team job closed from her line on his words, refused without them", False, "flow480"),
     481: ("nowroad: his now reaches the team today on real rows: the words once, reword in the ask, 004 and its undo, add from a text, the re-review settles, his now never sends it flagged and of today starts it once it passes (F151), an old or unquoted now refused, no test line on his ledger", False, "flow481"),
     489: ("H321: his now on a call held on the backup counts during the call, typed or spoken: the backup checks his words at its own door and hands them to the main with the send; words not his line, her line, a summary and the log still refused", False, "flow489"),

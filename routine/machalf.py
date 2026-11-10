@@ -57,7 +57,7 @@ HEADER = "mac-half"
 WATCH_FOR = 3 * 3600      # seconds a watcher asks the laptop before it leaves it to the routine's minute [Claude's choice]
 RUN_FOR = 45 * 60         # seconds one flow may run on the laptop [Claude's choice: flow 61 takes under a minute]
 SHOW_DAYS = 3             # a finished check stays on the status page this many days [Claude's choice]
-RETRY_EVERY = 60          # seconds between two hand-overs to a laptop that was off (the routine's minute)
+RETRY_EVERY = int(os.environ.get("HQ_MAC_HALF_RETRY") or 60)  # seconds between two hand-overs to a laptop that was off (the routine's minute)
 
 # A QA's words that its only open part is a Mac example it couldn't run (job 9485's, and plainer ones)
 MAC = r"(?:Mac(?:Book)?|macOS)"
@@ -273,6 +273,9 @@ def finish(cid: str, d: dict) -> dict | None:
         ran += f"; the laptop isn't a Mac ({d['platform']}), so it ran the flow as it runs there"
     job = it.get("job")
     import qa
+    if ran in _row(it["label"]):  # written already by a watcher that stopped before it said so: not twice
+        return _update(cid, state="done", result=d["result"], done=time.time(), ran=ran,
+                       line=f"{it['label']} · QA (job {job or 'by hand'}): {ran}. In the verdict.")
     if d["result"] == "PASS":
         what = f"{it['what']}. The Mac half, handed to the laptop by itself (F216): {ran}"
         qa.mark(it["label"], True, what, job)
@@ -329,11 +332,13 @@ def tick() -> list[str]:
     said, now = [], time.time()
     for it in _read():
         st = it.get("state")
-        if st == "laptop-off" and now - float(it.get("tried") or 0) >= RETRY_EVERY - 5:
+        if st == "laptop-off" and now - float(it.get("tried") or 0) >= max(0, RETRY_EVERY - 5):
             it2 = hand(it["id"]) or {}
             if it2.get("state") == "handed":
                 _watch(it["id"])
                 said.append(f"{it['label']}: flow {it['flow']}'s Mac half went to the laptop")
+        elif st == "writing" and now - float(it.get("asked") or it.get("handed") or 0) >= 15 * 60:
+            _update(it["id"], state="handed")  # a watcher that stopped while it wrote the verdict: asked again (the row says if it's there)
         elif st == "handed" and now - float(it.get("asked") or it.get("handed") or 0) >= 50:
             it2 = ask(it["id"]) or {}
             if it2.get("state") == "done":
@@ -367,6 +372,8 @@ def _run_read(cid: str) -> dict | None:
 
 
 def _run_write(cid: str, d: dict) -> None:
+    if not os.path.isdir(os.path.dirname(RUNS)):  # its HQ (a throwaway copy) is gone: nothing is made again where it was
+        return
     os.makedirs(RUNS, exist_ok=True)
     p = _run_file(cid)
     with open(p + ".tmp", "w", encoding="utf8") as f:
