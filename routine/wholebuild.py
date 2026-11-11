@@ -579,6 +579,13 @@ def _item_words(label: str, e: dict, rnd: int, d: dict, rid: str) -> str:
              "The item, whole (sprint.py show):\n" + show,
              "His own words in it: " + (his or "(no His words field in the row)")]
     front = _front_points(show)
+    try:  # the front's own record of them (routine/front.py, branch fb-front), when it's there; the printed heading otherwise
+        import front as F
+        kept = "\n".join(f"- {x['from']}, round {x['round']}: {x['finding']}" for x in F.open_points(label))
+        if kept and kept not in front:
+            front = (front + "\n" + kept).strip()
+    except Exception:
+        pass
     parts.append("Open points from the front (not settled): " + (front if front else "none"))
     parts.append("The build's commits (newest first):\n" + ("\n".join(commits[:40]) if commits else "(none recorded)"))
     parts.append("The build's record and her sealed tests:\n" + "\n".join(_record_words(b["job"]) for b in (e.get("builds") or []) + (e.get("fixes") or [])))
