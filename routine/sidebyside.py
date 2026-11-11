@@ -217,16 +217,24 @@ def prepare(job: dict) -> dict | None:
             e = d["jobs"][str(n)]
             e["state"] = "building"
             return e
-        again = _item_worktree(d, label) if label else None
-        if again:  # its fix or its merge: the same worktree, with dev merged in first (the others' work, as it now stands)
+        rerun = re.match(r"Rerun of job (\d+)\b", job.get("text") or "")
+        again = (d["jobs"].get(rerun.group(1)) if rerun else None) or (_item_worktree(d, label) if label else None)
+        if again and not os.path.isdir(again.get("worktree") or ""):
+            again = None
+        if again and rerun:  # a crash (H62): the rerun carries on in the same worktree, its commits and its uncommitted work as they are
+            class _R:
+                returncode = 0
+            r = _R()
+        elif again:  # its fix or its merge: the same worktree, with dev merged in first (the others' work, as it now stands)
             r = _git("merge", "--no-edit", "dev", cwd=again["worktree"])
             if r.returncode:
                 _git("merge", "--abort", cwd=again["worktree"])
-            for x in d["jobs"].values():  # its earlier collided or built run: this one carries it now
-                if x.get("worktree") == again["worktree"] and x.get("state") in ("collided", "built"):
+        if again:
+            for x in d["jobs"].values():  # its earlier run (collided, built, crashed): this one carries it now
+                if x.get("worktree") == again["worktree"] and x.get("state") in ("collided", "built", "handed", "building"):
                     x["state"] = "superseded"
-            e = {**{k: v for k, v in again.items() if k not in ("files", "merge_job", "tip", "merged")}, "job": n, "state": "building",
-                 "at": time.time(), "of": again.get("job"), "dev_merged": r.returncode == 0}
+            e = {**{k: v for k, v in again.items() if k not in ("files", "merge_job", "tip", "merged", "blocked", "rerun", "kept_said")},
+                 "job": n, "state": "building", "at": time.time(), "of": again.get("job"), "dev_merged": r.returncode == 0}
             d["jobs"][str(n)] = e
             return e
         wt = os.path.join(side_dir(), f"job-{n}")
@@ -270,10 +278,27 @@ def runner_env(info: dict | None) -> str:
 
 # ---------- brought together ----------
 
-def waiting_to_merge() -> bool:
-    if not on():
-        return False
-    return any(e.get("state") in WAITING for e in load()["jobs"].values())
+def waiting_to_merge(jobs: list | None = None) -> bool:
+    """Something still to bring together before the review. A parked job (boxed, paused, held for him) doesn't hold the others' review:
+    it joins a later one once it's done. A held collision neither."""
+    jobs = q.read()[1] if jobs is None else jobs
+    for e in load()["jobs"].values():
+        if e.get("state") not in WAITING + ("handed",):
+            continue
+        n = e.get("merge_job") if e.get("state") == "collided" else (e.get("rerun") if e.get("state") == "handed" else e.get("job"))
+        j = next((x for x in jobs if x["n"] == n), None)
+        if j and (q.parked(j) or j["state"].startswith("held: ") and "for him" in j["state"]):
+            continue
+        return True
+    return False
+
+
+def in_dev(label: str) -> bool:
+    """Is this item's newest side build in dev (or did it never build side by side)? The review only takes what's in."""
+    got = [e for e in load()["jobs"].values() if e.get("label") == label and e.get("state") != "superseded"]
+    if not got:
+        return True
+    return max(got, key=lambda e: e.get("at") or 0).get("state") in ("merged", "gone")
 
 
 def _jobs_state(jobs: list, n) -> str | None:
@@ -281,9 +306,17 @@ def _jobs_state(jobs: list, n) -> str | None:
     return j["state"] if j else None
 
 
+MOST_COLLISIONS = 2  # real collisions an item goes back to its builder for; past it: held, one text
+
+
+def _pending(d: dict) -> bool:
+    return any(e.get("state") in WAITING + ("handed",) for e in d["jobs"].values())
+
+
 def merge_minute(push: bool = True) -> list[str]:
-    """Every minute on the main: the side builds' end seen, and once no build waits or runs, each built branch merged into dev."""
-    if not on():
+    """Every minute on the main: the side builds' end seen, and once no build waits or runs, each built branch merged into dev. Also
+    with the switch off, while side builds from before are still there: the switch only says whether new builds go side by side."""
+    if not on() and not _pending(load()):
         return []
     try:
         import role
@@ -302,9 +335,13 @@ def merge_minute(push: bool = True) -> list[str]:
             st = _jobs_state(jobs, n)
             if st and st.startswith("done"):
                 e.update(state="built", tip=_git("rev-parse", e["branch"]).stdout.strip())
+            elif st and "requeued as job" in st:  # a crash (H62): its rerun carries on in this worktree, on this branch
+                e.update(state="handed", rerun=int(re.search(r"requeued as job (\d+)", st).group(1)))
+                out.append(f"job {n} ({e.get('label')}) ended by a crash; its rerun, job {e['rerun']}, carries on in its worktree")
             elif st is None or st.startswith(("stopped", "cancelled", "ended")):
                 e.update(state="dropped", why=st or "gone from the queue")
-                out.append(f"job {n} ({e.get('label')}) ended without being done: its branch isn't brought together")
+                out.append(f"job {n} ({e.get('label')}) ended without being done: its branch isn't brought together; its worktree "
+                           f"{e.get('worktree')} is kept while it holds work")
         if wholebuild._busy_builds(jobs):
             _cleanup(d, out)
             return out
@@ -328,11 +365,32 @@ def merge_minute(push: bool = True) -> list[str]:
             label = e.get("label") or f"job {n}"
             r = _git("merge", "--no-ff", "--no-edit", "-m", f"{label}: brought together from {e['branch']} (side by side, job {n})", e["branch"])
             if r.returncode == 0:
+                e.pop("blocked", None)
                 e.update(state="merged", merged=_git("rev-parse", "HEAD").stdout.strip(), at_merge=time.time())
                 merged.append(label)
                 continue
             files = [f for f in _git("diff", "--name-only", "--diff-filter=U").stdout.splitlines() if f.strip()]
-            _git("merge", "--abort")
+            if _git("rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0:
+                _git("merge", "--abort")
+            if not files:  # not a collision (an untracked file in the way, a lock of another git, ...): no job, wait, said once
+                why = " ".join((r.stderr or r.stdout or "").split())[:300] or f"git merge ended with {r.returncode}"
+                if e.get("blocked") != why:
+                    e["blocked"] = why
+                    out.append(f"{label} can't be brought together yet, and it isn't a collision: {why}. Nothing sent to anyone; "
+                               "tried again every minute")
+                    try:
+                        import incidents
+                        incidents.past("side-by-side", time.time(), time.time(), f"{label}'s branch can't be merged into dev: {why}",
+                                       [(time.time(), "Waits and tries again every minute; no job sent")])
+                    except Exception:
+                        pass
+                break  # what's in the way holds the rest behind it too
+            c = d.setdefault("collisions", {})
+            c[label] = int(c.get(label) or 0) + 1
+            if c[label] > MOST_COLLISIONS:
+                e.update(state="held", files=files)
+                out.append(_hold_collision(label, e, files))
+                continue
             e.update(state="collided", files=files)
             out.append(_send_back(n, e, files, merged))
         if merged:
@@ -341,6 +399,17 @@ def merge_minute(push: bool = True) -> list[str]:
         r = subprocess.run([sys.executable, os.path.join(HERE, "push.py")], cwd=root(), capture_output=True, text=True)
         out.append("pushed dev after its privacy check" if r.returncode == 0 else f"dev not pushed: {(r.stdout + r.stderr).strip()[-200:]}")
     return out
+
+
+def _hold_collision(label: str, e: dict, files: list) -> str:
+    words = (f"{label}'s branch {e['branch']} still collides with dev in {', '.join(files)} after {MOST_COLLISIONS} rounds back with its "
+             f"builder. It's held: not brought together, not reviewed; its worktree {e['worktree']} stays as it is.")
+    try:
+        import qatests
+        qatests.tell(label, f"side-held-{e['branch']}", words)
+    except Exception:
+        pass
+    return words
 
 
 def _send_back(n, e: dict, files: list, merged: list) -> str:
@@ -367,23 +436,50 @@ def _send_back(n, e: dict, files: list, merged: list) -> str:
     return f"{label}'s branch collides with dev in {', '.join(files)}: back to job {n}'s chat as job {m}"
 
 
+def fresh_note(n: int, plan: dict, job: dict) -> str:
+    """A merge job whose builder chat can't be picked up: the item whole, both sides of the collision, the files, what to keep working."""
+    import carryon
+    import sprint as S
+    m = MERGE_RE.match(" ".join((job.get("text") or "").split()))
+    label = m.group(1) if m else ""
+    e = _item_worktree(load(), label) or {}
+    wt, br = e.get("worktree") or "", e.get("branch") or ""
+    files = e.get("files") or []
+    mine = _git("log", "--format=%h %s", f"dev..{br}").stdout.strip() if br else ""
+    theirs = _git("log", "--format=%h %s", f"{br}..dev", "--", *files).stdout.strip() if br and files else ""
+    return (f"\n\nThis is bringing {label} together with dev after the side-by-side builds. Its builder's chat (job {plan.get('continues')}) "
+            f"can't be picked up, because {plan.get('why') or 'it is gone'}, so you start fresh with everything here.\n\nThe item, whole:\n"
+            + S.show_words([label]) + f"\n\nIts side ({br}, in {wt}), the commits not in dev:\n{mine or '(none)'}"
+            + f"\n\nThe other side, dev's commits in the same files since it branched:\n{theirs or '(none found)'}"
+            + f"\n\nThe files that collide: {', '.join(files) or '(git named none)'}. In the worktree: git merge dev, resolve so both sides keep "
+            f"working ({label}'s done examples and those of the items in dev), run the flows of both, commit, and end.")
+
+
 def _cleanup(d: dict, out: list) -> None:
     """A worktree goes once its item is through the review and its branch is in dev."""
     import wholebuild
     wb = wholebuild.load()["items"]
     for n, e in d["jobs"].items():
-        if e.get("state") not in ("merged", "dropped"):
+        if e.get("state") not in ("merged", "dropped", "superseded"):
             continue
         st = (wb.get(e.get("label") or "") or {}).get("stage")
         if e["state"] == "merged" and st not in ("passed", "held", "out"):
             continue
         if any(x is not e and x.get("worktree") == e.get("worktree") and x.get("state") in WAITING for x in d["jobs"].values()):
             continue
-        if os.path.isdir(e.get("worktree") or ""):
-            _git("worktree", "remove", "--force", e["worktree"])
+        wt = e.get("worktree") or ""
+        if os.path.isdir(wt):
+            dirty = _git("status", "--porcelain", cwd=wt).stdout.strip()
+            ahead = _git("rev-list", "--count", f"dev..{e['branch']}").stdout.strip()
+            if dirty or (ahead and ahead != "0"):  # never lose work: kept, said once
+                if not e.get("kept_said"):
+                    e["kept_said"] = True
+                    out.append(f"job {n}'s worktree {wt} is kept: " + ("it has changes not committed" if dirty else
+                                                                       f"its branch {e['branch']} has {ahead} commit(s) not in dev"))
+                continue
+            _git("worktree", "remove", wt)
             _git("worktree", "prune")
-        if e["state"] == "merged":
-            _git("branch", "-D", e["branch"])
+        _git("branch", "-d", e["branch"])
         e["state"] = "gone"
         out.append(f"job {n}'s worktree is gone ({e.get('label')} {st or 'dropped'})")
 

@@ -255,7 +255,8 @@ def night_refuses(target: str | None = None) -> str | None:
         if wholebuild.on() and nightly.happy_at_night():
             lh = nightly.last_happy()
             if not lh:
-                return "the 17 happy flows haven't run at night yet"
+                return ("the release waits for the first night run of the 17 happy flows: since the whole-build road is on they run only "
+                        "at night (routine/nightly.py), and they haven't run yet; the next night runs them")
             if not lh.get("green"):
                 return f"the last night run of the 17 happy flows ({lh.get('at')}) was red: {'; '.join((lh.get('failed') or []) + (lh.get('not_tried') or []))[:300]}"
     except ImportError:

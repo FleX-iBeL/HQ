@@ -2193,7 +2193,7 @@ def tick():
     except Exception as e:
         log(f"mail list: {e!r}")
     running = q["running"]
-    side = _side_on()
+    side = _side_on() or _side_files()  # the switch says whether new builds go side by side; the ones running are watched either way
     if side:  # 11 November 2026: up to N builds side by side, each watched as one job alone was (routine/sidebyside.py)
         _side_watch(q, running)
         q = json.loads(jobs("next"))
@@ -2407,6 +2407,11 @@ def _finished(s):
         incidents.up("jobs", what=f"Job {s.get('n')} isn't running any more (done or held)")
     clear()
     quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
+
+
+def _side_files():
+    d = os.path.join(RUN, "side")
+    return os.path.isdir(d) and any(re.fullmatch(r"job-\d+\.json", f) for f in os.listdir(d))
 
 
 def _side_on():
