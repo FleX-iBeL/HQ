@@ -14081,6 +14081,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         import subprocess as _sp
         import time as _t
         ws, env = self._h298_ws("f86")
+        env["HQ_BACKEND_FRONT_CAP"] = "0"  # FB-front: the twenty rounds (F86, H318) are the road with front_cap off; flows 620 to 623 test it on
         env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
         t0 = int(_t.time()) - 3600  # the old flags are from before the loop was switched on
         env.update({"HQ_LOOK": "0", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_NOW": str(t0)})
@@ -14280,6 +14281,7 @@ console.log(JSON.stringify({{problems: r.problems}}));"""
         import time as _t
         import types
         ws, env = self._h298_ws(name)
+        env["HQ_BACKEND_FRONT_CAP"] = "0"  # FB-front: the twenty rounds (F86, H318) are the road with front_cap off; flows 620 to 623 test it on
         env["HQ_LEDGER_FOLDER"] = str(ws / "HQ/ledger")
         t0 = int(_t.time())
         env.update({"HQ_LOOK": "0", "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_NOW": str(t0)})
@@ -26858,6 +26860,7 @@ print(json.dumps(o))
         routine's own, once a night, over every quick flow; a friend's HQ doesn't pull the work line."""
         import subprocess as _sp
         ws, env = self._h298_ws("f101e")
+        env["HQ_BACKEND_FRONT_CAP"] = "0"  # FB-front: the twenty rounds (F86, H318) are the road with front_cap off; flows 620 to 623 test it on
         rm = ws / "HQ/roadmap.md"
         ss = ROOT / "status/set-status.py"
         keep = rm.read_text()
@@ -41170,6 +41173,342 @@ setattr(Run, "flow503", _f201_flow503)
 FLOWS.update({503: ("F201: a prepare he switched off (his words, or held-off from before) stays off through an hour of her Must pickup, shown as his on the line; an untouched Must and the line's own off are still picked up", False, "flow503")})
 FLOW_LIMITS.update({503: 300})
 # == end of F201's block ==
+
+
+# == FB-front (11 November 2026): the front capped and the preparation fed (flows 620 to 626) ==
+# routine/front.py and routine/prepfeed.py, the backend switches front_cap and fed_prep. No Claude: the review's stand-in (HQ_REVIEW_FAKE).
+
+def _fb_env(self, name, hour=14, **extra):
+    """A throwaway HQ for these flows (the wall's, with the review's stand-in and the line's own state), his words of today on the team
+    line, and the tools: (ws, env, d, script, py, jobs, minute, state, go_words)."""
+    import subprocess as _sp
+    ws, env, d = self._wall_env(f"fb-{name}", hour=hour)
+    env.update({"HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_LINE_STATE": str(d / "line.json"), "HQ_QA_SEALS": str(d / "seals")})
+    env.pop("HQ_DIRECT_AGENT", None)
+    env.update(extra)
+    jobs, minute, state, _new = self._wall_tools(env, d, ws)
+    self._wall_usage(env)
+    th = ws / "HQ/team-line"
+    th.mkdir(parents=True, exist_ok=True)
+    go_words = "Yes, flip it on and let it go all the way, build it today."
+    th_lines = [{"at": time.time() - 600, "from": "me", "text": "The made-up card keeps saying Nothing planned, it should say Nothing planned yet please."},
+                {"at": time.time() - 590, "from": "moneypenny", "text": "I'll put it on the planning as a bug, with your words."},
+                {"at": time.time() - 5, "from": "me", "text": go_words}]  # said before anything the flow does (a stop at the same second counts it as an answer)
+    (th / "thread.jsonl").write_text("".join(json.dumps(x) + "\n" for x in th_lines))
+    env["HQ_WORDS_FROM"] = str(th / "thread.jsonl")
+    env["FB_SAID_AT"] = str(th_lines[-1]["at"])
+
+    def script(name, *a, **k):
+        r = _sp.run([sys.executable, str(ROOT / "routine" / name), *a], capture_output=True, text=True, env={**env, **k}, cwd=str(ws))
+        r.out = r.stdout + r.stderr
+        return r
+
+    def py(code, **k):
+        r = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, %r)\n" % str(ROOT / "routine") + code], capture_output=True,
+                    text=True, env={**env, **k}, cwd=str(ws))
+        need(r.returncode == 0, f"{code[:80]}: {r.stderr[-1500:]}")
+        return r.stdout.strip()
+
+    return ws, env, d, script, py, jobs, minute, state, go_words
+
+
+def _fb_row(jobs, words):
+    r = jobs("write-row", words, "--bug")
+    need(r.returncode == 0 and re.search(r"\b([FH]\d+) is on the planning", r.stdout), f"the row: {r.stdout} {r.stderr}")
+    return re.search(r"\b([FH]\d+) is on the planning", r.stdout).group(1)
+
+
+def _fb_fields(go_words, env):
+    return (f'His words: "{go_words}" Sources: his text on the team line, {time.strftime("%-d %B %Y %H:%M", time.localtime(float(env["FB_SAID_AT"])))}.')
+
+
+def _fb_capped_item(script, py, jobs, go_words, env):
+    """A made-up bug row its review flags twice (the stand-in flags HOLE until FILLED), its words changed in between: (label)."""
+    label = _fb_row(jobs, "The made-up card says Nothing planned. What's wrong: it says Nothing planned. What right looks like: Nothing planned "
+                          "yet. How to check: the empty card. HOLE: which card.")
+    py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+    r = script("review.py", "add", label, _fb_fields(go_words, env), HQ_SAYSO_FAKE="yes")
+    need(r.returncode == 0, f"her addition: {r.out}")
+    py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+    return label
+
+
+async def _fb_flow620(self) -> str:
+    """The front capped (FB-front), no Claude: on a throwaway HQ with front_cap on, an item whose review flags it twice (its words changed in
+    between, the hole still open) is not stuck: its ready check no longer names the review, no third review starts on new words (not by the
+    routine's minute, not by review.py now), sprint.py show prints its open point under "Open points from the front (not settled):", the line
+    marks it ready and sends it to the team on his build switch, and the build's first prompt carries the open point with the sentence."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "cap", HQ_BACKEND_FRONT_CAP="1")
+    label = _fb_capped_item(script, py, jobs, go_words, env)
+    hist = json.loads(py("import review\nprint(json.dumps(review._state()[1]['rows'][%r].get('history')))" % label))
+    need(len(hist) == 2 and all(h["verdict"] == "flag" for h in hist) and hist[1]["prior"] == ["which card"],
+         f"the two verdicts aren't kept, or round 2 didn't get round 1's point: {hist}")
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("review" not in why and "it only needs the mark" in why, f"the capped item is still held by its review: {why}")
+    shown = script("sprint.py", "show", label).stdout
+    need("Open points from the front (not settled):\n- the item's review, round 2 of 2: which card" in shown, f"show: {shown[:1500]}")
+    r = script("review.py", "now", label)
+    need(r.returncode == 0 and "No round" in r.out and "which card" in r.out, f"a third round by review.py now: {r.out}")
+    need(script("review.py", "add", label, "One more sentence of hers.", HQ_SAYSO_FAKE="yes").returncode == 0, "her second addition")
+    started = json.loads(py("import review\nprint(json.dumps(review.tick()))"))
+    need(label not in started, f"a third review started on its new words: {started}")
+    need(script("sprint.py", "go", label, "both", "on", "--said", go_words).returncode == 0, "his switches")
+    steps = []
+    for _ in range(3):
+        steps += json.loads(py("import line\nprint(json.dumps(line.tick()))"))
+    need(any("marked ready by the line" in x for x in steps) and any(f"{label}: sent to the team by the line" in x for x in steps),
+         f"the line didn't take it on: {steps} {py('import line' + chr(10) + 'print(line.show([%r]))' % label)}")
+    q = (ws / "HQ/roadmap.md").read_text().split("## The queue", 1)[1]
+    n = re.search(rf"^- Job (\d+) · ready · [^\n]*{label} on the HQ roadmap, sent to the team by the line", q, re.M)
+    need(n, f"no build job: {q[-1200:]}")
+    n = n.group(1)
+    res = minute()
+    need(state(n).startswith("running"), f"the build didn't start: {state(n)} {res['log'][-3:]}")
+    prompt = (Path(env["HQ_JOB_RUN"]) / f"job-{n}.prompt").read_text()
+    need(f"{label}: Open points from the front (not settled):\n- the item's review, round 2 of 2: which card" in prompt
+         and "These were raised and not settled before the build; settle each in the build or say why it doesn't apply." in prompt,
+         f"the build's first prompt doesn't carry the open point: {prompt[-1500:]}")
+    return ("two flags, then on: no review hold, no third round (minute or now), the open point under its heading in show, marked and sent "
+            "by the line, and in the build's first prompt with the sentence")
+
+
+async def _fb_flow621(self) -> str:
+    """The front capped, no Claude: a point only he can answer still goes to him. The item past its two flagged rounds, put on her sit-down
+    list (review.py sitdown), is held for his answer exactly as before: its ready check says so, the line waits and sends nothing, and his now
+    is refused; once its words change (his answer written in), the stop lifts and it goes on."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "him", HQ_BACKEND_FRONT_CAP="1")
+    label = _fb_capped_item(script, py, jobs, go_words, env)
+    r = script("review.py", "sitdown", label, "Which of the two cards he means is his to say.", "If the top card, I'll name it; if not, the other.")
+    need(r.returncode == 0, f"the sit-down: {r.out}")
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("sit-down list for his answer" in why, f"his point doesn't hold it: {why}")
+    need(script("sprint.py", "ready", label, "on").returncode != 0, "the Ready mark went on past his open point")
+    need(script("sprint.py", "go", label, "both", "on", "--said", go_words).returncode == 0, "his switches")
+    steps = []
+    for _ in range(2):
+        steps += json.loads(py("import line\nprint(json.dumps(line.tick()))"))
+    shown = py("import line\nprint(line.show([%r]))" % label)
+    need(not any("sent to the team" in x or "marked ready" in x for x in steps) and "wait" in shown and "sit-down" in shown,
+         f"the line went past his point: {steps} {shown}")
+    r = jobs("send-row", label, "--not-ready", "--now", "--said", go_words)
+    need(r.returncode != 0 and "sit-down" in (r.stdout + r.stderr), f"his now went past his open point: {r.stdout} {r.stderr}")
+    r = script("review.py", "add", label, "His answer: the top card.", HQ_SAYSO_FAKE="yes")
+    need(r.returncode == 0, f"his answer written in: {r.out}")
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("sit-down" not in why and "review" not in why, f"his answer in, it's still held: {why}")
+    return "past the cap his sit-down point still holds it (ready check, Ready mark, the line, his now); his answer in, it goes on"
+
+
+def _fb_tests(ws, d, label, hole, extra=""):
+    qd = ws / "HQ/qa-tests" / label
+    t = json.loads((qd / "tests.json").read_text())
+    for x in t["sentences"]:
+        x["tests"] = ["t_card"]
+    t["tests"] = {"t_card": "the empty card says Nothing planned yet"}
+    (qd / "tests.json").write_text(json.dumps(t))
+    (qd / "test.py").write_text("import pathlib\nd = pathlib.Path(%r)\n# HOLE: %s\n%s\nprint('PASS t_card' if (d / 'built').exists() else "
+                                "'FAIL t_card: the card still says Nothing planned')\n" % (str(d), hole, extra))
+
+
+async def _fb_flow622(self) -> str:
+    """The front capped, no Claude: her QA tests' review. Round 1 flags her sealed tests; she changes them and they're sealed again; round 2
+    is given round 1's points and the diff of what changed in her tests since (H343's fix brought in), and flags again: that was the last
+    round, no text goes to him for it, a third review gives no round, the hard checks still hold (a changed test is sealed again first), the
+    ready check no longer names her tests, and show lists the tests' open point under the heading."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "tests", HQ_BACKEND_FRONT_CAP="1", HQ_QA_ON="1",
+                                                                     HQ_QA_REVIEW_INPUT=str(self.tmp / "wall-fb-tests" / "seen.txt"))
+    seen = Path(env["HQ_QA_REVIEW_INPUT"])
+    label = _fb_row(jobs, "The made-up card says Nothing planned. What's wrong: it says Nothing planned. What right looks like: Nothing planned "
+                          "yet. How to check: the empty card.")
+    need(script("review.py", "add", label, _fb_fields(go_words, env), HQ_SAYSO_FAKE="yes").returncode == 0, "his words in the row")
+    py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+    script("qatests.py", "new", label)
+    _fb_tests(ws, d, label, "the card isn't named")
+    need("are sealed" in script("qatests.py", "check", label).out, "her first tests weren't sealed")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 1 and "Round 1 of 20" in r.out and "the card isn't named" in r.out, f"round 1: {r.out}")
+    need(seen.read_text().startswith("FIRST\n"), "round 1 wasn't a first review")
+    _fb_tests(ws, d, label, "the card isn't named", extra="# zq7: the card is the planning's empty card")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 2 and "aren't sealed" in r.out, f"a changed test went to its review unsealed: {r.out}")
+    need("are sealed" in script("qatests.py", "check", label).out, "her changed tests weren't sealed")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 1 and "Round 2 of 20" in r.out and "last round under the cap" in r.out, f"round 2: {r.out}")
+    again = seen.read_text().split("=====\n")[1]
+    need(again.startswith("AGAIN\n") and "The earlier review's points:\n1. the card isn't named" in again and "+# zq7" in again,
+         f"round 2 didn't see round 1's points and what changed: {again[:1500]}")
+    r = script("qatests.py", "review", label)
+    need(r.returncode == 0 and "No round" in r.out, f"a third round: {r.out}")
+    th = (ws / "HQ/team-line/thread.jsonl").read_text() + ((ws / "HQ/direct-line/thread.jsonl").read_text() if (ws / "HQ/direct-line/thread.jsonl").exists() else "")
+    need("your decision" not in th, f"the cap texted him: {th[-600:]}")
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("QA tests" not in why, f"her capped tests still hold it: {why}")
+    shown = script("sprint.py", "show", label).stdout
+    need("Open points from the front (not settled):\n- the review of her QA tests, round 2 of 2: the card isn't named" in shown, f"show: {shown[:1500]}")
+    _fb_tests(ws, d, label, "the card isn't named", extra="# zq8")
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("haven't passed the hard checks" in why, f"past the cap a changed test skipped its hard checks: {why}")
+    return ("round 2 of her tests' review got round 1's point and the diff; after it no third round, no text to him, the ready check free of "
+            "it, its point in show; a changed test still needs its hard checks")
+
+
+async def _fb_flow623(self) -> str:
+    """The front capped and the preparation fed switched off, no Claude: everything as before. Two flags keep holding the item (the ready
+    check names the review, show has no open points heading, review.py now runs round 3, her tests' third round runs as round 3 of 20); the
+    line's prep job is the old one (get item ready, no gathered start, a fresh session)."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "off", HQ_BACKEND_FRONT_CAP="0", HQ_BACKEND_FED_PREP="0")
+    label = _fb_capped_item(script, py, jobs, go_words, env)
+    why = py("import sprint\nr=[x for x in sprint.open_rows() if x['label']==%r][0]\nprint(sprint.not_ready_why(r))" % label)
+    need("the review flagged it" in why and "which card" in why, f"switched off, two flags no longer hold it: {why}")
+    need("Open points from the front" not in script("sprint.py", "show", label).stdout, "switched off, show has the open points")
+    r = script("review.py", "now", label)
+    need("Round 1 of 20" in r.out and "flagged" in r.out, f"switched off, review.py now didn't run: {r.out}")
+    need(script("sprint.py", "go", label, "prep", "on", "--said", go_words).returncode == 0, "his switch")
+    got = json.loads(py("import line\nprint(json.dumps(line.tick()))"))
+    need(any("a prep job for Moneypenny" in x for x in got), f"no prep job: {got}")
+    q = (ws / "HQ/roadmap.md").read_text().split("## The queue", 1)[1]
+    m = re.search(rf"^- Job (\d+) · ready · [^\n]*Prep of {label} \(the line\): get item {label} ready for the team", q, re.M)
+    need(m and "First understand what he asks" not in q, f"switched off, the prep's task changed: {q[-1200:]}")
+    minute()
+    prompt = (Path(env["HQ_JOB_RUN"]) / f"job-{m.group(1)}.prompt").read_text()
+    script_ = Path(env["HQ_JOB_RUN"]) / f"job-{m.group(1)}.command"
+    need("WHAT THE PROGRAM GATHERED" not in prompt and "--session-id" in script_.read_text(), f"switched off, the prep's start changed: {prompt[-800:]}")
+    need(not (Path(env["HQ_CARRYON"]) / f"prep-{label}.json").exists(), "switched off, an item's prep chat was kept")
+    # her tests: a third round runs as before
+    env["HQ_QA_ON"] = "1"
+    script("qatests.py", "new", label)
+    for k, extra in enumerate(("", "# one", "# two")):
+        _fb_tests(ws, d, label, "the card isn't named", extra=extra)
+        need("are sealed" in script("qatests.py", "check", label).out, f"her tests {k + 1} weren't sealed")
+        r = script("qatests.py", "review", label)
+        need(r.returncode == 1 and f"Round {k + 1} of 20" in r.out and "cap" not in r.out, f"switched off, round {k + 1}: {r.out}")
+    return "switched off: two flags still hold it, no heading, round 3 by now and of her tests, the old prep job and start"
+
+
+def _fb_prep_started(env, ws, py, minute, state, label):
+    """The line's one prep job for LABEL, queued and started by the routine's minute: (n, prompt, command script)."""
+    got = json.loads(py("import line\nprint(json.dumps(line.tick()))"))
+    need(any(f"{label}: a prep job for Moneypenny" in x for x in got), f"no prep job: {got}")
+    q = (ws / "HQ/roadmap.md").read_text().split("## The queue", 1)[1]
+    n = [x for x in re.findall(rf"^- Job (\d+) · ready · [^\n]*Prep of {label} \(the line\)", q, re.M)][-1]
+    res = minute()
+    need(state(n).startswith("running"), f"her prep job didn't start: {state(n)} {res['log'][-4:]}")
+    run = Path(env["HQ_JOB_RUN"])
+    return n, (run / f"job-{n}.prompt").read_text(), (run / f"job-{n}.command").read_text()
+
+
+async def _fb_flow624(self) -> str:
+    """The preparation fed, no Claude: a prep job's start holds the substance. On a throwaway HQ, an item quoting his line on the team line,
+    naming a real job (its run log there) and a file, flagged once by its review: the line's prep job's task reads understand and prepare,
+    and its first prompt holds the item's full text, his quoted line with where and when and the lines around it (the agent's answer too),
+    the job's log line and the file's lines, and the review's round 1 finding; an item with none of his words found says so first."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "fed", HQ_BACKEND_FED_PREP="1", HQ_BACKEND_FRONT_CAP="1")
+    run = Path(env["HQ_JOB_RUN"])
+    (run / "job-4242.stream.log").write_text("job 4242: headless run started\nsays: zq5 the card was read from the state file, not the page\n")
+    (ws / "HQ/zq-case.md").write_text("zq6 the real card as he saw it: Nothing planned\n")
+    his = "The made-up card keeps saying Nothing planned, it should say Nothing planned yet please."
+    label = _fb_row(jobs, f'The made-up card says Nothing planned. His words: "{his}" What\'s wrong: it says Nothing planned (the real case: job '
+                          f'4242, and HQ/zq-case.md). What right looks like: Nothing planned yet. How to check: the empty card. HOLE: which card.')
+    py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+    need(script("sprint.py", "go", label, "prep", "on", "--said", go_words).returncode == 0, "his switch")
+    n, prompt, cmd = _fb_prep_started(env, ws, py, minute, state, label)
+    need(f"Prep of {label} (the line): prepare item {label} for the team" in prompt and "First understand what he asks and why" in prompt
+         and "Never send it to the team" in prompt, f"the prep's task: {prompt[:1500]}")
+    fed = prompt.split("WHAT THE PROGRAM GATHERED FOR THIS ITEM", 1)
+    need(len(fed) == 2, f"no gathered start: {prompt[-1500:]}")
+    fed = fed[1]
+    need("1. THE ITEM AS IT STANDS" in fed and "What right looks like: Nothing planned yet" in fed, f"the item's text: {fed[:1500]}")
+    words = fed.split("2. HIS OWN WORDS", 1)[1].split("3. THE REAL CASES", 1)[0]
+    need(f'"{his}"' in words and "where: HQ/team-line" in words and "→ He (" in words
+         and "The agent (" in words and "I'll put it on the planning as a bug" in words and "FIRST TO SETTLE" not in fed,
+         f"his words, with where and when and the lines around: {words[:1500]}")
+    cases = fed.split("3. THE REAL CASES", 1)[1].split("4. EVERY FINDING", 1)[0]
+    need("job 4242" in cases and "zq5 the card was read from the state file" in cases and "zq6 the real card" in cases, f"the real cases: {cases[:1500]}")
+    found = fed.split("4. EVERY FINDING", 1)[1]
+    need("round 1" in found and "flagged: which card" in found, f"the findings so far: {found[:1500]}")
+    need(len(fed) < 41000, f"the gathered start isn't bounded: {len(fed)}")
+    rec = json.loads((Path(env["HQ_CARRYON"]) / f"prep-{label}.json").read_text())
+    need(rec["n"] == int(n) and rec["session"] in cmd and "--session-id" in cmd, f"the item's prep chat wasn't kept: {rec} {cmd[-300:]}")
+    # an item with none of his words found: that first (the same start text tick.start adds)
+    two = _fb_row(jobs, "The weather tile repeats its unit. What's wrong: Celsius twice. What right looks like: once. How to check: the tile.")
+    p2 = py("import prepfeed\nprint(prepfeed.start_text(%r))" % two)
+    need(p2.split("1. THE ITEM", 1)[0].count("FIRST TO SETTLE: none of his own words for " + two) == 1, f"no words of his, not said first: {p2[:800]}")
+    return ("the prep's task reads understand and prepare; its start holds the item, his line with where, when and the lines around, the job's "
+            "log and the file, and round 1's finding, bounded; no words of his is said first")
+
+
+async def _fb_flow625(self) -> str:
+    """The preparation fed, no Claude: one preparation in one chat. Her first prep of an item ends; the review flags it again on new words;
+    the line's next prep starts as a resume of that same chat (the runner is asked --resume with its session), its message the new finding;
+    when the chat's transcript is gone the next one is a fresh chat with the whole gathered start and why; a chat whose context is too full
+    is not picked up either."""
+    ws, env, d, script, py, jobs, minute, state, go_words = _fb_env(self, "chat", HQ_BACKEND_FED_PREP="1", HQ_BACKEND_FRONT_CAP="0")
+    rm = ws / "HQ/roadmap.md"
+    label = _fb_row(jobs, "The made-up card says Nothing planned. What's wrong: it says Nothing planned. What right looks like: Nothing planned yet. "
+                          "How to check: the empty card. HOLE: which card.")
+    py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+    need(script("sprint.py", "go", label, "prep", "on", "--said", go_words).returncode == 0, "his switch")
+    n1, p1, c1 = _fb_prep_started(env, ws, py, minute, state, label)
+    sid = json.loads((Path(env["HQ_CARRYON"]) / f"prep-{label}.json").read_text())["session"]
+    chats = Path(env["HQ_CLAUDE_PROJECTS"]) / re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(ws))
+    chats.mkdir(parents=True, exist_ok=True)
+    tr = chats / f"{sid}.jsonl"
+    usage = lambda k: json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}],  # noqa: E731
+                                                                   "usage": {"input_tokens": 10, "cache_read_input_tokens": k, "output_tokens": 50}}}) + "\n"
+    tr.write_text(usage(30000))
+    jobs("done", n1)
+
+    def flag_again(hole):
+        line = next(x for x in rm.read_text().split("\n") if f"| {label} " in x)
+        rm.write_text(rm.read_text().replace(line, re.sub(r"HOLE: [^.|]+\.", f"HOLE: {hole}.", line), 1))
+        py("import review\nreview.tick(start=False)\nreview.review_run(%r)" % label)
+
+    flag_again("which corner of the card")
+    n2, p2, c2 = _fb_prep_started(env, ws, py, minute, state, label)
+    need(f"--resume {sid}" in c2 and "--session-id" not in c2, f"the second prep didn't resume the item's chat: {c2[-400:]}")
+    need(p2.startswith(f"let's go again. This is job {n2}") and f"same chat you prepared it in (job {n1})" in p2
+         and "which corner of the card" in p2 and "WHAT THE PROGRAM GATHERED" not in p2, f"the continuation's message: {p2[:1500]}")
+    need(f"jobs.py\" done {n2}" in p2 or f"done {n2} as the very last step" in p2, "the continuation has no done mark")
+    rec = json.loads((Path(env["HQ_CARRYON"]) / f"prep-{label}.json").read_text())
+    need(rec["n"] == int(n2) and rec["session"] == sid and rec["first"] == int(n1), f"the item's chat record: {rec}")
+    jobs("done", n2)
+    # too full: not picked up
+    tr.write_text(usage(30000) + usage(150000))
+    flag_again("which edge of the card")
+    n3, p3, c3 = _fb_prep_started(env, ws, py, minute, state, label)
+    need("--session-id" in c3 and f"--resume {sid}" not in c3 and "too full" in p3 and "WHAT THE PROGRAM GATHERED" in p3,
+         f"a full chat was picked up again: {c3[-300:]} {p3.split('WHAT THE PROGRAM', 1)[-1][:400]}")
+    jobs("done", n3)
+    # gone: a fresh chat with the whole gathered start, and why
+    sid3 = json.loads((Path(env["HQ_CARRYON"]) / f"prep-{label}.json").read_text())["session"]
+    need(sid3 != sid, "the fresh chat kept the old session")
+    flag_again("which side of the card")
+    n4, p4, c4 = _fb_prep_started(env, ws, py, minute, state, label)
+    need("--session-id" in c4 and "isn't on this computer any more" in p4 and "1. THE ITEM AS IT STANDS" in p4
+         and "which side of the card" in p4, f"the fallback: {c4[-300:]} {p4.split('WHAT THE PROGRAM', 1)[-1][:600]}")
+    # held by the usage line, its own chat gone: started again fresh, with the whole gathered start too
+    py("import jobs as q, carryon\nwith q.locked():\n    text, js, on = q.read()\n    j = [x for x in js if x['n'] == %d][0]\n"
+       "    j['state'] = 'held: by the usage line'\n    q.write(text, js, on)\ncarryon.on_held(%d, text)" % (int(n4), int(n4)))
+    res = minute()
+    need(state(n4).startswith("running"), f"the held prep didn't start again: {state(n4)} {res['log'][-3:]}")
+    p5 = (Path(env["HQ_JOB_RUN"]) / f"job-{n4}.prompt").read_text()
+    need("stopped by the usage line" in p5 and "WHAT THE PROGRAM GATHERED" in p5 and "(A fresh chat:" in p5, f"a held prep started fresh unfed: {p5[-900:]}")
+    return ("the second prep resumes the item's chat with the new finding as its message; a too-full chat, a gone one and a held one whose "
+            "chat is gone each get a fresh chat with the whole gathered start and why")
+
+
+for _n in (620, 621, 622, 623, 624, 625):
+    setattr(Run, f"flow{_n}", globals()[f"_fb_flow{_n}"])
+FLOWS.update({
+    620: ("FB-front: the front capped: two flags on the item's review, then it goes on: no third round, its open point in show and in the build's first prompt", False, "flow620"),
+    621: ("FB-front: the front capped: past the cap a point only he can answer still holds the item for him", False, "flow621"),
+    622: ("FB-front: the front capped: her tests' review round 2 sees round 1's points and the diff; then no third round, no text, the hard checks still hold", False, "flow622"),
+    623: ("FB-front: both switches off: two flags still hold the item, round 3 runs, the prep's task and start as before", False, "flow623"),
+    624: ("FB-front: the preparation fed: the prep's start holds the item, his words with where and when, the real cases and the findings so far", False, "flow624"),
+    625: ("FB-front: one preparation in one chat: the next prep resumes the item's chat; too full or gone, a fresh fed start says why", False, "flow625"),
+})
+FLOW_LIMITS.update({620: 420, 621: 300, 622: 600, 623: 600, 624: 300, 625: 420})
+# == end of FB-front's block ==
 
 
 def limit_of(n: int) -> int:

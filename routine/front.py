@@ -25,6 +25,8 @@ before the history was kept counts its flagged `now` rounds of the road, or (roa
 
 With the switch off nothing here holds or opens anything: every function below says "not capped".
 """
+from __future__ import annotations
+
 import os
 import sys
 
@@ -39,7 +41,9 @@ BUILD_SENTENCE = ("These were raised and not settled before the build; settle ea
 def cap_on() -> bool:
     """The backend switch front_cap (app/backend.py)."""
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+        app = os.path.join(os.path.dirname(HERE), "app")
+        if app not in sys.path:
+            sys.path.insert(0, app)
         import backend
         return backend.on("front_cap")
     except Exception:

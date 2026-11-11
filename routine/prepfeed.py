@@ -29,6 +29,8 @@ So, held by the program (tick.start reads this for every prep job, "Prep of LABE
 The record of an item's prep chat is this computer's own, next to the carry-on records: carryon.DIR/prep-LABEL.json {session, n, at,
 host, mode}. With the switch off nothing here runs: the prep starts as before.
 """
+from __future__ import annotations
+
 import glob
 import json
 import os
@@ -60,7 +62,9 @@ PREP_CHAT_BYTES = 8_000_000  # a transcript this big is too full whatever its la
 def fed_on() -> bool:
     """The backend switch fed_prep (app/backend.py)."""
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "app"))
+        app = os.path.join(os.path.dirname(HERE), "app")
+        if app not in sys.path:
+            sys.path.insert(0, app)
         import backend
         return backend.on("fed_prep")
     except Exception:

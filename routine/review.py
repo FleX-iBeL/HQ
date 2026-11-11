@@ -1728,7 +1728,8 @@ def flagged(rows=None):
     """[(row, state)] for the flagged open rows, in the planning's order."""
     rows = S.open_rows() if rows is None else rows
     st = states(rows)
-    return [(r, st[r["label"]]) for r in rows if st[r["label"]]["state"] == "flagged"]
+    rs = _state()[1].get("rows") or {}  # the front capped: a row past its rounds goes on as it is, nothing to raise first
+    return [(r, st[r["label"]]) for r in rows if st[r["label"]]["state"] == "flagged" and not capped_e(r["label"], rs.get(r["label"]) or {})]
 
 
 def flag_words(rows=None):

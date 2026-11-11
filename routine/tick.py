@@ -302,11 +302,13 @@ def start(job):
     plan = carryon.plan(job, roadmap, FOLDER)
     cycle = cycles.is_cycle_job(job)  # H298: an agent's own run: her prompt, a fresh session, the box, always headless
     fed, fresh_why = None, None  # the preparation fed (routine/prepfeed.py): a prep job's item, and why its own chat isn't picked up
-    if not cycle and plan["mode"] == "new":
+    if not cycle and plan["mode"] in ("new", "fresh"):  # a held prep whose own chat is gone ("fresh") gets the whole fed start too
         try:
             import prepfeed
             fed = prepfeed.label_of(job)
-            if fed:  # one preparation in one chat: the item's earlier prep chat carries on, when it still can
+            if fed and plan["mode"] == "fresh":
+                fresh_why = plan.get("why")
+            elif fed:  # one preparation in one chat: the item's earlier prep chat carries on, when it still can
                 got = prepfeed.chat_to_continue(fed, FOLDER)
                 if got.get("session"):
                     plan = {"mode": "continue", "session": got["session"], "prev": got["rec"]}
