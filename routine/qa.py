@@ -297,7 +297,13 @@ def on_done(jobs: list, j: dict, text: str, kind: str | None) -> dict | None:
     if kind not in ("build", "bigbuild") or is_qa(j["text"]) or is_prep(j["text"]):  # H342: a prep builds nothing
         return None
     label = (j.get("item") or {}).get("label") or job_label(j["text"])  # F103: the carried id's row, never a sentence again
-    if not label or not gated(label, text) or _waiting_for(jobs, label, qa=True):
+    if not label or not gated(label, text):
+        return None
+    import wholebuild  # 11 November 2026: with whole_build_review on, no QA job per item: one review over the whole build
+    if wholebuild.on():
+        print(wholebuild.on_built(j, label))
+        return None
+    if _waiting_for(jobs, label, qa=True):
         return None
     return _append(jobs, qa_text(label, f"the team finished job {j['n']} for it."), label)
 
@@ -416,6 +422,9 @@ def fail(label: str, what: str, job: int | None = None) -> str:
     mistakes.add("qa-fail", "team", what, where=f"QA job {job}" if job else "QA by hand", label=label, item=item or "")
     trail.step(item, "qa", state="failed", job=job, words=what[:300])
     open_point(label, what)
+    import wholebuild  # 11 November 2026: an item in the whole-build road goes back to its builder's chat, then one recheck, then held
+    if wholebuild.takes(label):
+        return wholebuild.on_fail(label, what, job)
     road = qatests.qa_failed(label, what.rstrip("."), job)
     n = fails_in_a_row(row)
     tell("qa-failed", f"What: {name}\nWhat's off: {what}\nNo fix went to the team by itself: the finding is back in the item as an open "
@@ -791,7 +800,10 @@ def hold(root: str | None = None, base: str = "main", tip: str = "dev", text: st
                 ms = marks(all_rows[l][0])
                 if st == "failed":
                     why = f"QA failed: {ms[-1][2].rstrip('.')}"
-                    if fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
+                    import wholebuild
+                    if (wholebuild.load()["items"].get(l) or {}).get("stage") == "held" and wholebuild.on():
+                        why += " (held after the whole-build review's one fix round; it waits for him)"
+                    elif fails_in_a_row(all_rows[l][0]) >= MAX_FAILS:
                         why += f" ({MAX_FAILS} times; it waits for a call)"
                 elif said and not said["tag"]:
                     why = said["why"]
@@ -868,7 +880,7 @@ def ship_whole(label: str, row: str) -> list[str]:
     return out
 
 
-def prompt_extra(text: str) -> str:
+def prompt_extra(text: str, n: int | None = None) -> str:
     """The QA job's first prompt gets Moneypenny's character and craft (F56). A build of a piece of a feature gets
     the in-pieces rule (F56, piece 2)."""
     if (text or "").startswith("Prep of "):  # the line (5 November 2026): a prep job runs as Moneypenny too
@@ -902,6 +914,10 @@ def prompt_extra(text: str) -> str:
         body = f"Your character: {a['personality']}\nHow you work:\n{a.get('craft', '')}\n"
     except Exception as e:
         body = f"(Her character couldn't be loaded here: {e!r}. Work as head of development: the definition of done is the gate.)\n"
+    import wholebuild
+    if wholebuild.is_review(text):  # 11 November 2026: the whole-build review, her character, then what the program put together
+        return ("\n\nThis is a QA job (F56) over the whole build. You are Moneypenny, head of development, checking the team's work "
+                "before it reaches anyone; not done is not done.\n" + body + wholebuild.prompt(text, n))
     return ("\n\nThis is a QA job (F56). You are Moneypenny, head of development, checking the team's work before it "
             "reaches anyone; not done is not done.\n" + body
             + "A feature built in pieces (F56, piece 2): from its first piece it's in app/features-in-pieces.json, so "
@@ -1075,6 +1091,8 @@ def main(argv: list[str]) -> int:
         trail.step(item_id(label), "qa", state="passed", job=job)
         import qatests
         qatests.qa_passed(label)
+        import wholebuild
+        wholebuild.on_pass(label, job)
         print(f"QA passed for {label}, in its row; the release may take it.")
         for lab in close_replaced(label):
             print(f"{lab} is closed as replaced by {label}.")

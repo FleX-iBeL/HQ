@@ -1614,8 +1614,17 @@ def main(argv):
                     print(f"(couldn't queue its QA: {e!r})", file=sys.stderr)
                     import routines
                     routines.bad("qa", f"QA couldn't be queued for job {j['n']}: {e!r}", every=30 * 86400)  # F102
+            wb_said = ""
+            if cmd == "done" and not was.startswith("done"):
+                try:  # 11 November 2026: the whole-build review's end: an item it left without a verdict goes into the next one, once
+                    import wholebuild
+                    wb_said = wholebuild.review_done(j)
+                except Exception as e:
+                    print(f"(the whole-build review's end wasn't settled: {e!r})", file=sys.stderr)
             write(text, jobs, on)
             print(show(j))
+            if wb_said:
+                print(wb_said)
             if cmd == "done" and not was.startswith("done") and report_of(j):  # F145: its report's place, to him on her line
                 print(tell_report(j))
             if qa_job:

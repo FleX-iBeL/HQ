@@ -195,6 +195,13 @@ def next_step(row, g, jobs, now=None, e=None):
                 return "split", f"job {j['n']} is red only on {len(other)} check(s) unrelated to {label}"
             return "rerun", f"job {j['n']} ended without a green record"
         return "wait", f"with the team: job {j['n']} ({j['state']})"
+    try:  # 11 November 2026: built and in the whole-build road (its review, its fix in its builder's chat, its recheck, held after)
+        import wholebuild
+        wb = wholebuild.line_step(row)
+        if wb:
+            return wb
+    except Exception:
+        pass
     if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted;
         return "hold", held  # a prep of it queued before the hold doesn't hide it: wall.why_not keeps that one back
     p = prep_of(jobs, label)

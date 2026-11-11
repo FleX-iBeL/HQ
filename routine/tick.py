@@ -304,13 +304,17 @@ def start(job):
     if cycle:  # always a fresh chat: a held run's own session id is taken ("already in use"), and the run would end at once
         plan = {"mode": "new", "session": plan["session"] if plan["mode"] == "new" else str(uuid.uuid4())}
         prompt = cycles.prompt(job, cycle)
+    elif plan["mode"] == "resume" and plan.get("continues") and not carryon.load(n).get("started"):
+        import wholebuild  # 11 November 2026: the fix round of the whole-build review, in the chat that built the item
+        prompt = wholebuild.resume_prompt(n, where, plan, job)
     elif plan["mode"] == "resume":
         prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)
     else:
         prompt = (
             f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
             f"(phase L) in {where}. The job, as agreed on the call: {job['text']}"
-            + (carryon.fresh_note(n, plan) if plan["mode"] == "fresh" else "") + "\n\n"
+            + ((importlib.import_module("wholebuild").fresh_note(n, plan, job) if plan.get("continues") else carryon.fresh_note(n, plan))
+               if plan["mode"] == "fresh" else "") + "\n\n"
             f"Follow the HQ build notes, the section \"Jobs started by the routine\": they're in "
             f"{json.dumps(os.path.join(FOLDER, 'HQ', 'CLAUDE.md'))}, a big file, so read that section, not all of it. "
             # F99: a job starts without his private folder; what it needs, it reads by path.
@@ -343,7 +347,7 @@ def start(job):
             + plain_rule(n)
             + past_note
             + importlib.import_module("jobs").notes_for_prompt(job)
-            + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
+            + importlib.import_module("qa").prompt_extra(job["text"], n)  # F56: a QA job runs as Moneypenny
         )
         prompt += _steps_extra(job, plan)
     # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
@@ -2056,6 +2060,11 @@ def tick():
             log(f"line: {l}")
         routines.good("line", "Carries the items with a switch on")
     guarded("line", _line)
+    def _whole_build():  # 11 November 2026: one review over the whole build once the builds are through (main only)
+        import wholebuild
+        for l in wholebuild.minute():
+            log(f"whole build: {l}")
+    guarded("whole-build", _whole_build)
     try:  # F107: the plan in use: set once, and following what Claude Code reports
         import usagecost
         usagecost.plan_minute(log=log)

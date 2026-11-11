@@ -41243,6 +41243,305 @@ async def canary() -> str | None:
     return None
 
 
+
+# ---------- 11 November 2026: the weight at the back (routine/wholebuild.py), flows 630 to 639 ----------
+# One builder holds an item, one review over the whole build, one fix round, then held; with whole_build_review off, as before.
+# Kept in one block, numbered 630-639, so another branch adding flows next to it merges cleanly.
+
+_WB_DRIVER = r'''
+import json, os, re, subprocess, sys, time
+ROOT, D, what = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, ROOT + "/routine"); sys.path.insert(0, ROOT + "/app")
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+def run(*a, ok=True):
+    r = subprocess.run(["python3", *a], capture_output=True, text=True, cwd=ROOT)
+    if ok:
+        need(r.returncode == 0, f"{a}: {r.stdout[-600:]} {r.stderr[-900:]}")
+    return r.stdout + r.stderr
+jobs_ = lambda *a, ok=True: run(ROOT + "/routine/jobs.py", *a, ok=ok)
+qa_ = lambda *a, ok=True: run(ROOT + "/routine/qa.py", *a, ok=ok)
+import jobs as q, carryon, wholebuild as W, line as L, sprint as S, qa
+REPO = os.environ["HQ_PROOF_ROOT"]
+def git(*a):
+    return subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, check=True).stdout.strip()
+def commit(msg, f):
+    open(os.path.join(REPO, f), "a").write(msg + "\n")
+    git("add", f); git("commit", "-qm", msg)
+    return git("rev-parse", "--short=12", "HEAD")
+def queue():
+    return q.read()[1]
+def find(start):
+    return [j for j in queue() if j["text"].startswith(start)]
+def transcript(sid, tokens=40000, age=0):
+    p = os.path.join(os.environ["HQ_CLAUDE_PROJECTS"], "-made-up-folder", f"{sid}.jsonl")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w").write(json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": tokens}}}) + "\n")
+    if age:
+        os.utime(p, (time.time() - age, time.time() - age))
+    return p
+def build(label, msg, f, sid):
+    """A build of the team's for LABEL: added, running, its chat's session kept (as tick.start does), its record, done."""
+    out = jobs_("add", f"{label} on the HQ roadmap: build it as it says, push to dev with push.py", "--not-ready", "--kind", "small")
+    n = int(re.search(r"Job (\d+) is ready", out).group(1))
+    jobs_("mark", str(n), "running since 12:00")
+    carryon.save(n, {"session": sid, "started": time.time(), "mode": "new"})
+    sha = commit(msg, f)
+    os.makedirs(os.environ["HQ_PROOF_DIR"], exist_ok=True)
+    json.dump({"n": n, "label": label, "head": git("rev-parse", "HEAD"), "commits": [f"{sha} {msg}"], "named": [], "ran": 17, "passed": 17,
+               "failed": [], "green": True, "qa_tests": {"green": True, "ran": 2, "passed": 2}, "t": time.time()},
+              open(os.path.join(os.environ["HQ_PROOF_DIR"], f"job-{n}.json"), "w"))
+    said = jobs_("done", str(n))
+    return n, sha, said
+def setup():
+    os.makedirs(REPO, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", REPO], check=True)
+    git("config", "user.email", "t@t"); git("config", "user.name", "t")
+    base = commit("the code before", "a.txt")
+    git("checkout", "-qb", "dev")
+    for j in queue():
+        if not j["state"].startswith(q.FINISHED):
+            jobs_("stop", str(j["n"]), ok=False)
+    rm = os.environ["HQ_ROADMAP"]
+    t = open(rm).read()
+    rows = ('| ⬜ | F9631 The made-up count shows on the page | Made up for the whole-build review. His words: "the count should show on '
+            'the page, right where i look". Done means: the page shows the count. | |\n'
+            '| ⬜ | F9632 The made-up second thing comes back | Made up too. His words: "the second thing has to come back by itself". Done '
+            'means: it comes back. Open points from the front (not settled): whether it also comes back by day. | |\n')
+    marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+    i = t.index("## Phase F · Bugs"); k = t.index(marker, i) + len(marker)
+    open(rm, "w").write(t[:k] + rows + t[k:])
+    n1, c1, s1 = build("F9631", "F9631: the count on the page", "count.txt", "sid-builder-one")
+    n2, c2, s2 = build("F9632", "F9632: the second thing back", "back.txt", "sid-builder-two")
+    return {"base": base, "n1": n1, "n2": n2, "c1": c1, "c2": c2, "said": s1 + s2}
+def review1(st):
+    need(W.minute() == [], "the review was queued before the builds had settled")
+    got = W.minute(now=time.time() + W.SETTLE + 5)
+    need(len(got) == 1 and "queued the whole-build review 1" in got[0], f"no review queued: {got}")
+    rv = find("QA of the whole build")
+    need(len(rv) == 1, f"not one review job: {[j['text'][:60] for j in rv]}")
+    st["r1"] = rv[0]["n"]
+    return rv[0]
+
+if what in ("review", "verdicts", "recheck"):
+    st = setup()
+    need(not find("QA of F963"), "a build still got a QA job of its own: " + str([j["text"][:50] for j in find("QA of")]))
+    need("waits for the whole-build review" in st["said"], f"done didn't say it waits for the review: {st['said'][-300:]}")
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "built" and d["items"]["F9632"]["stage"] == "built", f"the items aren't built: {d['items']}")
+    need(d["items"]["F9632"]["builds"][0]["session"] == "sid-builder-two", "the builder's chat wasn't kept")
+    row = S.row_of("F9631")
+    w = L.next_step(row, {"build": {"by": "him"}}, queue())
+    need(w[0] == "wait" and "whole-build review" in w[1], f"the line would do something else with a built item: {w}")
+    jobs_("add", "F9632 on the HQ roadmap: another build of it, still waiting", "--not-ready", "--kind", "small")
+    need(W.minute(now=time.time() + 999) == [], "the review was queued while a build still waits")
+    for j in queue():
+        if j["state"] == "ready":
+            jobs_("stop", str(j["n"]))
+    rv = review1(st)
+    need(W.minute(now=time.time() + 999) == [], "a second review was queued beside the first")
+    import estimate
+    need(estimate.kind_for(rv["text"]) == "qa", f"the review isn't kind qa: {estimate.kind_for(rv['text'])}")
+    need(qa.job_label(rv["text"]) is None and not q.with_team(queue(), "F9631"), "the review's text reads as one item's job")
+    p = qa.prompt_extra(rv["text"], rv["n"])
+    for words in ("You are Moneypenny", "=== F9631 (first look)", "=== F9632 (first look)", "the count should show on the page, right where i look",
+                  "the second thing has to come back by itself", "whether it also comes back by day", f"{st['c1']} F9631: the count on the page",
+                  f"{st['c2']} F9632: the second thing back", "green on", "her sealed tests green (2 of 2)", f"--job {rv['n']}",
+                  "the quick set ONCE", "already red before these builds", st["base"][:7], "One verdict PER ITEM".lower()):
+        need(words.lower() in p.lower(), f"the review's first prompt lacks: {words}")
+    need(p.count("Open points from the front (not settled): none") == 1, "the item without the front's points isn't said to have none")
+    if what == "review":
+        print("OK two builds, no QA job each, one review over both with their words, the front's points, commits and records"); sys.exit(0)
+    # The review runs and gives a verdict per item.
+    jobs_("mark", str(rv["n"]), "running since 13:00")
+    qa_("pass", "F9631", "the count shows", "--job", str(rv["n"]), "--example", "the page shows the count", "--ran", "the page on a copy",
+        "--got", "the count, 3", "--compared", "counts on the page, 3 of 3")
+    need(qa.state("F9631") == "passed" and W.load()["items"]["F9631"]["stage"] == "passed", "the pass didn't land as a QA mark and a stage")
+    out = qa_("fail", "F9632", "the second thing doesn't come back after a restart", "--job", str(rv["n"]))
+    need("goes to the chat that built it" in out, f"the fail didn't go to the builder: {out}")
+    need(qa.state("F9632") == "failed", "the fail isn't a QA mark")
+    fx = find("Fix for F9632 after the whole-build review")
+    need(len(fx) == 1 and fx[0]["state"] == W.FIX_STATE and not find("Fix for F9632 (F56)"), f"not one continuation: {[ (j['state'], j['text'][:70]) for j in fx]}")
+    need("doesn't come back after a restart" in fx[0]["text"] and f"chat of job {st['n2']}" in fx[0]["text"], "the continuation lacks the finding or its builder")
+    import qatests
+    need(qatests.fix_road("F9632") is None, "the old road of a new item opened on the first fail")
+    rec = carryon.load(fx[0]["n"])
+    need(rec.get("session") == "sid-builder-two" and rec.get("continues") == st["n2"], f"the continuation doesn't hold the builder's chat: {rec}")
+    w = L.next_step(S.row_of("F9632"), {"build": {"by": "him"}}, queue())
+    need(w[0] == "wait", f"the line would send the failed item again: {w}")
+    # The builder's chat continued; else a fresh job, fully fed.
+    tp = transcript("sid-builder-two")
+    plan = carryon.plan(fx[0], open(os.environ["HQ_ROADMAP"]).read())
+    need(plan["mode"] == "resume" and plan["session"] == "sid-builder-two", f"the builder's chat isn't continued: {plan}")
+    rp = W.resume_prompt(fx[0]["n"], "tmux", plan, fx[0])
+    need("doesn't come back after a restart" in rp and f"job {fx[0]['n']}" in rp and f"your own chat from job {st['n2']}" in rp, "the resume message lacks the finding or the job")
+    for tokens, age, why in ((W.CONTEXT_MOST + 1, 0, "context is full"), (100, (W.CHAT_HOURS + 1) * 3600, "older than"), (None, 0, "isn't on this computer")):
+        if tokens is None:
+            os.remove(tp)
+        else:
+            transcript("sid-builder-two", tokens, age)
+        plan = carryon.plan(fx[0], "")
+        need(plan["mode"] == "fresh" and why in (plan.get("why") or ""), f"a chat that can't be continued ({why}) still resumes: {plan}")
+    fn = W.fresh_note(fx[0]["n"], plan, fx[0])
+    for words in ("the second thing has to come back by itself", f"{st['c2']} F9632: the second thing back", "doesn't come back after a restart"):
+        need(words in fn, f"the fresh job's first prompt lacks: {words}")
+    # The release gate reads the marks: F9631 goes, F9632 is held.
+    h = qa.hold(root=REPO, base="main", tip="dev")
+    need(h["taken"] == ["F9631"] and [x["label"] for x in h["held"]] == ["F9632"] and "QA failed" in h["held"][0]["why"], f"the gate: {h}")
+    jobs_("done", str(rv["n"]))
+    need(W.load()["items"]["F9632"]["stage"] == "fixing", "the review's end changed the item in its fix")
+    tr = open(os.path.join(os.environ["HQ_WORKSPACE"], "HQ", "trail.jsonl")).read()
+    need(tr.count('"qa"') >= 2 and '"failed"' in tr and '"passed"' in tr, "the trail lacks the per-item verdicts")
+    if what == "verdicts":
+        print("OK a verdict per item as QA marks the gate reads; the fail back to the builder's chat, fresh and fully fed when it can't"); sys.exit(0)
+    # The fix lands; one recheck over only the failed item; still failing: held, one text, no third round.
+    n3 = fx[0]["n"]
+    jobs_("mark", str(n3), "running since 14:00")
+    c3 = commit("F9632: it comes back after a restart", "back.txt")
+    json.dump({"n": n3, "label": "F9632", "head": git("rev-parse", "HEAD"), "commits": [f"{c3} F9632: it comes back after a restart",
+               f"{st['c2']} F9632: the second thing back"], "ran": 17, "passed": 17, "failed": [], "green": True, "t": time.time()},
+              open(os.path.join(os.environ["HQ_PROOF_DIR"], f"job-{n3}.json"), "w"))
+    jobs_("done", str(n3))
+    need(W.load()["items"]["F9632"]["stage"] == "fixed", "the fix done didn't make it fixed")
+    need(not find("QA of F9632"), "the fix got a QA job of its own")
+    got = W.minute(now=time.time() + W.SETTLE + 5)
+    rv2 = [j for j in find("QA of the whole build (review 2)")]
+    need(len(rv2) == 1 and "F9632" in rv2[0]["text"] and "F9631" not in rv2[0]["text"] and "Rechecks" in rv2[0]["text"], f"not one recheck over F9632 alone: {got}")
+    p2 = qa.prompt_extra(rv2[0]["text"], rv2[0]["n"])
+    need("=== F9632 (RECHECK" in p2 and "doesn't come back after a restart" in p2 and "Files the fix touched: back.txt" in p2 and "=== F9631" not in p2,
+         "the recheck's prompt lacks the earlier finding or the fix's files, or holds the passed item")
+    jobs_("mark", str(rv2[0]["n"]), "running since 15:00")
+    out = qa_("fail", "F9632", "after a restart it still doesn't come back", "--job", str(rv2[0]["n"]))
+    need("held" in out and "no third round" in out, f"the second fail wasn't held: {out}")
+    need(len(find("Fix for F9632")) == 1, "a third round was started")
+    e = W.load()["items"]["F9632"]
+    need(e["stage"] == "held" and len(e.get("told") or []) == 1, f"not held with one text: {e.get('stage')} {e.get('told')}")
+    w = L.next_step(S.row_of("F9632"), {"build": {"by": "him"}}, queue())
+    need(w[0] == "hold" and "one fix round" in w[1], f"the line would take the held item on: {w}")
+    jobs_("done", str(rv2[0]["n"]))
+    need(W.minute(now=time.time() + 999) == [] and not find("QA of the whole build (review 3)"), "a third review came by itself")
+    need(qatests.fix_road("F9632"), "the held item has no road for when the hold is lifted")
+    h = qa.hold(root=REPO, base="main", tip="dev")
+    need("one fix round" in qa.hold_words(h), f"the release doesn't say it's held after its fix round: {qa.hold_words(h)}")
+    texts = ""
+    for root_, _, fs in os.walk(os.environ["HQ_DIRECT_DIR"]):
+        for f_ in fs:
+            texts += open(os.path.join(root_, f_), errors="replace").read()
+    need(texts.count("still fails after its one fix round") <= 1, "more than one text about the hold")
+    print("OK the fix lands, one recheck over the failed item only, still failing it's held with one text, no third round"); sys.exit(0)
+
+if what == "missed":
+    st = setup()
+    rv = review1(st)
+    jobs_("mark", str(rv["n"]), "running since 13:00")
+    jobs_("done", str(rv["n"]))
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "built" and d["items"]["F9631"]["missed"] == 1, "an item left without a verdict isn't in the next review")
+    W.minute(now=time.time() + W.SETTLE + 5)
+    rv2 = find("QA of the whole build (review 2)")
+    need(len(rv2) == 1 and "F9631" in rv2[0]["text"] and "F9632" in rv2[0]["text"], "the next review doesn't take them again")
+    import machalf
+    os.makedirs(os.path.dirname(machalf.STORE), exist_ok=True)
+    json.dump([{"id": "x1", "label": "F9632", "state": "laptop-off", "job": rv2[0]["n"], "flow": 61, "commit": "abc"}], open(machalf.STORE, "w"))
+    jobs_("mark", str(rv2[0]["n"]), "running since 14:00")
+    jobs_("done", str(rv2[0]["n"]))
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "held" and len(d["items"]["F9631"]["told"]) == 1, "twice without a verdict isn't held with one text")
+    need(d["items"]["F9632"]["stage"] == "mac", "an item waiting for the laptop's half was counted as missed")
+    W.on_pass("F9632", rv2[0]["n"])
+    need(W.load()["items"]["F9632"]["stage"] == "passed", "the laptop's pass didn't end its road")
+    print("OK a review without a verdict takes the item once more, then holds it; the laptop's half waits, and its pass counts"); sys.exit(0)
+
+if what == "off":
+    st = setup()
+    need(len(find("QA of F9631")) == 1 and len(find("QA of F9632")) == 1, "with the switch off a build didn't get its QA job")
+    need(W.minute(now=time.time() + 999) == [] and not find("QA of the whole build"), "with the switch off a whole-build review came")
+    need(L.next_step(S.row_of("F9631"), {}, queue())[1].startswith("with the team"), "the line doesn't read the QA job as before")
+    qa_("fail", "F9631", "off as before")
+    import qatests
+    need(not find("Fix for F9631") and qatests.fix_road("F9631"), "with the switch off a fail didn't open the road of a new item")
+    import backend
+    from pathlib import Path
+    ws = Path(D) / "backend-ws"
+    (ws / "HQ").mkdir(parents=True, exist_ok=True)
+    (ws / "HQ/backend.json").write_text('{"on": ["briefing"]}')
+    os.environ.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
+    need(backend.on("whole_build_review", ws) and backend.on("briefing", ws) and not backend.on("handover", ws), "whole_build_review isn't on by default")
+    os.environ["HQ_BACKEND"] = str(ws / "HQ/backend.json")
+    backend.switch("whole_build_review", False)
+    need(not backend.on("whole_build_review") and backend.on("briefing"), "off doesn't turn it off, or turned another off")
+    backend.switch("whole_build_review", True)
+    need(backend.on("whole_build_review") and "off" not in json.loads((ws / "HQ/backend.json").read_text()), "on again doesn't clear it")
+    print("OK with the switch off a QA job per build and the road of a new item, as before; on by default, and turned off and on"); sys.exit(0)
+print("FAIL unknown " + what); sys.exit(1)
+'''
+
+
+def _wb_run(self, name: str, what: str, on: bool = True) -> str:
+    ws, env, d = self._wall_env(f"wb{name}", hour=23)
+    env = {**env, "HQ_PROOF_ROOT": str(d / "repo"), "HQ_MAC_HALF_FILE": str(d / "mac-half.json"), "HQ_WHOLE_BUILD_STATE": str(d / "whole-build.json"),
+           "HQ_NO_WALL": "1"}
+    if on:
+        env["HQ_BACKEND_WHOLE_BUILD_REVIEW"] = "1"
+    else:
+        env.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
+    drv = d / "wb-driver.py"
+    drv.write_text(_WB_DRIVER)
+    import subprocess as _sp
+    r = _sp.run([sys.executable, str(drv), str(ROOT), str(d), what], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=600)
+    out = (r.stdout + r.stderr).strip()
+    ok = [ln for ln in out.splitlines() if ln.startswith("OK ")]
+    need(r.returncode == 0 and ok, f"{what}: {out[-1500:]}")
+    return ok[-1][3:]
+
+
+async def _wb_flow630(self) -> str:
+    """11 November 2026, no Claude: two builds done on a throwaway HQ get no QA job each; the line waits on them; no review while a build
+    still waits or before the builds settle; then ONE review job, kind qa, whose first prompt holds both items whole, his words, the
+    front's open points when there are some (and says none when not), the build's commits, its record and her sealed tests, and the base."""
+    return _wb_run(self, "630", "review")
+
+
+async def _wb_flow631(self) -> str:
+    """11 November 2026, no Claude: the review's verdicts land as QA marks per item (pass and fail), the release gate takes the passed item
+    and holds the failed one; the fail goes to the builder's own chat as a continuation with the finding, no road of a new item; that chat is
+    resumed, and when it can't be (its context full, too old, not here) the job starts fresh with the item, the commits and the finding."""
+    return _wb_run(self, "631", "verdicts")
+
+
+async def _wb_flow632(self) -> str:
+    """11 November 2026, no Claude: the fix lands (no QA job of its own), one recheck runs over only the failed item, with its earlier
+    finding and the files the fix touched; failing again it's held: no third round, one text to him, the line holds it, the release says
+    why, and the old road of a new item waits for when the hold is lifted."""
+    return _wb_run(self, "632", "recheck")
+
+
+async def _wb_flow633(self) -> str:
+    """11 November 2026, no Claude: with whole_build_review off a build gets its QA job and a fail opens the road of a new item, as before;
+    the switch is on by default (an "off" list in backend.json), and turns off and on without touching the other switches."""
+    return _wb_run(self, "633", "off", on=False)
+
+
+async def _wb_flow634(self) -> str:
+    """11 November 2026, no Claude: a review that ends without a verdict for an item takes it into the next review once; twice, it's held
+    with one text; an item whose only open part waits for the laptop (F216) waits, and the laptop's pass ends its road."""
+    return _wb_run(self, "634", "missed")
+
+
+for _n in range(630, 635):
+    setattr(Run, f"flow{_n}", globals()[f"_wb_flow{_n}"])
+Run._wb_run = _wb_run
+FLOWS.update({
+    630: ("Whole build (1): builds done get no QA job each; one review over all of them, its first prompt with each item whole, his words, the front's points, commits and records", False, "flow630"),
+    631: ("Whole build (2): a verdict per item as QA marks the release gate reads; a fail back to the builder's own chat, fresh and fully fed when it can't be continued", False, "flow631"),
+    632: ("Whole build (3): the fix lands, one recheck over only the failed item; still failing it's held, one text, no third round", False, "flow632"),
+    633: ("Whole build (4): with whole_build_review off, a QA job per build as before; the switch is on by default and turns off and on", False, "flow633"),
+    634: ("Whole build (5): a review without a verdict takes the item once more, then holds it; the laptop's half waits and its pass counts", False, "flow634"),
+})
+# ---------- end of the whole-build block (630-639) ----------
+
+
 async def main(args) -> bool:
     chosen = sorted(int(x) for x in args.only.split(",")) if args.only else sorted(FLOWS)
     chosen = [n for n in chosen if str(n) not in args.skip.split(",")]  # F101: the night's Mac-only ones

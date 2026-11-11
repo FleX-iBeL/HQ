@@ -123,6 +123,16 @@ def plan(job, text, folder=None):
         return {"mode": "new", "session": str(uuid.uuid4())}
     step = rec.get("step") or step_from_roadmap(n, text)
     out = {"step": step, "held": rec.get("held", "")}
+    if rec.get("continues"):  # 11 November 2026: a fix after the whole-build review, in the chat of the job that built the item
+        out["continues"] = rec["continues"]
+        if "started" in rec:  # it ran already (held by the usage line since): its own chat now, as any held job
+            pass
+        else:
+            import wholebuild
+            why = wholebuild.chat_problem(rec.get("session"), folder)
+            if not why:
+                return dict(out, mode="resume", session=rec["session"])
+            return dict(out, mode="fresh", session=str(uuid.uuid4()), why=why)
     if rec.get("session") and chat_there(rec["session"], folder):
         return dict(out, mode="resume", session=rec["session"])
     why = ("its earlier chat isn't on this computer (it ran on the other one, or before this was built)"
@@ -260,7 +270,7 @@ BIG_MINUTES = 40
 def started(n, p):
     """The routine started job n as planned: keep its chat's id; the hold is used up."""
     save(n, {"session": p["session"], "started": time.time(), "mode": p["mode"],
-             **({"step": p["step"]} if p.get("step") else {})})
+             **({"step": p["step"]} if p.get("step") else {}), **({"continues": p["continues"]} if p.get("continues") else {})})
 
 
 def resume_prompt(n, where, p, text_of_job, past_note=""):

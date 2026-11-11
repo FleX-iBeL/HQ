@@ -291,7 +291,7 @@ def _sure(t):
     m = _CYCLE.match(t) or _STEP.match(t)  # H298: an agent's own run
     if m:
         return ("cycle-" if t.startswith("agent cycle") else "step-") + m.group(1)
-    if re.search(r"^qa of [hf]\d+", t):  # F56: the QA job qa.py queues
+    if re.search(r"^qa of [hf]\d+|^qa of the whole build\b", t):  # F56: the QA job qa.py queues; the whole-build review (11 November 2026)
         return "qa"
     if re.search(r"(^|: )(do |build )?release hq \d|^(h\d+ on the (hq )?roadmap: )?release (hq \d|hq now|now)\b"
                  r"|^h\d+(?: and h\d+)*, the daily release\b|^h\d+ on the (hq )?roadmap, once, now, then the release\b", t):

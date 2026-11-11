@@ -35,7 +35,12 @@ SWITCHES = {
     "handover": "With one-way sync, the backup hands what it holds that the main doesn't (its own changes, its "
                 "conflict copies) to the main every minute, and takes the main's copy back once all of it is there "
                 "(F115). Off: it waits, said on the sync line; `sync.py handover` does it once by hand.",
+    "whole_build_review": "One builder holds an item from start to end, and one review runs over the whole build once the "
+                          "builds are through, in place of a QA job per item; a fail goes back to the builder's own chat, "
+                          "then one recheck, then it's held (routine/wholebuild.py). Off: a QA job per built item, as before.",
 }
+# 11 November 2026: switches that are on unless turned off (the file's "off" list), so an HQ has them without a data change.
+DEFAULT_ON = ("whole_build_review",)
 
 
 def _folder() -> Path:
@@ -66,22 +71,30 @@ def on(name: str, folder: Path | None = None) -> bool:
     env = os.environ.get(f"HQ_BACKEND_{name.upper()}")
     if env in ("0", "1"):
         return env == "1"
+    if name in DEFAULT_ON:
+        return name not in (_read(folder).get("off") or [])
     return name in (_read(folder).get("on") or [])
 
 
 def listing() -> list[dict]:
     d = _read()
-    return [{"id": k, "on": on(k), "set": k in (d.get("on") or []), "what": v} for k, v in SWITCHES.items()]
+    return [{"id": k, "on": on(k), "set": k in (d.get("off" if k in DEFAULT_ON else "on") or []), "what": v} for k, v in SWITCHES.items()]
 
 
 def switch(name: str, want: bool) -> dict:
     if name not in SWITCHES:
         raise KeyError(name)
     d = _read()
-    now = [k for k in (d.get("on") or []) if k in SWITCHES and k != name]
-    if want:
-        now.append(name)
-    d["on"] = [k for k in SWITCHES if k in now]
+    if name in DEFAULT_ON:  # on unless it's on the "off" list
+        off = [k for k in (d.get("off") or []) if k in DEFAULT_ON and k != name] + ([] if want else [name])
+        d["off"] = [k for k in SWITCHES if k in off]
+        if not d["off"]:
+            d.pop("off")
+    else:
+        now = [k for k in (d.get("on") or []) if k in SWITCHES and k != name and k not in DEFAULT_ON]
+        if want:
+            now.append(name)
+        d["on"] = [k for k in SWITCHES if k in now]
     p = file()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")
