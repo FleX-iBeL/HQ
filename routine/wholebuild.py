@@ -459,25 +459,33 @@ def minute(now: float | None = None) -> list[str]:
 def _due(d: dict, jobs: list, now: float) -> bool:
     if any(is_review(j["text"]) and not j["state"].startswith(q.FINISHED) for j in jobs):
         return False
-    due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed")}
+    due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed") and _in_dev(l)}
     if not due or _busy_builds(jobs):
         return False
     try:
         import sidebyside
-        if sidebyside.waiting_to_merge():  # point 6: the branches come together into dev first
+        if sidebyside.waiting_to_merge(jobs):  # the branches come together into dev first (a parked one doesn't hold the rest)
             return False
     except ImportError:
         pass
     return now - max(float(e.get("at") or 0) for e in due.values()) >= SETTLE
 
 
+def _in_dev(label: str) -> bool:
+    try:
+        import sidebyside
+        return sidebyside.in_dev(label)
+    except ImportError:
+        return True
+
+
 def queue_review() -> str:
-    """One review job over everything built (and fixed) since the last one; the 17 happy flows are the night's, not its."""
+    """One review job over everything built (and fixed) since the last one and in dev; the 17 happy flows are the night's, not its."""
     import sprint as S
     with q.locked():
         text, jobs, onq = q.read()
         with changing() as d:
-            due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed")}
+            due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed") and _in_dev(l)}
             if not due:
                 return "nothing built to review"
             try:
@@ -585,8 +593,8 @@ def _item_words(label: str, e: dict, rnd: int, d: dict, rid: str) -> str:
     try:  # the front's own record of them (routine/front.py, branch fb-front), when it's there; the printed heading otherwise
         import front as F
         kept = "\n".join(f"- {x['from']}, round {x['round']}: {x['finding']}" for x in F.open_points(label))
-        if kept and kept not in front:
-            front = (front + "\n" + kept).strip()
+        if kept and not front:  # sprint.py show prints the same points under the heading; once is enough
+            front = kept
     except Exception:
         pass
     parts.append("Open points from the front (not settled): " + (front if front else "none"))
@@ -700,7 +708,8 @@ def resume_prompt(n: int, where: str, plan: dict, job: dict) -> str:
             f"picks it up again in {where} as job {n}. The whole-build review tried {label} for real on the whole build and failed it. "
             "Its findings:\n" + "\n".join(f"- {f['what']}" for f in fs[-3:]) + "\n\n"
             f"Fix what's off so every done example of {label} holds, on the build as it stands now (other items were built after yours: "
-            "git pull and git log first, and keep their work whole). This is the one fix round: after it, one recheck, and an item still "
+            + ("git log first in your worktree, which has dev merged in already (no pull)" if _side(label) else "git pull and git log first")
+            + ", and keep their work whole). This is the one fix round: after it, one recheck, and an item still "
             f"failing is held. From now on this run is job {n}: use {n}, not {plan.get('continues')}, in every command (notes, guess, done). "
             f"Read your notes first and after each step, always before a push: python3 {jp} notes {n} (H283). Same as before: commit, "
             + ("in your own worktree (named below), no push: the program brings it together into dev" if _side(label) else
@@ -718,9 +727,12 @@ def _side(label: str) -> bool:
 
 
 def fresh_note(n: int, plan: dict, job: dict) -> str:
-    """A fix whose builder chat can't be continued: everything it needs, in its first prompt."""
+    """A fix whose builder chat can't be continued: everything it needs, in its first prompt. A merge job has its own (sidebyside)."""
     import sprint as S
     label = fix_label(job["text"]) or ""
+    if not label:
+        import sidebyside
+        return sidebyside.fresh_note(n, plan, job)
     e = load()["items"].get(label) or {}
     commits = list(dict.fromkeys(c for b in (e.get("builds") or []) + (e.get("fixes") or []) for c in b.get("commits") or []))
     return (f"\n\nThis is the one fix round of {label} after the whole-build review. Its builder's chat (job {plan.get('continues')}) can't "

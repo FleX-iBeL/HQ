@@ -75,9 +75,24 @@ def on(name: str, folder: Path | None = None) -> bool:
     env = os.environ.get(f"HQ_BACKEND_{name.upper()}")
     if env in ("0", "1"):
         return env == "1"
-    if name in DEFAULT_ON:
-        return name not in (_read(folder).get("off") or [])
+    if name in DEFAULT_ON:  # on by default only on the maker's HQ; a friend's has it off until it's turned on there
+        d = _read(folder)
+        if name in (d.get("on") or []):
+            return True
+        return _maker(folder) and name not in (d.get("off") or [])
     return name in (_read(folder).get("on") or [])
+
+
+def _maker(folder: Path | None = None) -> bool:
+    """The maker's HQ (hqpaths.is_maker: HQ_MAKER, else the workspace's features.json says maker)."""
+    env = os.environ.get("HQ_MAKER")
+    if env in ("0", "1"):
+        return env == "1"
+    f = (Path(folder) if folder is not None else _folder()) / "HQ" / "features.json"
+    try:
+        return json.loads(f.read_text(encoding="utf8")).get("maker") is True
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def listing() -> list[dict]:
@@ -89,9 +104,11 @@ def switch(name: str, want: bool) -> dict:
     if name not in SWITCHES:
         raise KeyError(name)
     d = _read()
-    if name in DEFAULT_ON:  # on unless it's on the "off" list
+    if name in DEFAULT_ON:  # on by default on the maker's HQ ("off" turns it off); elsewhere "on" turns it on
         off = [k for k in (d.get("off") or []) if k in DEFAULT_ON and k != name] + ([] if want else [name])
+        on_ = [k for k in (d.get("on") or []) if k in SWITCHES and k != name] + ([name] if want and not _maker() else [])
         d["off"] = [k for k in SWITCHES if k in off]
+        d["on"] = [k for k in SWITCHES if k in on_]
         if not d["off"]:
             d.pop("off")
     else:

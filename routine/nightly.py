@@ -377,7 +377,8 @@ def run(again: bool = False, routine: bool = False) -> int:
     try:
         with open(log, "w", encoding="utf8") as f:
             r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
-        if happy_at_night() and happy_due(stamp):
+        red_happy = any((x.get("happy") or {}).get("green") is False for x in rounds)  # a red night's next round checks their fix too
+        if happy_at_night() and (happy_due(stamp) or red_happy):
             hp = _happy_run(log, commit)
     finally:
         try:

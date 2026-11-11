@@ -41484,7 +41484,10 @@ if what == "once":
          and (last.get("happy") or {}).get("ran") == len(happy.gate_flows()), f"the night didn't run the 17 once or isn't red on one: {calls} {code} {last}")
     fail["happy"] = set()
     calls.clear()
+    import datetime as _dt0  # once a week too: a red night's next round runs them again, to check their fix
+    os.environ.update({"HQ_HAPPY_EVERY": "week", "HQ_HAPPY_DAY": nightly.WEEKDAYS[(_dt0.date.today().weekday() + 1) % 7]})
     code = nightly.run(again=True)
+    os.environ.pop("HQ_HAPPY_EVERY"); os.environ.pop("HQ_HAPPY_DAY")
     last = nightly.last() or {}
     need(calls == ["detailed", "happy"] and code == 0 and (last.get("happy") or {}).get("green"), f"a green night with the 17: {calls} {code} {last}")
     # once a week (his choice still open): on a night that isn't theirs they don't run, and aren't counted as missing
@@ -41550,13 +41553,21 @@ if what == "off":
     (ws / "HQ").mkdir(parents=True, exist_ok=True)
     (ws / "HQ/backend.json").write_text('{"on": ["briefing"]}')
     os.environ.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
-    need(backend.on("whole_build_review", ws) and backend.on("briefing", ws) and not backend.on("handover", ws), "whole_build_review isn't on by default")
+    os.environ.pop("HQ_MAKER", None)
+    need(not backend.on("whole_build_review", ws) and not backend.on("side_by_side", ws) and backend.on("briefing", ws),
+         "a friend's HQ has the new road on without anyone's yes")
+    (ws / "HQ/features.json").write_text('{"maker": true}')
+    need(backend.on("whole_build_review", ws) and backend.on("side_by_side", ws) and not backend.on("handover", ws), "the maker's HQ doesn't have it on by default")
     os.environ["HQ_BACKEND"] = str(ws / "HQ/backend.json")
+    os.environ["HQ_WORKSPACE"] = str(ws)
     backend.switch("whole_build_review", False)
     need(not backend.on("whole_build_review") and backend.on("briefing"), "off doesn't turn it off, or turned another off")
     backend.switch("whole_build_review", True)
     need(backend.on("whole_build_review") and "off" not in json.loads((ws / "HQ/backend.json").read_text()), "on again doesn't clear it")
-    print("OK with the switch off a QA job per build and the road of a new item, as before; on by default, and turned off and on"); sys.exit(0)
+    (ws / "HQ/features.json").write_text('{"maker": false}')
+    backend.switch("side_by_side", True)
+    need(backend.on("side_by_side") and "side_by_side" in json.loads((ws / "HQ/backend.json").read_text())["on"], "a friend can't turn it on")
+    print("OK with the switch off a QA job per build and the road of a new item, as before; on by default only on the maker's HQ, a friend's off until it's turned on"); sys.exit(0)
 print("FAIL unknown " + what); sys.exit(1)
 '''
 
@@ -41662,7 +41673,12 @@ prompt = sys.stdin.read()
 wt, n, root = os.environ.get("HQ_SIDE_WORKTREE", ""), os.environ.get("HQ_JOB", ""), os.environ["SIDE_HQ"]
 open(os.environ["SIDE_SEEN"], "a").write(json.dumps({"n": n, "wt": wt, "proof": os.environ.get("HQ_PROOF_ROOT", "")}) + "\n")
 g = lambda *a: subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True)
+mode = os.environ.get("SIDE_FAKE_MODE", "")
 m = re.search(r"Merge (F\d+) into dev", prompt)
+if mode == "crash":  # one step committed, one file not, then the machine goes down: no result, no done
+    open(os.path.join(wt, "step1.txt"), "w").write("saved\n"); g("add", "step1.txt"); g("commit", "-qm", "F9635: step 1 of 2")
+    open(os.path.join(wt, "step2.txt"), "w").write("not committed yet\n")
+    sys.exit(1)
 if m:
     g("merge", "dev")
     open(os.path.join(wt, "shared.txt"), "w").write("line one by F9636\nline one by F9637\n")
@@ -41674,7 +41690,8 @@ else:
     if label in ("F9636", "F9637"):
         open(os.path.join(wt, "shared.txt"), "w").write(f"line one by {label}\n")
     g("add", "-A"); g("commit", "-qm", f"{label}: built side by side")
-subprocess.run([sys.executable, os.path.join(root, "routine/jobs.py"), "done", n], capture_output=True, text=True)
+if mode != "nodone":  # nodone: the runner's record step makes the record and the done mark, as for real (proof.py on its branch)
+    subprocess.run([sys.executable, os.path.join(root, "routine/jobs.py"), "done", n], capture_output=True, text=True)
 print(json.dumps({"type": "result", "subtype": "success", "result": "done", "is_error": False}), flush=True)
 '''
 
@@ -41731,6 +41748,7 @@ async def _side_flow635(self) -> str:
     runs, over all three on the merged code. The jobs line says they run side by side; the estimates end each at its own time."""
     import subprocess as _sp
     ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "635")
+    env.update({"HQ_PROOF_ON": "1", "SIDE_FAKE_MODE": "nodone"})  # the record for real: the runner's record step, on each branch
     scripts = []
     for k in range(3):
         r = minute()
@@ -41767,6 +41785,10 @@ async def _side_flow635(self) -> str:
     log = g("log", "--format=%s", "dev").stdout
     need("F9635: brought together" in log and "F9636: brought together" in log and "F9637: brought together" not in log, f"dev: {log}")
     need(len(r["opened"]) == 1 and wts[2] in Path(r["opened"][0]).read_text(), "the merge job doesn't run in F9637's own worktree")
+    mn = re.search(r"runjob.py\S* (\d+)", Path(r["opened"][0]).read_text()).group(1)
+    mp = (Path(env["HQ_JOB_RUN"]) / f"job-{mn}.prompt").read_text()
+    need("bringing F9637 together with dev" in mp and "The made-up side item 9637" in mp and "shared.txt" in mp and "one fix round of  " not in mp,
+         f"the fresh merge job didn't get its own note: {mp[-1500:]}")
     _sp.run(["bash", r["opened"][0]], capture_output=True, text=True, env=env, timeout=120)
     r = minute()
     log = g("log", "--format=%s", "dev").stdout
@@ -41782,6 +41804,10 @@ async def _side_flow635(self) -> str:
     q = json.loads(jobs("next").stdout)
     rv = [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")]
     need(len(rv) == 1 and all(f"F{x}" in rv[0]["text"] for x in (9635, 9636, 9637)), f"not one review over all three: {p.stdout} {p.stderr[-400:]}")
+    p = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import qa; print(qa.prompt_extra(sys.argv[2], int(sys.argv[3])))",
+                 str(ROOT / "routine"), rv[0]["text"], str(rv[0]["n"])], capture_output=True, text=True, env=env, timeout=120)
+    need("F9635: built side by side" in p.stdout and "F9637: both sides kept" in p.stdout and p.stdout.count("green on") >= 3
+         and "(none recorded)" not in p.stdout and "no record kept" not in p.stdout, f"the side builds' records and commits aren't in the review: {p.stdout[-2500:]}")
     return "three side by side on their own branches, brought together, the collision back to its builder, then one review over all three"
 
 
@@ -41805,12 +41831,174 @@ FLOWS.update({
 })
 
 
+_SIDE_MERGE_DRIVER = r'''
+import json, os, re, subprocess, sys, time
+ROOT = sys.argv[1]
+sys.path.insert(0, ROOT + "/routine")
+import jobs as q, sidebyside as SB
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+repo = os.environ["HQ_SIDE_ROOT"]
+def g(*a, cwd=None):
+    return subprocess.run(["git", "-C", cwd or repo, *a], capture_output=True, text=True)
+def jobsp(*a):
+    return subprocess.run([sys.executable, ROOT + "/routine/jobs.py", *a], capture_output=True, text=True).stdout
+def job(n):
+    return next(j for j in q.read()[1] if j["n"] == n)
+def built(n, files):
+    """Job n gets its worktree and branch, commits files {path: text} there, and is done."""
+    info = SB.prepare(job(n))
+    for f, text in files.items():
+        os.makedirs(os.path.dirname(os.path.join(info["worktree"], f)) or ".", exist_ok=True)
+        open(os.path.join(info["worktree"], f), "w").write(text)
+    g("add", "-A", cwd=info["worktree"]); g("commit", "-qm", f"{info['label']}: built", cwd=info["worktree"])
+    jobsp("mark", str(n), "done 12:00 on " + time.strftime("%Y-%m-%d"))
+    return info
+waiting = lambda: [j for j in q.read()[1] if j["text"].startswith("Merge ") and not j["state"].startswith(q.FINISHED)]
+n1, n2, n3 = [int(x) for x in sys.argv[2:5]]
+for n in (n2, n3):  # parked for now (not a build that waits): each is built in its turn below
+    jobsp("mark", str(n), "paused: its turn comes later in this flow")
+SB.prepare(job(n3))  # cut from dev now, before the others go in: its change will meet theirs
+# (a) an untracked file in HQ's folder where a branch adds one: not a collision, no job, said once, merged once it's gone
+a = built(n1, {"new.txt": "from the branch\n"})
+open(os.path.join(repo, "new.txt"), "w").write("in the way\n")
+out1 = SB.merge_minute(push=False)
+out2 = SB.merge_minute(push=False)
+need(not waiting() and any("isn't a collision" in x for x in out1) and not any("isn't a collision" in x for x in out2),
+     f"an untracked file made a job, or wasn't said once: {out1} {out2} {[j['text'][:60] for j in waiting()]}")
+need(SB.load()["jobs"][str(n1)]["state"] == "built" and "untracked" in SB.load()["jobs"][str(n1)].get("blocked", ""), "it doesn't name what's in the way")
+os.remove(os.path.join(repo, "new.txt"))
+out = SB.merge_minute(push=False)
+need(SB.load()["jobs"][str(n1)]["state"] == "merged", f"not merged once the file was gone: {out}")
+# (b) another git's index.lock: not a collision either
+b = built(n2, {"b.txt": "b\n", "shared.txt": "line one by B\n"})
+open(os.path.join(repo, ".git", "index.lock"), "w").write("")
+out = SB.merge_minute(push=False)
+need(not waiting() and SB.load()["jobs"][str(n2)]["state"] == "built" and "index.lock" in SB.load()["jobs"][str(n2)].get("blocked", ""),
+     f"a lock of another git sent it back as a collision: {out}")
+os.remove(os.path.join(repo, ".git", "index.lock"))
+out = SB.merge_minute(push=False)
+need(SB.load()["jobs"][str(n2)]["state"] == "merged", f"not merged once the lock was gone: {out}")
+# (c) a real collision: back to its builder at most twice, then held with one text, and it doesn't hold the others' review
+c = built(n3, {"shared.txt": "line one by C\n"})
+for k in (1, 2):
+    out = SB.merge_minute(push=False)
+    w = waiting()
+    need(len(w) == 1 and "shared.txt" in w[0]["text"], f"collision {k} didn't go back to its builder: {out}")
+    SB.prepare(w[0])  # the merge job runs in the same worktree and ends without resolving it
+    jobsp("mark", str(w[0]["n"]), "done 12:30 on " + time.strftime("%Y-%m-%d"))
+out = SB.merge_minute(push=False)
+need(not waiting() and any("held" in x for x in out), f"a third collision didn't hold it: {out}")
+need(not SB.waiting_to_merge() and not SB.in_dev(c["label"]) and SB.in_dev(a["label"]), "a held collision holds the review, or reads as in dev")
+print("OK an untracked file and a lock wait and say so once, no job; a real collision goes back twice, then it's held and the rest goes on")
+'''
+
+
+async def _side_flow638(self) -> str:
+    """11 November 2026, the whole-build review's finding 1, real git: a failed merge is a collision only when git names unmerged files. An
+    untracked file in HQ's folder at a path a branch adds, and another git's index.lock, send nothing to anyone: the item waits, it's said
+    once, and it's merged once they're gone. A real collision goes back to the builder twice at most; the third time it's held, and the
+    review isn't held up by it."""
+    import subprocess as _sp
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "638")
+    drv = d / "merge-driver.py"
+    drv.write_text(_SIDE_MERGE_DRIVER)
+    r = _sp.run([sys.executable, str(drv), str(ROOT), *ns], capture_output=True, text=True, env=env, timeout=300)
+    ok = [ln for ln in r.stdout.splitlines() if ln.startswith("OK ")]
+    need(r.returncode == 0 and ok, (r.stdout + r.stderr)[-1500:])
+    return ok[-1][3:]
+
+
+async def _side_flow639(self) -> str:
+    """11 November 2026, the whole-build review's findings 2, 3 and 4, through the routine's real minute. A boxed side build doesn't hold
+    the others' review: the two that are done are brought together and reviewed, the boxed one later. A side build that crashes with one
+    step committed and one file not keeps its worktree and branch: its rerun carries on in it, nothing lost. With side_by_side switched off
+    while builds run side by side, they go on being watched as before (not ended while they run), and an update sees every running job."""
+    import subprocess as _sp
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "639")
+    scripts = [minute()["opened"][0] for _ in range(3)]
+    need(all(state(n).startswith("running") for n in ns), f"not three running: {[state(n) for n in ns]}")
+    # 4: the switch off while they run: still watched, not ended (their windows alive)
+    keeper = _sp.Popen(["sleep", "300"])
+    try:
+        side = Path(env["HQ_JOB_RUN"]) / "side"
+        for n in ns:
+            (side / f"job-{n}.pid").write_text(str(keeper.pid))
+            st = json.loads((side / f"job-{n}.json").read_text())
+            st.update(pid=keeper.pid)
+            (side / f"job-{n}.json").write_text(json.dumps(st))
+        off = {k: v for k, v in env.items() if k != "HQ_BACKEND_SIDE_BY_SIDE"}
+        r = _sp.run([sys.executable, str(d / "driver.py"), str(ROOT), str(d), "minute"], capture_output=True, text=True, env=off, cwd=str(ROOT), timeout=120)
+        need(all(state(n).startswith("running") for n in ns), f"switched off, a running side build was ended: {[state(n) for n in ns]} {r.stdout[-400:]}")
+        p = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import update; "
+                     "update.RUN_DIR = sys.argv[2]; update.alive = lambda pid: True; print(json.dumps(update.running_windows()))",
+                     str(ROOT / "routine"), env["HQ_JOB_RUN"]], capture_output=True, text=True, env=env, timeout=60)
+        seen = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else []
+        need(sorted(x[0] for x in seen) == sorted(int(n) for n in ns) and all(x[1] == keeper.pid for x in seen), f"an update doesn't see every running job: {p.stdout} {p.stderr[-300:]}")
+        for n in ns:
+            (side / f"job-{n}.pid").unlink()
+            st = json.loads((side / f"job-{n}.json").read_text())
+            st["pid"] = None
+            (side / f"job-{n}.json").write_text(json.dumps(st))
+    finally:
+        keeper.kill()
+    # 2: the third is boxed; the two that are done go together and get their review
+    jobs("boxed", ns[2], "it ran past its box (a made-up one)")
+    for s in scripts[:2]:
+        _sp.run(["bash", s], capture_output=True, text=True, env=env, timeout=120)
+    minute()
+    log = g("log", "--format=%s", "dev").stdout
+    need("F9635: brought together" in log and "F9636: brought together" in log, f"the two done ones weren't brought together: {log}")
+    p = _sp.run([sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); import wholebuild as W; print(W.minute(now=time.time() + 999))",
+                 str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=120)
+    q = json.loads(jobs("next").stdout)
+    rv = [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")]
+    need(len(rv) == 1 and "F9635" in rv[0]["text"] and "F9636" in rv[0]["text"] and "F9637" not in rv[0]["text"],
+         f"a boxed build held the review, or got into it: {p.stdout} {[j['text'][:90] for j in q['waiting']]}")
+    jobs("stop", str(rv[0]["n"]))
+    # 3: a crash with one step saved and one not: the rerun carries on in the same worktree, on the same branch
+    n4 = new("F9638 on the HQ roadmap: build it as it says", "--not-ready", "--kind", "small")
+    r = minute()
+    need(len(r["opened"]) == 1, f"the fourth build didn't start: {r['log'][-4:]}")
+    s4 = r["opened"][0]
+    wt4 = re.search(r"HQ_SIDE_WORKTREE=(\S+)", Path(s4).read_text()).group(1).strip("'")
+    _sp.run(["bash", s4], capture_output=True, text=True, env={**env, "SIDE_FAKE_MODE": "crash"}, timeout=120)
+    jobs("crashed", n4, "the machine went down (made up)")
+    r = minute()
+    rerun = [j for j in json.loads(jobs("next").stdout)["running"] if j["text"].startswith(f"Rerun of job {n4}")]
+    need(rerun and r["opened"] and f"HQ_SIDE_WORKTREE={wt4}" in Path(r["opened"][0]).read_text().replace("'", ""),
+         f"the rerun didn't carry on in the same worktree: {r['log'][-5:]}")
+    need((Path(wt4) / "step2.txt").exists() and "F9635: step 1 of 2" in g("log", "--format=%s", f"side/job-{n4}").stdout,
+         "the crashed build's work was lost: its uncommitted file or its saved step")
+    need(not g("branch", "--list", f"side/job-{rerun[0]['n']}").stdout.strip(), "the rerun got a fresh branch from dev")
+    return "a boxed build doesn't hold the review; a crash keeps its worktree, the rerun carries on in it; switched off, running builds stay watched"
+
+
+for _n in (638, 639):
+    setattr(Run, f"flow{_n}", globals()[f"_side_flow{_n}"])
+FLOWS.update({
+    638: ("Side by side (3): a failed merge is a collision only when git names unmerged files; an untracked file or a lock waits and is said once; a real collision goes back twice, then it's held", False, "flow638"),
+    639: ("Side by side (4): a boxed build doesn't hold the review; a crash keeps its worktree and the rerun carries on in it; switched off, running builds stay watched, an update sees them all", False, "flow639"),
+})
+
+
 def _items_flows() -> None:
     """11 November 2026: an item's own flows, app/flows_items/LABEL.py, read into this file's namespace (Run, FLOWS, need, ...). Side
     by side, each builder writes its new flows there, so the branches never collide in this file (routine/sidebyside.py)."""
     d = Path(__file__).resolve().parent / "flows_items"
     for f in sorted(d.glob("*.py")) if d.is_dir() else []:
-        exec(compile(f.read_text(encoding="utf8"), str(f), "exec"), globals())
+        try:
+            exec(compile(f.read_text(encoding="utf8"), str(f), "exec"), globals())
+        except Exception as e:  # one broken file is that item's failure, a flow of its own, never every flow's
+            m = re.match(r"([A-Z])(\d+)", f.stem)
+            num = 90000 + (5000 if m and m.group(1) == "H" else 0) + (int(m.group(2)) % 5000 if m else 4999)
+            why = f"app/flows_items/{f.name} doesn't load: {type(e).__name__}: {e}"
+
+            async def _broken(self, why=why):
+                raise Failed(why)
+            setattr(Run, f"flow{num}", _broken)
+            FLOWS[num] = (f"{f.stem}: its own flows file doesn't load", False, f"flow{num}")
 
 
 _items_flows()
