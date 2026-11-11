@@ -22,6 +22,10 @@ maintenance moments because we just do it daily whenever we have space." and "Ma
   python3 "routine/nightly.py" tutorial done  the read is done: the next one starts from here
 
 The set: on a Mac every flow without Claude turns (--quick); elsewhere the Linux nightly set (flowsets.LINUX_NIGHTLY: every quick flow that holds on Linux).
+11 November 2026, his words: "No the 17 happy flows should only run once at night in the nightly run". With whole_build_review on
+(routine/wholebuild.py), after the detailed set the 17 happy flows (happy.gate_args, for real, with the model) run here, on dev as it stands,
+their own log next to the night's (happy_at_night, _happy_run); a red or untried one is one of the night's failures, so the night is red,
+the release holds, and it becomes the night's own repair item like any failure. A build's record and the whole-build review run none of them.
 The flows with Claude turns stay out: they need a live voice and cost usage, and the daytime builds run them.
 [Claude's choice.] Each run's output is kept in scratch/nightly/ (the last 14 nights).
 
@@ -369,9 +373,12 @@ def run(again: bool = False, routine: bool = False) -> int:
     t0 = time.time()
     commit, dirty = here()  # F112: what this run tests; a release reads it
     json.dump({"pid": os.getpid(), "at": stamp.strftime("%Y-%m-%d %H:%M")}, open(_running_file(), "w"))
+    hp = None
     try:
         with open(log, "w", encoding="utf8") as f:
             r = subprocess.run(cmd, cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
+        if happy_at_night() and happy_due(stamp):
+            hp = _happy_run(log, commit)
     finally:
         try:
             os.remove(_running_file())
@@ -381,9 +388,13 @@ def run(again: bool = False, routine: bool = False) -> int:
     mins = round((time.time() - t0) / 60)
     passed, ran = summary(out)
     failed = failures(out)
+    if hp:  # a red or untried happy flow makes the night red, as a red detailed flow does; each its own repair item (rotate)
+        failed = failed + hp["failed"] + hp["not_tried"]
     entry = {"at": stamp.strftime("%Y-%m-%d %H:%M"), "commit": commit, "dirty": dirty, "ran": ran, "passed": passed, "failed": failed,
-             "exit": r.returncode, "minutes": mins, "log": log}
-    green_ = r.returncode == 0 and bool(ran) and not failed
+             "exit": r.returncode, "minutes": mins, "log": log, **({"happy": hp} if hp else {})}
+    if happy_at_night() and not hp:  # not their night: nothing missing, the last run of them stands (release.night_refuses reads it)
+        entry["happy_not_tonight"] = f"the 17 run {happy_every()[0]}ly; the last run: {(last_happy() or {}).get('at') or 'none yet'}"
+    green_ = r.returncode == 0 and bool(ran) and not failed and (not hp or hp["green"])
     items = rotate(failed, n, night) if routine and not green_ and n < ROUNDS else {}  # H324
     entry["items"] = items
     held = bool(routine and not green_ and n >= ROUNDS)
@@ -392,11 +403,11 @@ def run(again: bool = False, routine: bool = False) -> int:
     _prune()
     when = stamp.strftime("%-d %b %H:%M")
     import routines  # F102: the night's own line, with a day's interval, so a night that didn't run shows
-    if r.returncode == 0 and ran and not failed:
-        routines.good("nightly", f"{when}: all {ran} flows pass", every=86400)
+    if green_:
+        routines.good("nightly", f"{when}: all {ran} flows pass" + (f", and the {hp['ran']} of the happy flows" if hp else ""), every=86400)
     else:
         routines.bad("nightly", f"{when}: {passed} of {ran} passed", every=86400)
-    if r.returncode == 0 and ran and not failed:
+    if green_:
         hold_privacy()
         if n == 1:
             add_night(f"{when} all {ran} flows pass ({mins} min)")
@@ -424,6 +435,75 @@ def run(again: bool = False, routine: bool = False) -> int:
         return 1
     print(f"That was the last of {ROUNDS} full runs: the night's work holds on nightly, not released.")
     return 3
+
+
+def happy_at_night() -> bool:
+    """11 November 2026, his words: "No the 17 happy flows should only run once at night in the nightly run". With whole_build_review on
+    they run here, once a night (each round of a red night too), not after a build and not in the whole-build step."""
+    try:
+        import wholebuild
+        return wholebuild.on()
+    except Exception:
+        return False
+
+
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def happy_every() -> tuple[str, int]:
+    """(night or week, the weekday for week) from the workspace's HQ/backend.json: "happy_flows_every" ("night", the default, or "week")
+    and "happy_flows_day" (a weekday's name; by default the weekly sweep's day, tick.SWEEP_DAY). He hasn't decided yet (11 November 2026)."""
+    try:
+        sys.path.insert(0, os.path.join(HQ, "app"))
+        import backend
+        d = backend._read()
+    except Exception:
+        d = {}
+    every = str(d.get("happy_flows_every") or os.environ.get("HQ_HAPPY_EVERY") or "night").lower()
+    day = str(d.get("happy_flows_day") or os.environ.get("HQ_HAPPY_DAY") or "").lower()
+    sweep = 0  # tick.SWEEP_DAY: Monday, the weekly sweep's morning
+    return ("week" if every.startswith("week") else "night"), (WEEKDAYS.index(day) if day in WEEKDAYS else sweep)
+
+
+def _happy_file() -> str:
+    return os.path.join(OUT, "happy-last.json")
+
+
+def last_happy() -> dict | None:
+    try:
+        return json.load(open(_happy_file(), encoding="utf8"))
+    except (OSError, ValueError):
+        return None
+
+
+def happy_due(now: dt.datetime | None = None) -> bool:
+    """Every night; or once a week: the first night on or after the set weekday since their last run (the sweep's Monday has no
+    nightly, so by default they run the Tuesday morning)."""
+    every, day = happy_every()
+    if every == "night":
+        return True
+    now = now or dt.datetime.now()
+    since = (now - dt.timedelta(days=(now.weekday() - day) % 7)).date()
+    last = (last_happy() or {}).get("at") or ""
+    return last[:10] < since.isoformat()
+
+
+def _happy_run(log: str, commit: str = "") -> dict:
+    """The 17 happy flows (happy.gate_args), for real, on dev as it stands, with their own log next to the night's."""
+    import happy
+    import proof
+    hlog = log[:-4] + "-happy.log"
+    t0 = time.time()
+    with open(hlog, "w", encoding="utf8") as f:
+        r = subprocess.run([_python(), os.path.join(HQ, "app", "happy_flows.py")] + happy.gate_args(), cwd=HQ, stdout=f, stderr=subprocess.STDOUT)
+    out = open(hlog, encoding="utf8").read()
+    passed, ran = summary(out)
+    failed = failures(out) or ([] if r.returncode == 0 and ran else [f"the run itself: the happy flows ended with exit {r.returncode}"])
+    not_tried = proof._not_tried()
+    rec = {"ran": ran, "passed": passed, "failed": failed, "not_tried": not_tried, "log": hlog, "minutes": round((time.time() - t0) / 60),
+           "green": not failed and not not_tried and bool(ran) and passed == ran, "at": time.strftime("%Y-%m-%d %H:%M"), "commit": commit}
+    json.dump(rec, open(_happy_file(), "w"), indent=1)
+    return rec
 
 
 def hold_privacy() -> None:
