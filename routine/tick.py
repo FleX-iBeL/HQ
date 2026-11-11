@@ -356,7 +356,7 @@ def start(job):
             + plain_rule(n)
             + past_note
             + importlib.import_module("jobs").notes_for_prompt(job)
-            + importlib.import_module("qa").prompt_extra(job["text"], n)  # F56: a QA job runs as Moneypenny
+            + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
         prompt += _steps_extra(job, plan)
     if side_info:

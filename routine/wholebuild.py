@@ -604,6 +604,7 @@ def prompt(text: str, n: int | None = None) -> str:
     if not r:
         return "\n\n(The whole-build review's items couldn't be found in the program's record; read HQ's whole-build.json by hand.)\n"
     items = r.get("items") or {}
+    n = n or r.get("job")
     me = "python3"
     wb = os.path.join(HERE, "wholebuild.py")
     jp = f"--job {n}" if n else "--job N"
