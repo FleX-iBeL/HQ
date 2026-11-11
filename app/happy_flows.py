@@ -41582,6 +41582,553 @@ async def canary() -> str | None:
     return None
 
 
+
+# ---------- 11 November 2026: the weight at the back (routine/wholebuild.py), flows 630 to 639 ----------
+# One builder holds an item, one review over the whole build, one fix round, then held; with whole_build_review off, as before.
+# Kept in one block, numbered 630-639, so another branch adding flows next to it merges cleanly.
+
+_WB_DRIVER = r'''
+import json, os, re, subprocess, sys, time
+ROOT, D, what = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, ROOT + "/routine"); sys.path.insert(0, ROOT + "/app")
+def need(ok, why):
+    if not ok:
+        print("FAIL " + why); sys.exit(1)
+def run(*a, ok=True):
+    r = subprocess.run(["python3", *a], capture_output=True, text=True, cwd=ROOT)
+    if ok:
+        need(r.returncode == 0, f"{a}: {r.stdout[-600:]} {r.stderr[-900:]}")
+    return r.stdout + r.stderr
+jobs_ = lambda *a, ok=True: run(ROOT + "/routine/jobs.py", *a, ok=ok)
+qa_ = lambda *a, ok=True: run(ROOT + "/routine/qa.py", *a, ok=ok)
+import jobs as q, carryon, wholebuild as W, line as L, sprint as S, qa
+REPO = os.environ["HQ_PROOF_ROOT"]
+def git(*a):
+    return subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, check=True).stdout.strip()
+def commit(msg, f):
+    open(os.path.join(REPO, f), "a").write(msg + "\n")
+    git("add", f); git("commit", "-qm", msg)
+    return git("rev-parse", "--short=12", "HEAD")
+def queue():
+    return q.read()[1]
+def find(start):
+    return [j for j in queue() if j["text"].startswith(start)]
+def transcript(sid, tokens=40000, age=0):
+    p = os.path.join(os.environ["HQ_CLAUDE_PROJECTS"], "-made-up-folder", f"{sid}.jsonl")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w").write(json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 10, "cache_read_input_tokens": tokens}}}) + "\n")
+    if age:
+        os.utime(p, (time.time() - age, time.time() - age))
+    return p
+def build(label, msg, f, sid):
+    """A build of the team's for LABEL: added, running, its chat's session kept (as tick.start does), its record, done."""
+    out = jobs_("add", f"{label} on the HQ roadmap: build it as it says, push to dev with push.py", "--not-ready", "--kind", "small")
+    n = int(re.search(r"Job (\d+) is ready", out).group(1))
+    jobs_("mark", str(n), "running since 12:00")
+    carryon.save(n, {"session": sid, "started": time.time(), "mode": "new"})
+    sha = commit(msg, f)
+    os.makedirs(os.environ["HQ_PROOF_DIR"], exist_ok=True)
+    json.dump({"n": n, "label": label, "head": git("rev-parse", "HEAD"), "commits": [f"{sha} {msg}"], "named": [], "ran": 17, "passed": 17,
+               "failed": [], "green": True, "qa_tests": {"green": True, "ran": 2, "passed": 2}, "t": time.time()},
+              open(os.path.join(os.environ["HQ_PROOF_DIR"], f"job-{n}.json"), "w"))
+    said = jobs_("done", str(n))
+    return n, sha, said
+def setup():
+    os.makedirs(REPO, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", REPO], check=True)
+    git("config", "user.email", "t@t"); git("config", "user.name", "t")
+    base = commit("the code before", "a.txt")
+    git("checkout", "-qb", "dev")
+    for j in queue():
+        if not j["state"].startswith(q.FINISHED):
+            jobs_("stop", str(j["n"]), ok=False)
+    rm = os.environ["HQ_ROADMAP"]
+    t = open(rm).read()
+    rows = ('| ⬜ | F9631 The made-up count shows on the page | Made up for the whole-build review. His words: "the count should show on '
+            'the page, right where i look". Done means: the page shows the count. Checked by flow ' + os.environ.get("WB_NAMED", "8801") + '. | |\n'
+            '| ⬜ | F9632 The made-up second thing comes back | Made up too. His words: "the second thing has to come back by itself". Done '
+            'means: it comes back. Open points from the front (not settled): whether it also comes back by day. | |\n')
+    marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+    i = t.index("## Phase F · Bugs"); k = t.index(marker, i) + len(marker)
+    open(rm, "w").write(t[:k] + rows + t[k:])
+    n1, c1, s1 = build("F9631", "F9631: the count on the page", "count.txt", "sid-builder-one")
+    n2, c2, s2 = build("F9632", "F9632: the second thing back", "back.txt", "sid-builder-two")
+    return {"base": base, "n1": n1, "n2": n2, "c1": c1, "c2": c2, "said": s1 + s2}
+def back(rid):
+    for _ in range(240):
+        run = (W.load()["reviews"].get(rid) or {}).get("run") or {}
+        if run.get("state") in ("done", "died"):
+            return run
+        time.sleep(0.25)
+    need(False, f"the merged run of review {rid} didn't come back: {W.load()['reviews'].get(rid)}")
+def review1(st):
+    need(W.minute() == [], "the review was queued before the builds had settled")
+    got = W.minute(now=time.time() + W.SETTLE + 5)
+    need(len(got) == 1 and "run once on the merged code for review 1" in got[0], f"the merged run didn't start: {got}")
+    need(not find("QA of the whole build"), "the review came before the merged run was back")
+    need(W.load()["items"]["F9631"]["stage"] == "testing", "the item isn't waiting for the merged run")
+    st["run"] = back("1")
+    got = W.minute()
+    need(any("queued the whole-build review 1" in x for x in got), f"no review queued once the merged run was back: {got}")
+    rv = find("QA of the whole build")
+    need(len(rv) == 1, f"not one review job: {[j['text'][:60] for j in rv]}")
+    st["r1"] = rv[0]["n"]
+    return rv[0]
+
+if what in ("review", "verdicts", "recheck"):
+    st = setup()
+    need(not find("QA of F963"), "a build still got a QA job of its own: " + str([j["text"][:50] for j in find("QA of")]))
+    need("waits for the whole-build review" in st["said"], f"done didn't say it waits for the review: {st['said'][-300:]}")
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "built" and d["items"]["F9632"]["stage"] == "built", f"the items aren't built: {d['items']}")
+    need(d["items"]["F9632"]["builds"][0]["session"] == "sid-builder-two", "the builder's chat wasn't kept")
+    row = S.row_of("F9631")
+    w = L.next_step(row, {"build": {"by": "him"}}, queue())
+    need(w[0] == "wait" and "whole-build review" in w[1], f"the line would do something else with a built item: {w}")
+    jobs_("add", "F9632 on the HQ roadmap: another build of it, still waiting", "--not-ready", "--kind", "small")
+    need(W.minute(now=time.time() + 999) == [], "the review was queued while a build still waits")
+    for j in queue():
+        if j["state"] == "ready":
+            jobs_("stop", str(j["n"]))
+    rv = review1(st)
+    need(W.minute(now=time.time() + 999) == [], "a second review was queued beside the first")
+    import estimate
+    need(estimate.kind_for(rv["text"]) == "qa", f"the review isn't kind qa: {estimate.kind_for(rv['text'])}")
+    need(qa.job_label(rv["text"]) is None and not q.with_team(queue(), "F9631"), "the review's text reads as one item's job")
+    p = qa.prompt_extra(rv["text"], rv["n"])
+    for words in ("You are Moneypenny", "=== F9631 (first look)", "=== F9632 (first look)", "the count should show on the page, right where i look",
+                  "the second thing has to come back by itself", "whether it also comes back by day", f"{st['c1']} F9631: the count on the page",
+                  f"{st['c2']} F9632: the second thing back", "green on", "her sealed tests green (2 of 2)", f"--job {rv['n']}",
+                  "ran ONCE already", "already red before these builds", st["base"][:7], "One verdict PER ITEM".lower()):
+        need(words.lower() in p.lower(), f"the review's first prompt lacks: {words}")
+    need(p.count("Open points from the front (not settled): none") == 1, "the item without the front's points isn't said to have none")
+    if what == "review":
+        print("OK two builds, no QA job each, one review over both with their words, the front's points, commits and records"); sys.exit(0)
+    # The review runs and gives a verdict per item.
+    jobs_("mark", str(rv["n"]), "running since 13:00")
+    qa_("pass", "F9631", "the count shows", "--job", str(rv["n"]), "--example", "the page shows the count", "--ran", "the page on a copy",
+        "--got", "the count, 3", "--compared", "counts on the page, 3 of 3")
+    need(qa.state("F9631") == "passed" and W.load()["items"]["F9631"]["stage"] == "passed", "the pass didn't land as a QA mark and a stage")
+    out = qa_("fail", "F9632", "the second thing doesn't come back after a restart", "--job", str(rv["n"]))
+    need("goes to the chat that built it" in out, f"the fail didn't go to the builder: {out}")
+    need(qa.state("F9632") == "failed", "the fail isn't a QA mark")
+    fx = find("Fix for F9632 after the whole-build review")
+    need(len(fx) == 1 and fx[0]["state"] == W.FIX_STATE and not find("Fix for F9632 (F56)"), f"not one continuation: {[ (j['state'], j['text'][:70]) for j in fx]}")
+    need("doesn't come back after a restart" in fx[0]["text"] and f"chat of job {st['n2']}" in fx[0]["text"], "the continuation lacks the finding or its builder")
+    import qatests
+    need(qatests.fix_road("F9632") is None, "the old road of a new item opened on the first fail")
+    rec = carryon.load(fx[0]["n"])
+    need(rec.get("session") == "sid-builder-two" and rec.get("continues") == st["n2"], f"the continuation doesn't hold the builder's chat: {rec}")
+    w = L.next_step(S.row_of("F9632"), {"build": {"by": "him"}}, queue())
+    need(w[0] == "wait", f"the line would send the failed item again: {w}")
+    # The builder's chat continued; else a fresh job, fully fed.
+    tp = transcript("sid-builder-two")
+    plan = carryon.plan(fx[0], open(os.environ["HQ_ROADMAP"]).read())
+    need(plan["mode"] == "resume" and plan["session"] == "sid-builder-two", f"the builder's chat isn't continued: {plan}")
+    rp = W.resume_prompt(fx[0]["n"], "tmux", plan, fx[0])
+    need("doesn't come back after a restart" in rp and f"job {fx[0]['n']}" in rp and f"your own chat from job {st['n2']}" in rp, "the resume message lacks the finding or the job")
+    for tokens, age, why in ((W.CONTEXT_MOST + 1, 0, "context is full"), (100, (W.CHAT_HOURS + 1) * 3600, "older than"), (None, 0, "isn't on this computer")):
+        if tokens is None:
+            os.remove(tp)
+        else:
+            transcript("sid-builder-two", tokens, age)
+        plan = carryon.plan(fx[0], "")
+        need(plan["mode"] == "fresh" and why in (plan.get("why") or ""), f"a chat that can't be continued ({why}) still resumes: {plan}")
+    fn = W.fresh_note(fx[0]["n"], plan, fx[0])
+    for words in ("the second thing has to come back by itself", f"{st['c2']} F9632: the second thing back", "doesn't come back after a restart"):
+        need(words in fn, f"the fresh job's first prompt lacks: {words}")
+    # The release gate reads the marks: F9631 goes, F9632 is held.
+    h = qa.hold(root=REPO, base="main", tip="dev")
+    need(h["taken"] == ["F9631"] and [x["label"] for x in h["held"]] == ["F9632"] and "QA failed" in h["held"][0]["why"], f"the gate: {h}")
+    jobs_("done", str(rv["n"]))
+    need(W.load()["items"]["F9632"]["stage"] == "fixing", "the review's end changed the item in its fix")
+    tr = open(os.path.join(os.environ["HQ_WORKSPACE"], "HQ", "trail.jsonl")).read()
+    need(tr.count('"qa"') >= 2 and '"failed"' in tr and '"passed"' in tr, "the trail lacks the per-item verdicts")
+    if what == "verdicts":
+        print("OK a verdict per item as QA marks the gate reads; the fail back to the builder's chat, fresh and fully fed when it can't"); sys.exit(0)
+    # The fix lands; one recheck over only the failed item; still failing: held, one text, no third round.
+    n3 = fx[0]["n"]
+    jobs_("mark", str(n3), "running since 14:00")
+    c3 = commit("F9632: it comes back after a restart", "back.txt")
+    json.dump({"n": n3, "label": "F9632", "head": git("rev-parse", "HEAD"), "commits": [f"{c3} F9632: it comes back after a restart",
+               f"{st['c2']} F9632: the second thing back"], "ran": 17, "passed": 17, "failed": [], "green": True, "t": time.time()},
+              open(os.path.join(os.environ["HQ_PROOF_DIR"], f"job-{n3}.json"), "w"))
+    jobs_("done", str(n3))
+    need(W.load()["items"]["F9632"]["stage"] == "fixed", "the fix done didn't make it fixed")
+    need(not find("QA of F9632"), "the fix got a QA job of its own")
+    got = W.minute(now=time.time() + W.SETTLE + 5)
+    back("2")
+    got += W.minute()
+    rv2 = [j for j in find("QA of the whole build (review 2)")]
+    need(len(rv2) == 1 and "F9632" in rv2[0]["text"] and "F9631" not in rv2[0]["text"] and "Rechecks" in rv2[0]["text"], f"not one recheck over F9632 alone: {got}")
+    p2 = qa.prompt_extra(rv2[0]["text"], rv2[0]["n"])
+    need("=== F9632 (RECHECK" in p2 and "doesn't come back after a restart" in p2 and "Files the fix touched: back.txt" in p2 and "=== F9631" not in p2,
+         "the recheck's prompt lacks the earlier finding or the fix's files, or holds the passed item")
+    jobs_("mark", str(rv2[0]["n"]), "running since 15:00")
+    out = qa_("fail", "F9632", "after a restart it still doesn't come back", "--job", str(rv2[0]["n"]))
+    need("held" in out and "no third round" in out, f"the second fail wasn't held: {out}")
+    need(len(find("Fix for F9632")) == 1, "a third round was started")
+    e = W.load()["items"]["F9632"]
+    need(e["stage"] == "held" and len(e.get("told") or []) == 1, f"not held with one text: {e.get('stage')} {e.get('told')}")
+    w = L.next_step(S.row_of("F9632"), {"build": {"by": "him"}}, queue())
+    need(w[0] == "hold" and "one fix round" in w[1], f"the line would take the held item on: {w}")
+    jobs_("done", str(rv2[0]["n"]))
+    need(W.minute(now=time.time() + 999) == [] and not find("QA of the whole build (review 3)"), "a third review came by itself")
+    need(qatests.fix_road("F9632"), "the held item has no road for when the hold is lifted")
+    h = qa.hold(root=REPO, base="main", tip="dev")
+    need("one fix round" in qa.hold_words(h), f"the release doesn't say it's held after its fix round: {qa.hold_words(h)}")
+    texts = ""
+    for root_, _, fs in os.walk(os.environ["HQ_DIRECT_DIR"]):
+        for f_ in fs:
+            texts += open(os.path.join(root_, f_), errors="replace").read()
+    need(texts.count("still fails after its one fix round") <= 1, "more than one text about the hold")
+    print("OK the fix lands, one recheck over the failed item only, still failing it's held with one text, no third round"); sys.exit(0)
+
+if what == "once":
+    import happy
+    g1, g2 = [str(x) for x in happy.gate_flows()[:2]]
+    os.environ["WB_NAMED"] = g2
+    st = setup()
+    # a build's own record: only what's its own (the flows its row names), not the 17
+    out = jobs_("add", "F9631 on the HQ roadmap: one more build of it", "--not-ready", "--kind", "small")
+    n = int(re.search(r"Job (\d+) is ready", out).group(1))
+    jobs_("mark", str(n), "running since 16:00")
+    before = len(open(os.environ["WB_RUNS"]).read().splitlines()) if os.path.exists(os.environ["WB_RUNS"]) else 0
+    os.environ["HQ_PROOF_ON"] = "1"
+    run(ROOT + "/routine/proof.py", "run", str(n), ok=False)
+    os.environ.pop("HQ_PROOF_ON")
+    import proof
+    rec = proof.load(n) or {}
+    asked = [json.loads(x) for x in open(os.environ["WB_RUNS"]).read().splitlines()[before:]]
+    need(rec.get("green") and rec.get("whole_build") and [a["args"] for a in asked] == [["--only", g2]],
+         f"a build's record ran more than its own flows, or isn't green: {asked} {rec}")
+    jobs_("mark", str(n), "stopped 16:05")
+    os.environ.update({"WB_FAIL_HEAD": f"{g1},{g2}", "WB_FAIL_BASE": g1})  # from here: the merged build red on both, the code before on g1
+    rv = review1(st)
+    run_ = st["run"]
+    need(run_["state"] == "done" and any(x.startswith(f"{g1}:") for x in run_["red_before"]) and any(x.startswith(f"{g2}:") for x in run_["new_red"]),
+         f"the merged run didn't tell red-before from new: {run_}")
+    allargs = [json.loads(x)["args"] for x in open(os.environ["WB_RUNS"]).read().splitlines()]
+    need(sum(1 for a in allargs if len(a[1].split(",")) > 2) == 1, f"the 17 didn't run exactly once: {allargs}")
+    p = qa.prompt_extra(rv["text"], rv["n"])
+    need("ran the 17 happy flows ONCE on the merged code" in p and f"Red before these builds too" in p and f"Red only on the build" in p
+         and "--quick" not in p and "don't run it again" in p, "the review's start text lacks the merged run, or still asks for the quick set")
+    jobs_("mark", str(rv["n"]), "running since 17:00")
+    out = qa_("pass", "F9631", "fine", "--job", str(rv["n"]), "--example", "e", "--ran", "r", "--got", "g", "--compared", "counts, 3 of 3", ok=False)
+    need("Refused" in out and g2 in out and qa.state("F9631") != "passed", f"a pass went through while the merged run is red on its own flow: {out}")
+    qa_("pass", "F9632", "fine", "--job", str(rv["n"]), "--example", "e", "--ran", "r", "--got", "g", "--compared", "counts, 3 of 3")
+    need(qa.state("F9632") == "passed", "an item whose flows are green on the merged run couldn't pass")
+    with W.changing() as d:
+        d["reviews"]["1"]["run"]["state"] = "running"
+    need("isn't back" in (W.run_refuses("F9631") or ""), "a pass doesn't wait for the merged run")
+    print(f"OK a build's record runs only its own flows ({g2}); the 17 run once on the merged code, {g1} red before, {g2} new; a pass reads it"); sys.exit(0)
+
+if what == "missed":
+    st = setup()
+    rv = review1(st)
+    jobs_("mark", str(rv["n"]), "running since 13:00")
+    jobs_("done", str(rv["n"]))
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "built" and d["items"]["F9631"]["missed"] == 1, "an item left without a verdict isn't in the next review")
+    W.minute(now=time.time() + W.SETTLE + 5)
+    back("2")
+    W.minute()
+    rv2 = find("QA of the whole build (review 2)")
+    need(len(rv2) == 1 and "F9631" in rv2[0]["text"] and "F9632" in rv2[0]["text"], "the next review doesn't take them again")
+    import machalf
+    os.makedirs(os.path.dirname(machalf.STORE), exist_ok=True)
+    json.dump([{"id": "x1", "label": "F9632", "state": "laptop-off", "job": rv2[0]["n"], "flow": 61, "commit": "abc"}], open(machalf.STORE, "w"))
+    jobs_("mark", str(rv2[0]["n"]), "running since 14:00")
+    jobs_("done", str(rv2[0]["n"]))
+    d = W.load()
+    need(d["items"]["F9631"]["stage"] == "held" and len(d["items"]["F9631"]["told"]) == 1, "twice without a verdict isn't held with one text")
+    need(d["items"]["F9632"]["stage"] == "mac", "an item waiting for the laptop's half was counted as missed")
+    W.on_pass("F9632", rv2[0]["n"])
+    need(W.load()["items"]["F9632"]["stage"] == "passed", "the laptop's pass didn't end its road")
+    print("OK a review without a verdict takes the item once more, then holds it; the laptop's half waits, and its pass counts"); sys.exit(0)
+
+if what == "off":
+    st = setup()
+    need(len(find("QA of F9631")) == 1 and len(find("QA of F9632")) == 1, "with the switch off a build didn't get its QA job")
+    need(W.minute(now=time.time() + 999) == [] and not find("QA of the whole build"), "with the switch off a whole-build review came")
+    need(L.next_step(S.row_of("F9631"), {}, queue())[1].startswith("with the team"), "the line doesn't read the QA job as before")
+    qa_("fail", "F9631", "off as before")
+    import qatests
+    need(not find("Fix for F9631") and qatests.fix_road("F9631"), "with the switch off a fail didn't open the road of a new item")
+    import backend
+    from pathlib import Path
+    ws = Path(D) / "backend-ws"
+    (ws / "HQ").mkdir(parents=True, exist_ok=True)
+    (ws / "HQ/backend.json").write_text('{"on": ["briefing"]}')
+    os.environ.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
+    need(backend.on("whole_build_review", ws) and backend.on("briefing", ws) and not backend.on("handover", ws), "whole_build_review isn't on by default")
+    os.environ["HQ_BACKEND"] = str(ws / "HQ/backend.json")
+    backend.switch("whole_build_review", False)
+    need(not backend.on("whole_build_review") and backend.on("briefing"), "off doesn't turn it off, or turned another off")
+    backend.switch("whole_build_review", True)
+    need(backend.on("whole_build_review") and "off" not in json.loads((ws / "HQ/backend.json").read_text()), "on again doesn't clear it")
+    print("OK with the switch off a QA job per build and the road of a new item, as before; on by default, and turned off and on"); sys.exit(0)
+print("FAIL unknown " + what); sys.exit(1)
+'''
+
+
+_WB_RUNNER = r'''#!/usr/bin/env python3
+# A stand-in for app/happy_flows.py as proof.py starts it: the flows asked for (--only), each passed unless WB_FAIL_HEAD names it in a
+# copy of the build (one with count.txt) or WB_FAIL_BASE in a copy of the code before it; what it was asked is kept in WB_RUNS.
+import json, os, sys
+nums = sys.argv[sys.argv.index("--only") + 1].split(",") if "--only" in sys.argv else ["1"]
+built = os.path.exists("count.txt")
+fail = set(filter(None, os.environ.get("WB_FAIL_HEAD" if built else "WB_FAIL_BASE", "").split(",")))
+open(os.environ["WB_RUNS"], "a").write(json.dumps({"args": sys.argv[1:], "built": built}) + "\n")
+print("\n== Result")
+for n in nums:
+    print(f"      {n}: FAILED - made up" if n in fail else f"      {n}: fine")
+print(f"\n{len([n for n in nums if n not in fail])} of {len(nums)} passed")
+'''
+
+
+def _wb_run(self, name: str, what: str, on: bool = True, **more) -> str:
+    ws, env, d = self._wall_env(f"wb{name}", hour=23)
+    env = {**env, "HQ_PROOF_ROOT": str(d / "repo"), "HQ_MAC_HALF_FILE": str(d / "mac-half.json"), "HQ_WHOLE_BUILD_STATE": str(d / "whole-build.json"),
+           "HQ_NO_WALL": "1"}
+    if on:
+        env["HQ_BACKEND_WHOLE_BUILD_REVIEW"] = "1"
+    else:
+        env.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
+    runner = d / "flows-stand-in"  # the flows' stand-in (proof.py's HQ_PROOF_RUNNER): it keeps what it was asked, and fails what it's told
+    runner.write_text(_WB_RUNNER)
+    runner.chmod(0o755)
+    env.update({"HQ_PROOF_RUNNER": str(runner), "WB_RUNS": str(d / "runs.jsonl")})
+    env.update(more)
+    drv = d / "wb-driver.py"
+    drv.write_text(_WB_DRIVER)
+    import subprocess as _sp
+    r = _sp.run([sys.executable, str(drv), str(ROOT), str(d), what], capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=600)
+    out = (r.stdout + r.stderr).strip()
+    ok = [ln for ln in out.splitlines() if ln.startswith("OK ")]
+    need(r.returncode == 0 and ok, f"{what}: {out[-1500:]}")
+    return ok[-1][3:]
+
+
+async def _wb_flow630(self) -> str:
+    """11 November 2026, no Claude: two builds done on a throwaway HQ get no QA job each; the line waits on them; no review while a build
+    still waits or before the builds settle; then ONE review job, kind qa, whose first prompt holds both items whole, his words, the
+    front's open points when there are some (and says none when not), the build's commits, its record and her sealed tests, and the base."""
+    return _wb_run(self, "630", "review")
+
+
+async def _wb_flow631(self) -> str:
+    """11 November 2026, no Claude: the review's verdicts land as QA marks per item (pass and fail), the release gate takes the passed item
+    and holds the failed one; the fail goes to the builder's own chat as a continuation with the finding, no road of a new item; that chat is
+    resumed, and when it can't be (its context full, too old, not here) the job starts fresh with the item, the commits and the finding."""
+    return _wb_run(self, "631", "verdicts")
+
+
+async def _wb_flow632(self) -> str:
+    """11 November 2026, no Claude: the fix lands (no QA job of its own), one recheck runs over only the failed item, with its earlier
+    finding and the files the fix touched; failing again it's held: no third round, one text to him, the line holds it, the release says
+    why, and the old road of a new item waits for when the hold is lifted."""
+    return _wb_run(self, "632", "recheck")
+
+
+async def _wb_flow633(self) -> str:
+    """11 November 2026, no Claude: with whole_build_review off a build gets its QA job and a fail opens the road of a new item, as before;
+    the switch is on by default (an "off" list in backend.json), and turns off and on without touching the other switches."""
+    return _wb_run(self, "633", "off", on=False)
+
+
+async def _wb_flow634(self) -> str:
+    """11 November 2026, no Claude: a review that ends without a verdict for an item takes it into the next review once; twice, it's held
+    with one text; an item whose only open part waits for the laptop (F216) waits, and the laptop's pass ends its road."""
+    return _wb_run(self, "634", "missed")
+
+
+for _n in range(630, 635):
+    setattr(Run, f"flow{_n}", globals()[f"_wb_flow{_n}"])
+async def _wb_flow637(self) -> str:
+    """11 November 2026, no Claude (the flows stood in): the whole set once, at the end. A build's own record runs only its own part (the
+    flows its row names; her sealed tests when it has them), not the 17; the program runs the 17 once on the merged code before the
+    review, runs what's red again on the code from before the builds, and the review's first prompt says what was red before and what's
+    new, and asks for no quick set of its own; a pass waits for that run and is refused while it's red on a flow the item names."""
+    return _wb_run(self, "637", "once")
+
+
+Run.flow637 = _wb_flow637
+Run._wb_run = _wb_run
+FLOWS.update({
+    630: ("Whole build (1): builds done get no QA job each; one review over all of them, its first prompt with each item whole, his words, the front's points, commits and records", False, "flow630"),
+    631: ("Whole build (2): a verdict per item as QA marks the release gate reads; a fail back to the builder's own chat, fresh and fully fed when it can't be continued", False, "flow631"),
+    632: ("Whole build (3): the fix lands, one recheck over only the failed item; still failing it's held, one text, no third round", False, "flow632"),
+    633: ("Whole build (4): with whole_build_review off, a QA job per build as before; the switch is on by default and turns off and on", False, "flow633"),
+    637: ("Whole build (6): the whole set once at the end: a build's record runs only its own flows; the 17 once on the merged code, red-before told apart, read by the review and by a pass", False, "flow637"),
+    634: ("Whole build (5): a review without a verdict takes the item once more, then holds it; the laptop's half waits and its pass counts", False, "flow634"),
+})
+
+
+_SIDE_FAKE = r'''#!/usr/bin/env python3
+# A stand-in for claude: one builder of the side-by-side flow. It reads which item from its prompt, works in its own worktree only,
+# commits there and says done; a merge job resolves its collision keeping both sides.
+import json, os, re, subprocess, sys
+prompt = sys.stdin.read()
+wt, n, root = os.environ.get("HQ_SIDE_WORKTREE", ""), os.environ.get("HQ_JOB", ""), os.environ["SIDE_HQ"]
+open(os.environ["SIDE_SEEN"], "a").write(json.dumps({"n": n, "wt": wt, "proof": os.environ.get("HQ_PROOF_ROOT", "")}) + "\n")
+g = lambda *a: subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True)
+m = re.search(r"Merge (F\d+) into dev", prompt)
+if m:
+    g("merge", "dev")
+    open(os.path.join(wt, "shared.txt"), "w").write("line one by F9636\nline one by F9637\n")
+    g("add", "-A"); g("commit", "-qm", f"{m.group(1)}: both sides kept")
+else:
+    label = re.search(r"(F\d+) on the HQ roadmap", prompt).group(1)
+    os.makedirs(os.path.join(wt, "app/flows_items"), exist_ok=True)
+    open(os.path.join(wt, f"app/flows_items/{label}.py"), "w").write(f"FLOWS.update({{\n    {label[1:]}: ('its own flow', False, 'flow{label[1:]}'),\n}})\n")
+    if label in ("F9636", "F9637"):
+        open(os.path.join(wt, "shared.txt"), "w").write(f"line one by {label}\n")
+    g("add", "-A"); g("commit", "-qm", f"{label}: built side by side")
+subprocess.run([sys.executable, os.path.join(root, "routine/jobs.py"), "done", n], capture_output=True, text=True)
+print(json.dumps({"type": "result", "subtype": "success", "result": "done", "is_error": False}), flush=True)
+'''
+
+
+def _side_setup(self, name, on=True):
+    import subprocess as _sp
+    ws, env, d = self._wall_env(f"side{name}", hour=23)
+    jobs, minute, state, new = self._wall_tools(env, d, ws)
+    self._wall_usage(env)
+    repo = d / "repo"
+    repo.mkdir()
+    g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "app").mkdir()
+    (repo / "app/happy_flows.py").write_text("FLOWS = {\n    1: ('one', False, 'flow1'),\n}\n")
+    (repo / "shared.txt").write_text("line one\n")
+    g("add", "-A"); g("commit", "-qm", "the code before")
+    g("checkout", "-qb", "dev")
+    fake = d / "claude"
+    fake.write_text(_SIDE_FAKE)
+    fake.chmod(0o755)
+    env.update({"HQ_CLAUDE": str(fake), "HQ_SIDE_ROOT": str(repo), "HQ_SIDE_DIR": str(d / "side"), "HQ_PROOF_ROOT": str(repo),
+                "HQ_SIDE_BY_SIDE_STATE": str(d / "side.json"), "HQ_WHOLE_BUILD_STATE": str(d / "wb.json"), "SIDE_HQ": str(ROOT),
+                "SIDE_SEEN": str(d / "seen.jsonl"), "HQ_BACKEND_WHOLE_BUILD_REVIEW": "1"})
+    runner = d / "flows-stand-in"
+    runner.write_text(_WB_RUNNER)
+    runner.chmod(0o755)
+    env.update({"HQ_PROOF_RUNNER": str(runner), "WB_RUNS": str(d / "runs.jsonl")})
+    if on:
+        env["HQ_BACKEND_SIDE_BY_SIDE"] = "1"
+    else:
+        env.pop("HQ_BACKEND_SIDE_BY_SIDE", None)
+    rm = ws / "HQ/roadmap.md"
+    t = rm.read_text()
+    rows = "".join(f"| ⬜ | F{x} The made-up side item {x} | Made up for the side-by-side flow. His words: \"build {x}\". Done means: it's built. | |\n"
+                   for x in (9635, 9636, 9637))
+    marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+    i = t.index("## Phase F · Bugs")
+    k = t.index(marker, i) + len(marker)
+    rm.write_text(t[:k] + rows + t[k:])
+    gate = d / "gate"  # the usage gate's stand-in: it lets everything go and keeps what each start asked it
+    gate.write_text("#!/bin/sh\necho \"$*\" >> " + str(d / "gate.log") + "\necho GO\n")
+    gate.chmod(0o755)
+    env["WALL_STAND_IN"] = str(gate)
+    ns = [new(f"F{x} on the HQ roadmap: build it as it says", "--not-ready", "--kind", "small") for x in (9635, 9636, 9637)]
+    return ws, env, d, repo, g, jobs, minute, state, new, ns
+
+
+async def _side_flow635(self) -> str:
+    """11 November 2026, no Claude (a stand-in builder): three ready builds start side by side through the routine's real minute, one a
+    minute, each on its own branch in its own worktree (its record's root there, not HQ's folder); they run at once, then are brought
+    together into dev in order; two of them edited the same line, so the later one goes back to its builder's chat as a merge job in its
+    own worktree, which keeps both; each item's new flow is a file of its own and never collides; only then the one whole-build review
+    runs, over all three on the merged code. The jobs line says they run side by side; the estimates end each at its own time."""
+    import subprocess as _sp
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "635")
+    scripts = []
+    for k in range(3):
+        r = minute()
+        need(len(r["opened"]) == 1, f"minute {k + 1} didn't start one: {r['opened']} {r['log'][-5:]}")
+        scripts.append(r["opened"][0])
+    need(all(state(n).startswith("running") for n in ns), f"not all three running: {[state(n) for n in ns]}")
+    asks = [ln for ln in (d / "gate.log").read_text().splitlines() if "--gate" in ln and "--line" not in ln]
+    five = [float(re.search(r"five=([\d.]+)", a).group(1)) for a in asks[-3:]]
+    need(len(five) == 3 and five[0] < five[1] < five[2], f"the gate wasn't asked for what the running ones still need too: {asks[-3:]}")
+    need(any("running side by side" in str(b.get("text")) for b in r["beats"]), f"the jobs line doesn't say side by side: {r['beats'][-3:]}")
+    wts = [re.search(r"HQ_SIDE_WORKTREE=(\S+)", Path(s).read_text()).group(1).strip("'") for s in scripts]
+    need(len(set(wts)) == 3 and all(Path(w).is_dir() for w in wts), f"not three worktrees: {wts}")
+    branches = g("branch", "--list", "side/*", "--format=%(refname:short)").stdout.split()
+    need(sorted(branches) == sorted(f"side/job-{n}" for n in ns), f"not a branch each: {branches}")
+    sys.path.insert(0, str(ROOT / "routine"))
+    p = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import estimate; "
+                 "pl = estimate.plan(); print(json.dumps([pl['jobs'][str(n)]['eta'] for n in sys.argv[2:]]))", str(ROOT / "routine"), *ns],
+                capture_output=True, text=True, env=env, timeout=60)
+    etas = json.loads(p.stdout.strip().splitlines()[-1])
+    need(max(etas) - min(etas) < 3600, f"the estimates queue the running builds one after another: {etas}")
+    procs = [_sp.Popen(["bash", s], stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, env=env) for s in scripts]
+    for pr in procs:
+        pr.wait(timeout=120)
+    seen = [json.loads(x) for x in (d / "seen.jsonl").read_text().splitlines()]
+    need(len(seen) == 3 and all(s["wt"] and s["proof"] == s["wt"] for s in seen), f"a builder didn't get its own worktree as its record's root: {seen}")
+    need(all(state(n).startswith("done") for n in ns), f"not all done: {[state(n) for n in ns]}")
+    r = minute()
+    need(any("brought together into dev" in x for x in r["log"]), f"nothing brought together: {r['log'][-8:]}")
+    q = json.loads(jobs("next").stdout)
+    mj = [j for j in q["waiting"] + q["running"] if j["text"].startswith("Merge F9637 into dev")]
+    need(len(mj) == 1 and "shared.txt" in mj[0]["text"] and f"job {ns[2]}" in mj[0]["text"],
+         f"the collision didn't go back to F9637's builder: {[j['text'][:80] for j in q['waiting'] + q['running']]} {r['log'][-6:]}")
+    need(not [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")], "the review came before everything was together")
+    log = g("log", "--format=%s", "dev").stdout
+    need("F9635: brought together" in log and "F9636: brought together" in log and "F9637: brought together" not in log, f"dev: {log}")
+    need(len(r["opened"]) == 1 and wts[2] in Path(r["opened"][0]).read_text(), "the merge job doesn't run in F9637's own worktree")
+    _sp.run(["bash", r["opened"][0]], capture_output=True, text=True, env=env, timeout=120)
+    r = minute()
+    log = g("log", "--format=%s", "dev").stdout
+    shared = g("show", "dev:shared.txt").stdout
+    need("F9637: brought together" in log and "by F9636" in shared and "by F9637" in shared, f"the merge didn't keep both: {log} {shared}")
+    files = g("ls-tree", "--name-only", "dev", "app/flows_items/").stdout.split()
+    need(sorted(files) == [f"app/flows_items/F{x}.py" for x in (9635, 9636, 9637)], f"the items' own flow files: {files}")
+    p = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import proof; print(sorted(proof._known_flows(sys.argv[2])))",
+                 str(ROOT / "routine"), str(repo)], capture_output=True, text=True, env=env, timeout=60)
+    need("9635" in p.stdout and "9637" in p.stdout, f"the items' own flows aren't known flows: {p.stdout} {p.stderr[-300:]}")
+    p = _sp.run([sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); import wholebuild as W; print(W.minute(now=time.time() + 999))\n"
+                 "for _ in range(240):\n    r = W.load()['reviews'].get('1') or {}\n    if (r.get('run') or {}).get('state') == 'done': break\n    time.sleep(0.25)\n"
+                 "print(W.minute())", str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=180)
+    q = json.loads(jobs("next").stdout)
+    rv = [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")]
+    need(len(rv) == 1 and all(f"F{x}" in rv[0]["text"] for x in (9635, 9636, 9637)), f"not one review over all three: {p.stdout} {p.stderr[-400:]}")
+    return "three side by side on their own branches, brought together, the collision back to its builder, then one review over all three"
+
+
+async def _side_flow636(self) -> str:
+    """11 November 2026, no Claude: with side_by_side off the same three ready builds run one after another, in HQ's own folder
+    (no worktree, no branch of their own), as before."""
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "636", on=False)
+    r = minute()
+    need(len(r["opened"]) == 1 and "HQ_SIDE_WORKTREE" not in Path(r["opened"][0]).read_text(), "off, the first build got a worktree")
+    r = minute()
+    need(not r["opened"] and [state(n).startswith("running") for n in ns] == [True, False, False], f"off, a second build started beside it: {[state(n) for n in ns]}")
+    need(not g("branch", "--list", "side/*").stdout.strip(), "off, a side branch was made")
+    return "with side_by_side off, one build after another in HQ's own folder"
+
+
+for _n in (635, 636):
+    setattr(Run, f"flow{_n}", globals()[f"_side_flow{_n}"])
+FLOWS.update({
+    635: ("Side by side (1): three ready builds start at once on their own branches, are brought together into dev, a collision back to the later builder's chat, then one whole-build review", False, "flow635"),
+    636: ("Side by side (2): with side_by_side off, one build after another in HQ's own folder, as before", False, "flow636"),
+})
+
+
+def _items_flows() -> None:
+    """11 November 2026: an item's own flows, app/flows_items/LABEL.py, read into this file's namespace (Run, FLOWS, need, ...). Side
+    by side, each builder writes its new flows there, so the branches never collide in this file (routine/sidebyside.py)."""
+    d = Path(__file__).resolve().parent / "flows_items"
+    for f in sorted(d.glob("*.py")) if d.is_dir() else []:
+        exec(compile(f.read_text(encoding="utf8"), str(f), "exec"), globals())
+
+
+_items_flows()
+# ---------- end of the whole-build block (630-639) ----------
+
+
 async def main(args) -> bool:
     chosen = sorted(int(x) for x in args.only.split(",")) if args.only else sorted(FLOWS)
     chosen = [n for n in chosen if str(n) not in args.skip.split(",")]  # F101: the night's Mac-only ones

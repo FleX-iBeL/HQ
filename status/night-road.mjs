@@ -57,13 +57,15 @@ async function readNight(key) {
 // so two jobs with the same plain name stay two rows; the key is never shown.
 const LABEL = '([A-Z]{1,2}\\d{1,4}(?:\\.\\d+)?)';
 const PLAIN = [
+  [/^QA of the whole build\b/, () => 'QA of the whole build'],  // 11 November 2026: the one review over the build (routine/wholebuild.py)
+  [new RegExp(`^Fix for ${LABEL} after the whole-build review\\b`), (m) => `${m[1]} fix`],
   [new RegExp(`^QA(?: check)? of ${LABEL}\\b`), (m) => `QA of ${m[1]}`],
   [new RegExp(`^Prep of ${LABEL}\\b`), (m) => `Prep of ${m[1]}`],
   [new RegExp(`^${LABEL} fix\\b`), (m) => `${m[1]} fix`],
   [new RegExp(`^Read the ${LABEL} row\\b`), (m) => `${m[1]} build`],
   [new RegExp(`^${LABEL}(?: on the HQ roadmap| fresh build|:)`), (m) => `${m[1]} build`],
 ];
-const KEPT_PLAIN = new RegExp(`^(?:(?:${LABEL} (?:build|fix|work)|QA of ${LABEL}|Prep of ${LABEL}|A team job)$|${LABEL} (?:QA (?:failed|passed)|review round)\\b|Release |Went wrong: |An item )`);
+const KEPT_PLAIN = new RegExp(`^(?:(?:${LABEL} (?:build|fix|work)|QA of ${LABEL}|QA of the whole build|Prep of ${LABEL}|A team job)$|${LABEL} (?:QA (?:failed|passed)|review round)\\b|Release |Went wrong: |An item )`);
 /** A job's text, or a row name kept before plain names, as the plain name a person reads; '' for a scheduler tick (no row). */
 export function plainName(text) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();

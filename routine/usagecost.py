@@ -860,6 +860,8 @@ def track(n, text="", now=None):
         _step(rec, _snap(now))
     if rec.get("running", True):  # H173: its own tokens, from its own chats
         _own(rec, n)
+    if SHARED:
+        rec["shared"] = True
     if isinstance(rec.get("est"), dict):  # H220: the top of its estimate, with the guesses known by now
         rec["est"]["top"] = top_factor(rec["est"], job_guesses(n))
         was, plan = rec["est"].get("plan"), current_plan()
@@ -946,11 +948,14 @@ def job_guesses(n):
     return {k: e[k] for k in GUESS_KEYS if e.get(k)}
 
 
+SHARED = False  # 11 November 2026: set by the routine while builds run side by side (tick._side_watch)
+
+
 def overrun(rec):
     """None, or {"line", "used", "est", "top"} when the running job has used about four times the top of its estimated
     cost on a line (H220: the top is the estimate times top_factor, kept in its est as "top" by track)."""
-    if not rec or (rec.get("late") and not rec.get("own")) or not rec.get("est"):
-        return None
+    if not rec or ((rec.get("late") or rec.get("shared")) and not rec.get("own")) or not rec.get("est"):
+        return None  # side by side, the readings' rise is everyone's: only a job's own tokens can pause it
     so_far = rec.get("so_far") or _so_far(rec)
     f = float(rec["est"].get("top") or 1)  # F100: this limit never rises: a resume only gives a boxed job more time and turns
     for k in KEYS:

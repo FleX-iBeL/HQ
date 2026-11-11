@@ -47,6 +47,10 @@ the record, never anyone's word, and does the next step:
     and the switch, and switched on again the same job goes back in line, once: no second prep is queued. A running one finishes.
     The same for a build the line sent while its item's build switch goes off (QA, 9 November 2026: F197's job 9521).
 
+  - Built with the switch whole_build_review on (11 November 2026, routine/wholebuild.py): while it waits for the whole-build review,
+    is back with its builder for its one fix round, or waits for its recheck, the line waits (wholebuild.line_step); held after the
+    recheck, it holds until its words change or wholebuild.py lift.
+
 His pause of the team (jobs.py off) holds the line too.
 
     python3 routine/line.py tick         one pass (the routine runs it every minute on the main)
@@ -198,6 +202,13 @@ def next_step(row, g, jobs, now=None, e=None):
                 return "split", f"job {j['n']} is red only on {len(other)} check(s) unrelated to {label}"
             return "rerun", f"job {j['n']} ended without a green record"
         return "wait", f"with the team: job {j['n']} ({j['state']})"
+    try:  # 11 November 2026: built and in the whole-build road (its review, its fix in its builder's chat, its recheck, held after)
+        import wholebuild
+        wb = wholebuild.line_step(row)
+        if wb:
+            return wb
+    except Exception:
+        pass
     if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted;
         return "hold", held  # a prep of it queued before the hold doesn't hide it: wall.why_not keeps that one back
     p = prep_of(jobs, label)

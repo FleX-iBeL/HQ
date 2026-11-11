@@ -28,6 +28,10 @@ record is `job-N-steps.json` next to the carry-on record; a held job's step is i
 resume prompt, the fresh note and a crash rerun's first prompt name the saved steps and where to carry on
 (`steps_words`, `steps_note`), and a crash rerun takes its first run's steps (`copy_steps`). The commits of the
 steps say "(job N, step K of M)" in their subject, so a fresh chat on the other computer finds them in git log.
+
+11 November 2026 (routine/wholebuild.py, routine/sidebyside.py): a job whose record says it `continues` another (a fix after the
+whole-build review, or bringing a side build together) is that job's chat picked up again: `plan` resumes the builder's session unless
+wholebuild.chat_problem says it can't be (not here, too old, its context too full); then it's fresh, fully fed by its first prompt.
 """
 import glob, json, os, re, subprocess, sys, time, uuid
 
@@ -123,6 +127,16 @@ def plan(job, text, folder=None):
         return {"mode": "new", "session": str(uuid.uuid4())}
     step = rec.get("step") or step_from_roadmap(n, text)
     out = {"step": step, "held": rec.get("held", "")}
+    if rec.get("continues"):  # 11 November 2026: a fix after the whole-build review, in the chat of the job that built the item
+        out["continues"] = rec["continues"]
+        if "started" in rec:  # it ran already (held by the usage line since): its own chat now, as any held job
+            pass
+        else:
+            import wholebuild
+            why = wholebuild.chat_problem(rec.get("session"), folder)
+            if not why:
+                return dict(out, mode="resume", session=rec["session"])
+            return dict(out, mode="fresh", session=str(uuid.uuid4()), why=why)
     if rec.get("session") and chat_there(rec["session"], folder):
         return dict(out, mode="resume", session=rec["session"])
     why = ("its earlier chat isn't on this computer (it ran on the other one, or before this was built)"
@@ -260,7 +274,7 @@ BIG_MINUTES = 40
 def started(n, p):
     """The routine started job n as planned: keep its chat's id; the hold is used up."""
     save(n, {"session": p["session"], "started": time.time(), "mode": p["mode"],
-             **({"step": p["step"]} if p.get("step") else {})})
+             **({"step": p["step"]} if p.get("step") else {}), **({"continues": p["continues"]} if p.get("continues") else {})})
 
 
 def resume_prompt(n, where, p, text_of_job, past_note=""):
