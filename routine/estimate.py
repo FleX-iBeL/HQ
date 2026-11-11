@@ -2431,6 +2431,7 @@ def plan(now=None):
     # H174: what the total counts, part by part, so it adds up with the per-job lines.
     parts = {"running_min": 0, "waiting_min": 0, "gaps": 0, "held": 0, "guess_in": False, "five": 0.0, "weekly": 0.0}
     running = [j for j in js if j["state"].startswith(("running", "stop asked"))]
+    par, ends, lates = len(running) > 1, [], []  # 11 November 2026: side by side, each running job ends at its own time
     for j in running:
         e = st.get(str(j["n"])) or known(j["n"])
         est = e.get("est") or job_estimate(j["n"], j["text"], hist, run["name"])["est"]
@@ -2458,7 +2459,12 @@ def plan(now=None):
         if j["state"].startswith("stop asked"):
             left, over = 1, False
         nxt = left if left > 0 else 2  # running longer than estimated: a couple of minutes more, at least
-        cursor += nxt * 60
+        if par:
+            cursor = now + nxt * 60
+            ends.append(cursor)
+            lates.append(max(lat_ := (m79["latest"] if m79 else latest_of(est, kind_for(j["text"], e.get("kind")), hist)), 0) - done_min)
+        else:
+            cursor += nxt * 60
         left_total += nxt
         lat = m79["latest"] if m79 else latest_of(est, kind_for(j["text"], e.get("kind")), hist)  # F66, F79
         late_total += max(lat - done_min, nxt)
@@ -2467,6 +2473,8 @@ def plan(now=None):
         out["jobs"][str(j["n"])] = {"est": est, "kind": kind_for(j["text"], e.get("kind")), "so_far": done_min,
                                     "left": left, "over": over, "eta": None if waits else int(cursor),
                                     "latest": lat, "eta_latest": None if waits else int(now + late_total * 60)}
+        if par:  # its own latest end, not the sum of the others'
+            out["jobs"][str(j["n"])]["eta_latest"] = None if waits else int(now + max(lat - done_min, nxt) * 60)
         out["jobs"][str(j["n"])].update(guess_detail(e))  # H168, H190
         if m79:  # F79
             out["jobs"][str(j["n"])]["sure"] = m79.get("sure")
@@ -2495,6 +2503,9 @@ def plan(now=None):
                 parts[w] += max(0.0, round(c.get(k, 0), 1) - round(used.get(k, 0), 1))
             if proj:
                 proj.add({k: max(0.0, c.get(k, 0) - used.get(k, 0)) for k in U.KEYS}, now)
+    if par and ends:  # the next waiting one starts when the first of them is done
+        cursor = min(ends)
+        late_total = max(0, min(lates))
     run_end = cursor  # H99: when the running job should be done; a priority item can start from there
     line = [j for j in js if j["state"] == "ready" or j["state"].startswith("held")]
     for j in line:

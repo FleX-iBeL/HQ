@@ -33,6 +33,12 @@ now names every done example of the row with its evidence, three flags each, in 
 example), --ran (the command, page or step really run for it) and --got (what came out). A pass without them, or
 with an example missing its ran or got, is refused and nothing is written. The mark keeps them: "Tried: (1) ...".
 
+11 November 2026, the weight at the back (routine/wholebuild.py, the backend switch whole_build_review, on by default): a build done
+queues no QA job of its own (on_done); one review over the whole build, "QA of the whole build (review R)", writes the same marks per
+item with pass and fail. A fail of an item in that road (fail -> wholebuild.on_fail) goes back to the chat that built it, then one
+recheck, then it's held, in place of the road of a new item (F151) and of MAX_FAILS; the release gate reads the marks as before.
+Off: everything above, as it was.
+
 usage:
   python3 routine/qa.py pass LABEL "SUMMARY" --example E --ran R --got G [--example ... ] [--job N]
                                                                 QA passed, in the row, each example with its evidence
@@ -556,7 +562,7 @@ def renumbered(label: str) -> str:
 # F101 (C73): a commit that names no item holds the release, unless it only touches the tests, the version or the changelog.
 # F112: the one set of free files, for the hold, the night and the release's status alike: the tests, the tutorial's text (flows 120 and 134 read it
 # the same night), the version, the changelog, and the release's own way-back file.
-FREE_FILES = ("app/happy_flows.py", "routine/flowsets.py", "app/test_", "app/web/tour.json", "VERSION", "CHANGELOG.md", "README.md", "updates/",
+FREE_FILES = ("app/happy_flows.py", "app/flows_items/", "routine/flowsets.py", "app/test_", "app/web/tour.json", "VERSION", "CHANGELOG.md", "README.md", "updates/",
               "routine/way-back.json")
 
 

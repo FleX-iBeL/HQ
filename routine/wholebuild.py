@@ -675,18 +675,34 @@ def _findings(label: str) -> list[dict]:
 
 
 def resume_prompt(n: int, where: str, plan: dict, job: dict) -> str:
+    import carryon
+    msg = carryon.load(n).get("message")
+    jp = os.path.join(HERE, "jobs.py")
+    if msg:  # side by side: bringing it together (sidebyside._send_back), in its own chat
+        return (f"let's go again. This is your own chat from job {plan.get('continues')}; the routine picks it up again in {where} as job "
+                f"{n}. {msg} From now on this run is job {n}: use {n}, not {plan.get('continues')}, in every command. Read your notes first: "
+                f"python3 {jp} notes {n}. As the very last step: python3 {jp} done {n}, nothing after it.")
     label = fix_label(job["text"]) or "the item"
     fs = _findings(label)
-    jp = os.path.join(HERE, "jobs.py")
     return (f"let's go again. This is your own chat from job {plan.get('continues')}, where you built {label}; the routine (phase L) "
             f"picks it up again in {where} as job {n}. The whole-build review tried {label} for real on the whole build and failed it. "
             "Its findings:\n" + "\n".join(f"- {f['what']}" for f in fs[-3:]) + "\n\n"
             f"Fix what's off so every done example of {label} holds, on the build as it stands now (other items were built after yours: "
             "git pull and git log first, and keep their work whole). This is the one fix round: after it, one recheck, and an item still "
             f"failing is held. From now on this run is job {n}: use {n}, not {plan.get('continues')}, in every command (notes, guess, done). "
-            f"Read your notes first and after each step, always before a push: python3 {jp} notes {n} (H283). Same as before: commit, push "
-            f"to dev with push.py after the privacy check, write under the {label} row what was fixed, and end; the runner runs the "
+            f"Read your notes first and after each step, always before a push: python3 {jp} notes {n} (H283). Same as before: commit, "
+            + ("in your own worktree (named below), no push: the program brings it together into dev" if _side(label) else
+               "push to dev with push.py after the privacy check") +
+            f", write under the {label} row what was fixed, and end; the runner runs the "
             f"record and marks the job done. As the very last step: python3 {jp} done {n}, nothing after it.")
+
+
+def _side(label: str) -> bool:
+    try:
+        import sidebyside
+        return sidebyside.on() and bool(sidebyside._item_worktree(sidebyside.load(), label))
+    except Exception:
+        return False
 
 
 def fresh_note(n: int, plan: dict, job: dict) -> str:

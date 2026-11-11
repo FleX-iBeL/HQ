@@ -405,9 +405,17 @@ def _known_flows(wt: str) -> set[int]:
     """F188: the flow numbers the copy's happy_flows.py has (its FLOWS entries); empty when it can't be read."""
     try:
         with open(os.path.join(wt, "app", "happy_flows.py"), encoding="utf8") as f:
-            return {int(x) for x in re.findall(r"(?m)^    (\d+): \(", f.read())}
+            got = {int(x) for x in re.findall(r"(?m)^    (\d+): \(", f.read())}
     except OSError:
         return set()
+    try:  # 11 November 2026: an item's own flows file (app/flows_items/LABEL.py)
+        for nm in os.listdir(os.path.join(wt, "app", "flows_items")):
+            if nm.endswith(".py"):
+                with open(os.path.join(wt, "app", "flows_items", nm), encoding="utf8") as f:
+                    got |= {int(x) for x in re.findall(r"(?m)^    (\d+): \(", f.read())}
+    except OSError:
+        pass
+    return got
 
 
 def _flows(wt: str, args: list[str], log) -> tuple[int, str]:
@@ -463,6 +471,15 @@ def _last_words(out: str) -> str:
 
 def run(n: int) -> int:
     was = _on_stop()
+    lk = None
+    try:
+        import sidebyside
+        if sidebyside.on() and not _held_by_parent(lock_path()):  # 11 November 2026: two builds' runs at once share the flows' ports
+            import fcntl
+            lk = open(lock_path(), "a")
+            fcntl.flock(lk, fcntl.LOCK_EX)
+    except ImportError:
+        pass
     try:
         return _run(n)
     except Stopped as e:
@@ -470,6 +487,8 @@ def run(n: int) -> int:
         return 143
     finally:
         _off_stop(was)
+        if lk:
+            lk.close()
 
 
 def _run(n: int) -> int:

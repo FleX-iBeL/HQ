@@ -41539,6 +41539,164 @@ FLOWS.update({
     633: ("Whole build (4): with whole_build_review off, a QA job per build as before; the switch is on by default and turns off and on", False, "flow633"),
     634: ("Whole build (5): a review without a verdict takes the item once more, then holds it; the laptop's half waits and its pass counts", False, "flow634"),
 })
+
+
+_SIDE_FAKE = r'''#!/usr/bin/env python3
+# A stand-in for claude: one builder of the side-by-side flow. It reads which item from its prompt, works in its own worktree only,
+# commits there and says done; a merge job resolves its collision keeping both sides.
+import json, os, re, subprocess, sys
+prompt = sys.stdin.read()
+wt, n, root = os.environ.get("HQ_SIDE_WORKTREE", ""), os.environ.get("HQ_JOB", ""), os.environ["SIDE_HQ"]
+open(os.environ["SIDE_SEEN"], "a").write(json.dumps({"n": n, "wt": wt, "proof": os.environ.get("HQ_PROOF_ROOT", "")}) + "\n")
+g = lambda *a: subprocess.run(["git", "-C", wt, *a], capture_output=True, text=True)
+m = re.search(r"Merge (F\d+) into dev", prompt)
+if m:
+    g("merge", "dev")
+    open(os.path.join(wt, "shared.txt"), "w").write("line one by F9636\nline one by F9637\n")
+    g("add", "-A"); g("commit", "-qm", f"{m.group(1)}: both sides kept")
+else:
+    label = re.search(r"(F\d+) on the HQ roadmap", prompt).group(1)
+    os.makedirs(os.path.join(wt, "app/flows_items"), exist_ok=True)
+    open(os.path.join(wt, f"app/flows_items/{label}.py"), "w").write(f"FLOWS.update({{\n    {label[1:]}: ('its own flow', False, 'flow{label[1:]}'),\n}})\n")
+    if label in ("F9636", "F9637"):
+        open(os.path.join(wt, "shared.txt"), "w").write(f"line one by {label}\n")
+    g("add", "-A"); g("commit", "-qm", f"{label}: built side by side")
+subprocess.run([sys.executable, os.path.join(root, "routine/jobs.py"), "done", n], capture_output=True, text=True)
+print(json.dumps({"type": "result", "subtype": "success", "result": "done", "is_error": False}), flush=True)
+'''
+
+
+def _side_setup(self, name, on=True):
+    import subprocess as _sp
+    ws, env, d = self._wall_env(f"side{name}", hour=23)
+    jobs, minute, state, new = self._wall_tools(env, d, ws)
+    self._wall_usage(env)
+    repo = d / "repo"
+    repo.mkdir()
+    g = lambda *a: _sp.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "app").mkdir()
+    (repo / "app/happy_flows.py").write_text("FLOWS = {\n    1: ('one', False, 'flow1'),\n}\n")
+    (repo / "shared.txt").write_text("line one\n")
+    g("add", "-A"); g("commit", "-qm", "the code before")
+    g("checkout", "-qb", "dev")
+    fake = d / "claude"
+    fake.write_text(_SIDE_FAKE)
+    fake.chmod(0o755)
+    env.update({"HQ_CLAUDE": str(fake), "HQ_SIDE_ROOT": str(repo), "HQ_SIDE_DIR": str(d / "side"), "HQ_PROOF_ROOT": str(repo),
+                "HQ_SIDE_BY_SIDE_STATE": str(d / "side.json"), "HQ_WHOLE_BUILD_STATE": str(d / "wb.json"), "SIDE_HQ": str(ROOT),
+                "SIDE_SEEN": str(d / "seen.jsonl"), "HQ_BACKEND_WHOLE_BUILD_REVIEW": "1"})
+    if on:
+        env["HQ_BACKEND_SIDE_BY_SIDE"] = "1"
+    else:
+        env.pop("HQ_BACKEND_SIDE_BY_SIDE", None)
+    rm = ws / "HQ/roadmap.md"
+    t = rm.read_text()
+    rows = "".join(f"| ⬜ | F{x} The made-up side item {x} | Made up for the side-by-side flow. His words: \"build {x}\". Done means: it's built. | |\n"
+                   for x in (9635, 9636, 9637))
+    marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
+    i = t.index("## Phase F · Bugs")
+    k = t.index(marker, i) + len(marker)
+    rm.write_text(t[:k] + rows + t[k:])
+    gate = d / "gate"  # the usage gate's stand-in: it lets everything go and keeps what each start asked it
+    gate.write_text("#!/bin/sh\necho \"$*\" >> " + str(d / "gate.log") + "\necho GO\n")
+    gate.chmod(0o755)
+    env["WALL_STAND_IN"] = str(gate)
+    ns = [new(f"F{x} on the HQ roadmap: build it as it says", "--not-ready", "--kind", "small") for x in (9635, 9636, 9637)]
+    return ws, env, d, repo, g, jobs, minute, state, new, ns
+
+
+async def _side_flow635(self) -> str:
+    """11 November 2026, no Claude (a stand-in builder): three ready builds start side by side through the routine's real minute, one a
+    minute, each on its own branch in its own worktree (its record's root there, not HQ's folder); they run at once, then are brought
+    together into dev in order; two of them edited the same line, so the later one goes back to its builder's chat as a merge job in its
+    own worktree, which keeps both; each item's new flow is a file of its own and never collides; only then the one whole-build review
+    runs, over all three on the merged code. The jobs line says they run side by side; the estimates end each at its own time."""
+    import subprocess as _sp
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "635")
+    scripts = []
+    for k in range(3):
+        r = minute()
+        need(len(r["opened"]) == 1, f"minute {k + 1} didn't start one: {r['opened']} {r['log'][-5:]}")
+        scripts.append(r["opened"][0])
+    need(all(state(n).startswith("running") for n in ns), f"not all three running: {[state(n) for n in ns]}")
+    asks = [ln for ln in (d / "gate.log").read_text().splitlines() if "--gate" in ln and "--line" not in ln]
+    five = [float(re.search(r"five=([\d.]+)", a).group(1)) for a in asks[-3:]]
+    need(len(five) == 3 and five[0] < five[1] < five[2], f"the gate wasn't asked for what the running ones still need too: {asks[-3:]}")
+    need(any("running side by side" in str(b.get("text")) for b in r["beats"]), f"the jobs line doesn't say side by side: {r['beats'][-3:]}")
+    wts = [re.search(r"HQ_SIDE_WORKTREE=(\S+)", Path(s).read_text()).group(1).strip("'") for s in scripts]
+    need(len(set(wts)) == 3 and all(Path(w).is_dir() for w in wts), f"not three worktrees: {wts}")
+    branches = g("branch", "--list", "side/*", "--format=%(refname:short)").stdout.split()
+    need(sorted(branches) == sorted(f"side/job-{n}" for n in ns), f"not a branch each: {branches}")
+    sys.path.insert(0, str(ROOT / "routine"))
+    p = _sp.run([sys.executable, "-c", "import sys, json; sys.path.insert(0, sys.argv[1]); import estimate; "
+                 "pl = estimate.plan(); print(json.dumps([pl['jobs'][str(n)]['eta'] for n in sys.argv[2:]]))", str(ROOT / "routine"), *ns],
+                capture_output=True, text=True, env=env, timeout=60)
+    etas = json.loads(p.stdout.strip().splitlines()[-1])
+    need(max(etas) - min(etas) < 3600, f"the estimates queue the running builds one after another: {etas}")
+    procs = [_sp.Popen(["bash", s], stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, env=env) for s in scripts]
+    for pr in procs:
+        pr.wait(timeout=120)
+    seen = [json.loads(x) for x in (d / "seen.jsonl").read_text().splitlines()]
+    need(len(seen) == 3 and all(s["wt"] and s["proof"] == s["wt"] for s in seen), f"a builder didn't get its own worktree as its record's root: {seen}")
+    need(all(state(n).startswith("done") for n in ns), f"not all done: {[state(n) for n in ns]}")
+    r = minute()
+    need(any("brought together into dev" in x for x in r["log"]), f"nothing brought together: {r['log'][-8:]}")
+    q = json.loads(jobs("next").stdout)
+    mj = [j for j in q["waiting"] + q["running"] if j["text"].startswith("Merge F9637 into dev")]
+    need(len(mj) == 1 and "shared.txt" in mj[0]["text"] and f"job {ns[2]}" in mj[0]["text"],
+         f"the collision didn't go back to F9637's builder: {[j['text'][:80] for j in q['waiting'] + q['running']]} {r['log'][-6:]}")
+    need(not [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")], "the review came before everything was together")
+    log = g("log", "--format=%s", "dev").stdout
+    need("F9635: brought together" in log and "F9636: brought together" in log and "F9637: brought together" not in log, f"dev: {log}")
+    need(len(r["opened"]) == 1 and wts[2] in Path(r["opened"][0]).read_text(), "the merge job doesn't run in F9637's own worktree")
+    _sp.run(["bash", r["opened"][0]], capture_output=True, text=True, env=env, timeout=120)
+    r = minute()
+    log = g("log", "--format=%s", "dev").stdout
+    shared = g("show", "dev:shared.txt").stdout
+    need("F9637: brought together" in log and "by F9636" in shared and "by F9637" in shared, f"the merge didn't keep both: {log} {shared}")
+    files = g("ls-tree", "--name-only", "dev", "app/flows_items/").stdout.split()
+    need(sorted(files) == [f"app/flows_items/F{x}.py" for x in (9635, 9636, 9637)], f"the items' own flow files: {files}")
+    p = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import proof; print(sorted(proof._known_flows(sys.argv[2])))",
+                 str(ROOT / "routine"), str(repo)], capture_output=True, text=True, env=env, timeout=60)
+    need("9635" in p.stdout and "9637" in p.stdout, f"the items' own flows aren't known flows: {p.stdout} {p.stderr[-300:]}")
+    p = _sp.run([sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); import wholebuild as W; print(W.minute(now=time.time() + 999))",
+                 str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=120)
+    q = json.loads(jobs("next").stdout)
+    rv = [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")]
+    need(len(rv) == 1 and all(f"F{x}" in rv[0]["text"] for x in (9635, 9636, 9637)), f"not one review over all three: {p.stdout} {p.stderr[-400:]}")
+    return "three side by side on their own branches, brought together, the collision back to its builder, then one review over all three"
+
+
+async def _side_flow636(self) -> str:
+    """11 November 2026, no Claude: with side_by_side off the same three ready builds run one after another, in HQ's own folder
+    (no worktree, no branch of their own), as before."""
+    ws, env, d, repo, g, jobs, minute, state, new, ns = _side_setup(self, "636", on=False)
+    r = minute()
+    need(len(r["opened"]) == 1 and "HQ_SIDE_WORKTREE" not in Path(r["opened"][0]).read_text(), "off, the first build got a worktree")
+    r = minute()
+    need(not r["opened"] and [state(n).startswith("running") for n in ns] == [True, False, False], f"off, a second build started beside it: {[state(n) for n in ns]}")
+    need(not g("branch", "--list", "side/*").stdout.strip(), "off, a side branch was made")
+    return "with side_by_side off, one build after another in HQ's own folder"
+
+
+for _n in (635, 636):
+    setattr(Run, f"flow{_n}", globals()[f"_side_flow{_n}"])
+FLOWS.update({
+    635: ("Side by side (1): three ready builds start at once on their own branches, are brought together into dev, a collision back to the later builder's chat, then one whole-build review", False, "flow635"),
+    636: ("Side by side (2): with side_by_side off, one build after another in HQ's own folder, as before", False, "flow636"),
+})
+
+
+def _items_flows() -> None:
+    """11 November 2026: an item's own flows, app/flows_items/LABEL.py, read into this file's namespace (Run, FLOWS, need, ...). Side
+    by side, each builder writes its new flows there, so the branches never collide in this file (routine/sidebyside.py)."""
+    d = Path(__file__).resolve().parent / "flows_items"
+    for f in sorted(d.glob("*.py")) if d.is_dir() else []:
+        exec(compile(f.read_text(encoding="utf8"), str(f), "exec"), globals())
+
+
+_items_flows()
 # ---------- end of the whole-build block (630-639) ----------
 
 

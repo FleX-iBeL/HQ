@@ -1293,6 +1293,8 @@ def main(argv):
                 running = [x for x in jobs if x["state"].startswith("running")]
                 if not running:
                     sys.exit("No job is running.")
+                if len(running) > 1:  # 11 November 2026: side by side
+                    sys.exit(f"Jobs {', '.join(str(x['n']) for x in running)} are running side by side: say which, stop N.")
                 j = running[0]
             if j["state"].startswith("running"):
                 j["state"] = "stop asked"

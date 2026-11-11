@@ -28,6 +28,10 @@ record is `job-N-steps.json` next to the carry-on record; a held job's step is i
 resume prompt, the fresh note and a crash rerun's first prompt name the saved steps and where to carry on
 (`steps_words`, `steps_note`), and a crash rerun takes its first run's steps (`copy_steps`). The commits of the
 steps say "(job N, step K of M)" in their subject, so a fresh chat on the other computer finds them in git log.
+
+11 November 2026 (routine/wholebuild.py, routine/sidebyside.py): a job whose record says it `continues` another (a fix after the
+whole-build review, or bringing a side build together) is that job's chat picked up again: `plan` resumes the builder's session unless
+wholebuild.chat_problem says it can't be (not here, too old, its context too full); then it's fresh, fully fed by its first prompt.
 """
 import glob, json, os, re, subprocess, sys, time, uuid
 

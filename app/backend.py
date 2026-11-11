@@ -38,9 +38,13 @@ SWITCHES = {
     "whole_build_review": "One builder holds an item from start to end, and one review runs over the whole build once the "
                           "builds are through, in place of a QA job per item; a fail goes back to the builder's own chat, "
                           "then one recheck, then it's held (routine/wholebuild.py). Off: a QA job per built item, as before.",
+    "side_by_side": "Up to three builds run at once (side_by_side_most in this file), each in its own worktree on its own branch "
+                    "cut from dev; once they're through, the program brings the branches together into dev (a collision back to the "
+                    "later builder's own chat) and then the one whole-build review runs (routine/sidebyside.py). Needs headless_jobs. "
+                    "Off: one build after another in HQ's own folder, as before.",
 }
 # 11 November 2026: switches that are on unless turned off (the file's "off" list), so an HQ has them without a data change.
-DEFAULT_ON = ("whole_build_review",)
+DEFAULT_ON = ("whole_build_review", "side_by_side")
 
 
 def _folder() -> Path:
