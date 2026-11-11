@@ -1449,8 +1449,8 @@ def job_need(job):
         if hl:
             m, c = hl["latest"], hl["cost_latest"]
         more = _running_need(job)  # 11 November 2026: side by side, the room the running ones still need
-        return ["--minutes", str(max(1, int(round(m)))), "--need",
-                f"five={round(c['five'] + more['five'], 2)},weekly={round(c['weekly'] + more['weekly'], 2)}"]
+        five, weekly = round(c['five'] + more['five'], 2), round(c['weekly'] + more['weekly'], 2)
+        return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={five},weekly={weekly}"]
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
         return []

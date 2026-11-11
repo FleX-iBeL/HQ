@@ -1087,7 +1087,8 @@ def main(argv: list[str]) -> int:
         if held:
             print(f"Refused: the pass says \"{held.group(0)}\": that holds QA until it's run for real (H313). Run it, or fail it. Nothing written.")
             return 2
-        no = fix_refuses(label) or proof_refuses(label, compared)
+        import wholebuild
+        no = fix_refuses(label) or proof_refuses(label, compared) or wholebuild.run_refuses(label)
         if no:
             print(f"Refused: {no} Nothing written.")
             return 2

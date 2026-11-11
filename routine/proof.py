@@ -505,9 +505,12 @@ def _run(n: int) -> int:
     label = label_of(j)
     rowtext = (j["text"] + " " + row_of(text, label))
     named = named_flows(rowtext)
+    whole = _whole_on()  # 11 November 2026: the 17 run once over the whole build (routine/wholebuild.py), not per build
     rec = {"n": n, "label": label, "item": (j.get("item") or {}).get("id"), "head": head, "commits": commits_of(label, head), "named": named,
-           "skipped": [], "ran": 0, "passed": 0, "failed": [], "not_tried": _not_tried(), "green": False,
+           "skipped": [], "ran": 0, "passed": 0, "failed": [], "not_tried": [] if whole else _not_tried(), "green": False,
            "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
+    if whole:
+        rec["whole_build"] = "the 17 happy flows run once over the whole build, on the merged code, before its review (routine/wholebuild.py)"
     logpath = path(n)[:-5] + ".log"
     os.makedirs(folder(), exist_ok=True)
     import wall
@@ -539,7 +542,7 @@ def _run(n: int) -> int:
                 rec["ran"], rec["passed"] = r_, p
                 rec["skipped"] = [x for x in skipped_flows(out) if x in both]
                 rec["failed"] = nightly.failures(out) or ([] if code == 0 else [f"the named flows {both} ended with exit {code}, {p} of {r_}{_last_words(out)}"])
-            if not rec["failed"]:
+            if not rec["failed"] and not whole:
                 code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real; the quick set is the night's
                 p, r_ = nightly.summary(out)
                 rec["ran"] += r_
@@ -549,7 +552,7 @@ def _run(n: int) -> int:
         if excused:  # F165: a check already split off as its own item doesn't hold this build
             rec["excused"] = excused
             rec["failed"] = [f for f in rec["failed"] if f not in excused]
-        rec["green"] = (not rec["failed"] and not rec["not_tried"] and rec["ran"] > 0
+        rec["green"] = (not rec["failed"] and not rec["not_tried"] and (rec["ran"] > 0 or whole)
                         and rec["passed"] + len(rec.get("excused") or []) == rec["ran"]
                         and ("qa_tests" not in rec or bool(rec["qa_tests"].get("green"))))
     finally:
@@ -563,6 +566,14 @@ def _run(n: int) -> int:
           + (f", named flows {named}" if named else "") + (f", skipped {rec['skipped']}" if rec["skipped"] else "")
           + (": green." if rec["green"] else f". Failed: {'; '.join(rec['failed'] + rec['not_tried'])[:900]}"))
     return 0 if rec["green"] else 1
+
+
+def _whole_on() -> bool:
+    try:
+        import wholebuild
+        return wholebuild.on()
+    except ImportError:
+        return False
 
 
 def lock_path() -> str:

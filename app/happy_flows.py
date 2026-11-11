@@ -41306,7 +41306,7 @@ def setup():
     rm = os.environ["HQ_ROADMAP"]
     t = open(rm).read()
     rows = ('| ⬜ | F9631 The made-up count shows on the page | Made up for the whole-build review. His words: "the count should show on '
-            'the page, right where i look". Done means: the page shows the count. | |\n'
+            'the page, right where i look". Done means: the page shows the count. Checked by flow ' + os.environ.get("WB_NAMED", "8801") + '. | |\n'
             '| ⬜ | F9632 The made-up second thing comes back | Made up too. His words: "the second thing has to come back by itself". Done '
             'means: it comes back. Open points from the front (not settled): whether it also comes back by day. | |\n')
     marker = "| | Step | What you get | Model |\n|---|---|---|---|\n"
@@ -41315,10 +41315,22 @@ def setup():
     n1, c1, s1 = build("F9631", "F9631: the count on the page", "count.txt", "sid-builder-one")
     n2, c2, s2 = build("F9632", "F9632: the second thing back", "back.txt", "sid-builder-two")
     return {"base": base, "n1": n1, "n2": n2, "c1": c1, "c2": c2, "said": s1 + s2}
+def back(rid):
+    for _ in range(240):
+        run = (W.load()["reviews"].get(rid) or {}).get("run") or {}
+        if run.get("state") in ("done", "died"):
+            return run
+        time.sleep(0.25)
+    need(False, f"the merged run of review {rid} didn't come back: {W.load()['reviews'].get(rid)}")
 def review1(st):
     need(W.minute() == [], "the review was queued before the builds had settled")
     got = W.minute(now=time.time() + W.SETTLE + 5)
-    need(len(got) == 1 and "queued the whole-build review 1" in got[0], f"no review queued: {got}")
+    need(len(got) == 1 and "run once on the merged code for review 1" in got[0], f"the merged run didn't start: {got}")
+    need(not find("QA of the whole build"), "the review came before the merged run was back")
+    need(W.load()["items"]["F9631"]["stage"] == "testing", "the item isn't waiting for the merged run")
+    st["run"] = back("1")
+    got = W.minute()
+    need(any("queued the whole-build review 1" in x for x in got), f"no review queued once the merged run was back: {got}")
     rv = find("QA of the whole build")
     need(len(rv) == 1, f"not one review job: {[j['text'][:60] for j in rv]}")
     st["r1"] = rv[0]["n"]
@@ -41348,7 +41360,7 @@ if what in ("review", "verdicts", "recheck"):
     for words in ("You are Moneypenny", "=== F9631 (first look)", "=== F9632 (first look)", "the count should show on the page, right where i look",
                   "the second thing has to come back by itself", "whether it also comes back by day", f"{st['c1']} F9631: the count on the page",
                   f"{st['c2']} F9632: the second thing back", "green on", "her sealed tests green (2 of 2)", f"--job {rv['n']}",
-                  "the quick set ONCE", "already red before these builds", st["base"][:7], "One verdict PER ITEM".lower()):
+                  "ran ONCE already", "already red before these builds", st["base"][:7], "One verdict PER ITEM".lower()):
         need(words.lower() in p.lower(), f"the review's first prompt lacks: {words}")
     need(p.count("Open points from the front (not settled): none") == 1, "the item without the front's points isn't said to have none")
     if what == "review":
@@ -41406,6 +41418,8 @@ if what in ("review", "verdicts", "recheck"):
     need(W.load()["items"]["F9632"]["stage"] == "fixed", "the fix done didn't make it fixed")
     need(not find("QA of F9632"), "the fix got a QA job of its own")
     got = W.minute(now=time.time() + W.SETTLE + 5)
+    back("2")
+    got += W.minute()
     rv2 = [j for j in find("QA of the whole build (review 2)")]
     need(len(rv2) == 1 and "F9632" in rv2[0]["text"] and "F9631" not in rv2[0]["text"] and "Rechecks" in rv2[0]["text"], f"not one recheck over F9632 alone: {got}")
     p2 = qa.prompt_extra(rv2[0]["text"], rv2[0]["n"])
@@ -41431,6 +41445,45 @@ if what in ("review", "verdicts", "recheck"):
     need(texts.count("still fails after its one fix round") <= 1, "more than one text about the hold")
     print("OK the fix lands, one recheck over the failed item only, still failing it's held with one text, no third round"); sys.exit(0)
 
+if what == "once":
+    import happy
+    g1, g2 = [str(x) for x in happy.gate_flows()[:2]]
+    os.environ["WB_NAMED"] = g2
+    st = setup()
+    # a build's own record: only what's its own (the flows its row names), not the 17
+    out = jobs_("add", "F9631 on the HQ roadmap: one more build of it", "--not-ready", "--kind", "small")
+    n = int(re.search(r"Job (\d+) is ready", out).group(1))
+    jobs_("mark", str(n), "running since 16:00")
+    before = len(open(os.environ["WB_RUNS"]).read().splitlines()) if os.path.exists(os.environ["WB_RUNS"]) else 0
+    os.environ["HQ_PROOF_ON"] = "1"
+    run(ROOT + "/routine/proof.py", "run", str(n), ok=False)
+    os.environ.pop("HQ_PROOF_ON")
+    import proof
+    rec = proof.load(n) or {}
+    asked = [json.loads(x) for x in open(os.environ["WB_RUNS"]).read().splitlines()[before:]]
+    need(rec.get("green") and rec.get("whole_build") and [a["args"] for a in asked] == [["--only", g2]],
+         f"a build's record ran more than its own flows, or isn't green: {asked} {rec}")
+    jobs_("mark", str(n), "stopped 16:05")
+    os.environ.update({"WB_FAIL_HEAD": f"{g1},{g2}", "WB_FAIL_BASE": g1})  # from here: the merged build red on both, the code before on g1
+    rv = review1(st)
+    run_ = st["run"]
+    need(run_["state"] == "done" and any(x.startswith(f"{g1}:") for x in run_["red_before"]) and any(x.startswith(f"{g2}:") for x in run_["new_red"]),
+         f"the merged run didn't tell red-before from new: {run_}")
+    allargs = [json.loads(x)["args"] for x in open(os.environ["WB_RUNS"]).read().splitlines()]
+    need(sum(1 for a in allargs if len(a[1].split(",")) > 2) == 1, f"the 17 didn't run exactly once: {allargs}")
+    p = qa.prompt_extra(rv["text"], rv["n"])
+    need("ran the 17 happy flows ONCE on the merged code" in p and f"Red before these builds too" in p and f"Red only on the build" in p
+         and "--quick" not in p and "don't run it again" in p, "the review's start text lacks the merged run, or still asks for the quick set")
+    jobs_("mark", str(rv["n"]), "running since 17:00")
+    out = qa_("pass", "F9631", "fine", "--job", str(rv["n"]), "--example", "e", "--ran", "r", "--got", "g", "--compared", "counts, 3 of 3", ok=False)
+    need("Refused" in out and g2 in out and qa.state("F9631") != "passed", f"a pass went through while the merged run is red on its own flow: {out}")
+    qa_("pass", "F9632", "fine", "--job", str(rv["n"]), "--example", "e", "--ran", "r", "--got", "g", "--compared", "counts, 3 of 3")
+    need(qa.state("F9632") == "passed", "an item whose flows are green on the merged run couldn't pass")
+    with W.changing() as d:
+        d["reviews"]["1"]["run"]["state"] = "running"
+    need("isn't back" in (W.run_refuses("F9631") or ""), "a pass doesn't wait for the merged run")
+    print(f"OK a build's record runs only its own flows ({g2}); the 17 run once on the merged code, {g1} red before, {g2} new; a pass reads it"); sys.exit(0)
+
 if what == "missed":
     st = setup()
     rv = review1(st)
@@ -41439,6 +41492,8 @@ if what == "missed":
     d = W.load()
     need(d["items"]["F9631"]["stage"] == "built" and d["items"]["F9631"]["missed"] == 1, "an item left without a verdict isn't in the next review")
     W.minute(now=time.time() + W.SETTLE + 5)
+    back("2")
+    W.minute()
     rv2 = find("QA of the whole build (review 2)")
     need(len(rv2) == 1 and "F9631" in rv2[0]["text"] and "F9632" in rv2[0]["text"], "the next review doesn't take them again")
     import machalf
@@ -41478,7 +41533,22 @@ print("FAIL unknown " + what); sys.exit(1)
 '''
 
 
-def _wb_run(self, name: str, what: str, on: bool = True) -> str:
+_WB_RUNNER = r'''#!/usr/bin/env python3
+# A stand-in for app/happy_flows.py as proof.py starts it: the flows asked for (--only), each passed unless WB_FAIL_HEAD names it in a
+# copy of the build (one with count.txt) or WB_FAIL_BASE in a copy of the code before it; what it was asked is kept in WB_RUNS.
+import json, os, sys
+nums = sys.argv[sys.argv.index("--only") + 1].split(",") if "--only" in sys.argv else ["1"]
+built = os.path.exists("count.txt")
+fail = set(filter(None, os.environ.get("WB_FAIL_HEAD" if built else "WB_FAIL_BASE", "").split(",")))
+open(os.environ["WB_RUNS"], "a").write(json.dumps({"args": sys.argv[1:], "built": built}) + "\n")
+print("\n== Result")
+for n in nums:
+    print(f"      {n}: FAILED - made up" if n in fail else f"      {n}: fine")
+print(f"\n{len([n for n in nums if n not in fail])} of {len(nums)} passed")
+'''
+
+
+def _wb_run(self, name: str, what: str, on: bool = True, **more) -> str:
     ws, env, d = self._wall_env(f"wb{name}", hour=23)
     env = {**env, "HQ_PROOF_ROOT": str(d / "repo"), "HQ_MAC_HALF_FILE": str(d / "mac-half.json"), "HQ_WHOLE_BUILD_STATE": str(d / "whole-build.json"),
            "HQ_NO_WALL": "1"}
@@ -41486,6 +41556,11 @@ def _wb_run(self, name: str, what: str, on: bool = True) -> str:
         env["HQ_BACKEND_WHOLE_BUILD_REVIEW"] = "1"
     else:
         env.pop("HQ_BACKEND_WHOLE_BUILD_REVIEW", None)
+    runner = d / "flows-stand-in"  # the flows' stand-in (proof.py's HQ_PROOF_RUNNER): it keeps what it was asked, and fails what it's told
+    runner.write_text(_WB_RUNNER)
+    runner.chmod(0o755)
+    env.update({"HQ_PROOF_RUNNER": str(runner), "WB_RUNS": str(d / "runs.jsonl")})
+    env.update(more)
     drv = d / "wb-driver.py"
     drv.write_text(_WB_DRIVER)
     import subprocess as _sp
@@ -41531,12 +41606,22 @@ async def _wb_flow634(self) -> str:
 
 for _n in range(630, 635):
     setattr(Run, f"flow{_n}", globals()[f"_wb_flow{_n}"])
+async def _wb_flow637(self) -> str:
+    """11 November 2026, no Claude (the flows stood in): the whole set once, at the end. A build's own record runs only its own part (the
+    flows its row names; her sealed tests when it has them), not the 17; the program runs the 17 once on the merged code before the
+    review, runs what's red again on the code from before the builds, and the review's first prompt says what was red before and what's
+    new, and asks for no quick set of its own; a pass waits for that run and is refused while it's red on a flow the item names."""
+    return _wb_run(self, "637", "once")
+
+
+Run.flow637 = _wb_flow637
 Run._wb_run = _wb_run
 FLOWS.update({
     630: ("Whole build (1): builds done get no QA job each; one review over all of them, its first prompt with each item whole, his words, the front's points, commits and records", False, "flow630"),
     631: ("Whole build (2): a verdict per item as QA marks the release gate reads; a fail back to the builder's own chat, fresh and fully fed when it can't be continued", False, "flow631"),
     632: ("Whole build (3): the fix lands, one recheck over only the failed item; still failing it's held, one text, no third round", False, "flow632"),
     633: ("Whole build (4): with whole_build_review off, a QA job per build as before; the switch is on by default and turns off and on", False, "flow633"),
+    637: ("Whole build (6): the whole set once at the end: a build's record runs only its own flows; the 17 once on the merged code, red-before told apart, read by the review and by a pass", False, "flow637"),
     634: ("Whole build (5): a review without a verdict takes the item once more, then holds it; the laptop's half waits and its pass counts", False, "flow634"),
 })
 
@@ -41586,6 +41671,10 @@ def _side_setup(self, name, on=True):
     env.update({"HQ_CLAUDE": str(fake), "HQ_SIDE_ROOT": str(repo), "HQ_SIDE_DIR": str(d / "side"), "HQ_PROOF_ROOT": str(repo),
                 "HQ_SIDE_BY_SIDE_STATE": str(d / "side.json"), "HQ_WHOLE_BUILD_STATE": str(d / "wb.json"), "SIDE_HQ": str(ROOT),
                 "SIDE_SEEN": str(d / "seen.jsonl"), "HQ_BACKEND_WHOLE_BUILD_REVIEW": "1"})
+    runner = d / "flows-stand-in"
+    runner.write_text(_WB_RUNNER)
+    runner.chmod(0o755)
+    env.update({"HQ_PROOF_RUNNER": str(runner), "WB_RUNS": str(d / "runs.jsonl")})
     if on:
         env["HQ_BACKEND_SIDE_BY_SIDE"] = "1"
     else:
@@ -41660,8 +41749,9 @@ async def _side_flow635(self) -> str:
     p = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import proof; print(sorted(proof._known_flows(sys.argv[2])))",
                  str(ROOT / "routine"), str(repo)], capture_output=True, text=True, env=env, timeout=60)
     need("9635" in p.stdout and "9637" in p.stdout, f"the items' own flows aren't known flows: {p.stdout} {p.stderr[-300:]}")
-    p = _sp.run([sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); import wholebuild as W; print(W.minute(now=time.time() + 999))",
-                 str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=120)
+    p = _sp.run([sys.executable, "-c", "import sys, time; sys.path.insert(0, sys.argv[1]); import wholebuild as W; print(W.minute(now=time.time() + 999))\n"
+                 "for _ in range(240):\n    r = W.load()['reviews'].get('1') or {}\n    if (r.get('run') or {}).get('state') == 'done': break\n    time.sleep(0.25)\n"
+                 "print(W.minute())", str(ROOT / "routine")], capture_output=True, text=True, env=env, timeout=180)
     q = json.loads(jobs("next").stdout)
     rv = [j for j in q["waiting"] if j["text"].startswith("QA of the whole build")]
     need(len(rv) == 1 and all(f"F{x}" in rv[0]["text"] for x in (9635, 9636, 9637)), f"not one review over all three: {p.stdout} {p.stderr[-400:]}")
