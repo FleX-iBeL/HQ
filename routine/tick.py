@@ -301,11 +301,27 @@ def start(job):
         roadmap = ""
     plan = carryon.plan(job, roadmap, FOLDER)
     cycle = cycles.is_cycle_job(job)  # H298: an agent's own run: her prompt, a fresh session, the box, always headless
+    fed, fresh_why = None, None  # the preparation fed (routine/prepfeed.py): a prep job's item, and why its own chat isn't picked up
+    if not cycle and plan["mode"] == "new":
+        try:
+            import prepfeed
+            fed = prepfeed.label_of(job)
+            if fed:  # one preparation in one chat: the item's earlier prep chat carries on, when it still can
+                got = prepfeed.chat_to_continue(fed, FOLDER)
+                if got.get("session"):
+                    plan = {"mode": "continue", "session": got["session"], "prev": got["rec"]}
+                else:
+                    fresh_why = got.get("why")
+        except Exception as ex:
+            log(f"the preparation fed: {ex!r}")
+            fed = None
     if cycle:  # always a fresh chat: a held run's own session id is taken ("already in use"), and the run would end at once
         plan = {"mode": "new", "session": plan["session"] if plan["mode"] == "new" else str(uuid.uuid4())}
         prompt = cycles.prompt(job, cycle)
     elif plan["mode"] == "resume":
         prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)
+    elif plan["mode"] == "continue":
+        prompt = prepfeed.continue_prompt(job, fed, where, plan) + importlib.import_module("qa").prompt_extra(job["text"])
     else:
         prompt = (
             f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
@@ -345,6 +361,13 @@ def start(job):
             + importlib.import_module("jobs").notes_for_prompt(job)
             + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
+        if fed:  # the preparation fed: the item, his words, the real case and every finding, gathered by the program
+            try:
+                prompt += prepfeed.start_text(fed, fresh_why)
+            except Exception as ex:
+                log(f"the preparation fed, job {n}: {ex!r}")
+        else:
+            prompt += _front_points(job, roadmap)
         prompt += _steps_extra(job, plan)
     # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
     # never ran it sat idle for over an hour (jobs 377 and 393, QA job 389).
@@ -366,7 +389,7 @@ def start(job):
                    "(proof.py) doesn't count. Past it the run is ended and the job is boxed, not done, and waits for a call. "
                    f"A call can let it go on at most {wall.MOST_RESUMES} times, and in all it never goes past {box['cap']:g} minutes; "
                    "then it stops for good and the item gets split, so save your work as you go.")
-    chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
+    chat = (f"--resume {plan['session']}" if plan["mode"] in ("resume", "continue") else f"--session-id {plan['session']}")
     if box and headless:
         chat += f" --max-minutes {box['minutes']:g} --max-turns {box['turns']} --box-state"
     if cycle:  # H298: the box, read by runjob.py from the run's own stream and a wall clock
@@ -424,7 +447,13 @@ JT=$(tty)
                "proof": wall.proof_seconds(n)}, open(STATE, "w"))
     open_window(cmd, f"job-{n}")
     carryon.started(n, plan)
+    if fed:
+        try:
+            prepfeed.started(fed, n, plan["session"], plan["mode"])
+        except Exception as ex:
+            log(f"the preparation fed, job {n}: its chat wasn't kept ({ex!r})")
     how = {"resume": "carries on in its own chat after the usage hold",
+           "continue": "a prep step in the item's own earlier prep chat (the preparation fed)",
            "fresh": "started again after the usage hold, in a fresh chat with a note"}.get(plan["mode"])
     if cycle:
         how = f"{cycle['agent'].capitalize()}'s own run ({cycle['name']}), headless inside its box"
@@ -439,6 +468,21 @@ NIGHT_AT = (5, 0)  # the same time as the H169 item that ran it; H340: 05:00 in 
 NIGHT_END = 8  # H340: the window closes at 08:00, the agents' day and Donna's morning text
 SWEEP_DAY = 0  # H340: Monday at 05:00 the weekly sweep (H162) runs every flow in the nightly's place: no nightly that morning
 NIGHT_LATE = (6, 0)  # F112: a job still running by now no longer keeps the night waiting, or there'd be no night at all [Claude's choice]
+
+
+def _front_points(job, roadmap) -> str:
+    """The front capped (routine/front.py): a build's first prompt carries the open points the front kept with each item it names,
+    with the one sentence; a QA job, a prep job or an agent's run gets none."""
+    try:
+        import front
+        text = job.get("text") or ""
+        if not front.cap_on() or importlib.import_module("qa").is_qa(text) or text.startswith("Prep of "):
+            return ""
+        import sprint
+        return front.build_note([r["label"] for r in sprint.named_open_rows(roadmap, text)])
+    except Exception as ex:
+        log(f"the front's open points, job {job.get('n')}: {ex!r}")
+        return ""
 
 
 def _pid_there(pid) -> bool:

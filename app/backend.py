@@ -7,7 +7,9 @@ push without any rollback possibilities". At the stable version (H301) those fiv
 has them on from the template, and an HQ that updates gets them once, by its data change (routine/datachanges/003),
 unless its file holds switches set by hand; each can still be turned off. The file is the workspace's
 `HQ/backend.json`: {"on": ["briefing", …]}. A computer can override one with
-HQ_BACKEND_<NAME>=1 or 0 (a test, or one computer only), and HQ_BACKEND names another file.
+HQ_BACKEND_<NAME>=1 or 0 (a test, or one computer only), and HQ_BACKEND names another file. The front capped and the
+preparation fed (front_cap, fed_prep; 11 November 2026) are on by default the same way: in the template, and once for an HQ whose
+file is still one HQ gave it (routine/datachanges/005).
 
     python3 app/backend.py                  the switches and what each does
     python3 app/backend.py on NAME          turn one on (from the next call, text or job)
@@ -35,6 +37,15 @@ SWITCHES = {
     "handover": "With one-way sync, the backup hands what it holds that the main doesn't (its own changes, its "
                 "conflict copies) to the main every minute, and takes the main's copy back once all of it is there "
                 "(F115). Off: it waits, said on the sync line; `sync.py handover` does it once by hand.",
+    "front_cap": "The front capped (11 November 2026): the item's review and the review of her QA tests run at most two rounds an "
+                 "item each (per road); after the second flag the item goes on as it is, its open points kept with it for the "
+                 "build (sprint.py show, the build's first prompt). A point only he can answer still goes to him. Off: up to "
+                 "twenty rounds each, then his decision, as before.",
+    "fed_prep": "The preparation fed (11 November 2026): a prep job starts with the item's full text, his own words it came from "
+                "(where and when, with his lines around them), the real cases it names and every finding so far, and is told to "
+                "understand and prepare the ask before the checks; a second prep step of the same item carries on in the same "
+                "chat (claude --resume), a fresh fed start only when that chat can't be picked up. Off: the short start, a new "
+                "chat each time, as before.",
 }
 
 

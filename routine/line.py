@@ -34,6 +34,9 @@ the record, never anyone's word, and does the next step:
     no longer holds the item: the line starts a fresh one with the record's next step, each one a try (F178, 7 November 2026). Before
     it gives up on her tests not through the hard checks, it runs qatests.py check itself once: sealed, it moves on with no text.
 
+  - The preparation fed (11 November 2026, the backend switch fed_prep; routine/prepfeed.py): the prep's task reads as understand and
+    prepare the ask, the checks after it as its check (prep_text); its start carries the item, his words, the real case and every
+    finding (tick.start), and the next prep step of the same item carries on in the same chat. Off: as before.
   - On her sit-down list for a point only he can answer (F207, 8 November 2026: H336 was prepared twice in a row, each prep stopping on
     the same laptop-chat quotes): no prep while its row is unchanged, nor after the one prep its changed words get, while its quotes
     still aren't found. Once one of the row's quotes is in a line of his said since (a call, a quick note, a text), one prep starts with
@@ -478,6 +481,24 @@ def _tell(label, key, words):
 
 def prep_text(label, why, row):
     title = (row.get("title") or "").strip()
+    try:
+        import prepfeed
+        fed = prepfeed.fed_on()
+    except Exception:
+        fed = False
+    if fed:  # the preparation fed (routine/prepfeed.py): understand and prepare the ask first; the checks check that preparation
+        return (f"{PREP}{label} (the line): prepare item {label} for the team. {title[:160]} The next step, from the record: {why}. "
+                f"First understand what he asks and why: his own words and the real case it names are gathered for you in this job's "
+                f"start (or, in your own earlier chat for it, already known), with the item as it stands and every finding so far. Then "
+                f"prepare the item so a builder who has never seen it can build it: what's asked, what done looks like with real examples "
+                f"from that real case, what's out of scope; write it in the item's own words (review.py add or reword). The checks come "
+                f"after, as the check on that preparation, not as the goal: your QA tests (qatests.py new, check, review: H342, the row's "
+                f"own done example replayed on the real data of the copy they run on, read where he looks, the status page as served and "
+                f"a text as it lands, with routine/realcase.py, failing first on the code from before the build for the row's reason), the "
+                f"review's findings answered, sprint.py check {label}. Before you end, run python3 routine/qatests.py check {label} once "
+                f"yourself, so tests that pass the hard checks are sealed and the line moves on. Never send it to the team, never jobs.py "
+                f"send-row or now: the program sends it once it's ready and its build switch is on. Text him only for a real decision, never "
+                f"for a step you can take yourself. You never build HQ.")
     return (f"{PREP}{label} (the line): get item {label} ready for the team. {title[:160]} The next step, from the record: {why}. "
             f"Do that step and every one after it you can, until sprint.py check {label} says it's ready: answer the review in the "
             f"item's own words (review.py add or reword), write or fix your QA tests (qatests.py new, check, review: H342, the row's own "
