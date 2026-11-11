@@ -23,6 +23,8 @@ On:
      "Open points from the front (not settled):" when it's there), the build's commits, its record and her sealed tests' result; and
      the base, the commit before the first of these builds, so a red check is proved red-before or not. It ends with a verdict per
      item through qa.py pass / qa.py fail (the same marks, so the release gate, the status page and the trail read them as before).
+     The 17 happy flows are not run here, nor after a build: they run once a night, in the nightly run (routine/nightly.py), his words:
+     "No the 17 happy flows should only run once at night in the nightly run". A build's record holds its own flows and her tests.
   3. A fail (qa.fail -> on_fail) on an item in this road goes back to the chat that built it: a new job "Fix for LABEL after the
      whole-build review", held as resumed, whose carry-on record (carryon) holds the builder's session, so the routine resumes that
      chat (claude --resume) with the findings as its message. Only when that chat can't be continued (not on this computer, older than
@@ -70,7 +72,7 @@ SETTLE = 3 * 60          # seconds after the last build ended before the review 
 CHAT_HOURS = 48          # a builder's chat older than this isn't continued: a fresh job, fully fed
 CONTEXT_MOST = 150_000   # tokens in the builder chat's last turn past which it isn't continued
 MOST_MISSED = 2          # reviews that ended without a verdict for an item before it's held
-OPEN = ("built", "testing", "review", "recheck", "fixing", "fixed", "mac")   # the item is in the road: the line waits
+OPEN = ("built", "review", "recheck", "fixing", "fixed", "mac")   # the item is in the road: the line waits
 IN_ROAD = OPEN + ("passed",)
 FRONT_HEAD = "Open points from the front (not settled):"
 
@@ -236,8 +238,7 @@ def line_step(row: dict) -> tuple[str, str] | None:
             lift(label, "its words changed")
             return None
         return "hold", f"held after the whole-build review's one fix round: {q.one_line((e.get('held') or {}).get('what') or '')[:200]}"
-    words = {"built": "built; waits for the whole-build review", "testing": "built; the whole set runs once on the merged code before its review",
-             "review": "built; in the whole-build review",
+    words = {"built": "built; waits for the whole-build review", "review": "built; in the whole-build review",
              "recheck": "fixed; in the whole-build review's recheck", "fixing": "back with its builder after the whole-build review",
              "fixed": "fixed; waits for the whole-build review's recheck", "mac": "waits for the laptop's half of its review"}
     if st in words:
@@ -450,16 +451,13 @@ def minute(now: float | None = None) -> list[str]:
             said = _settle(d, jobs)
             go = _due(d, jobs, now)
     flush()
-    said += _runs_minute()
     if not go or _line_would_send(jobs):
         return said
-    return said + [start_run()]
+    return said + [queue_review()]
 
 
 def _due(d: dict, jobs: list, now: float) -> bool:
     if any(is_review(j["text"]) and not j["state"].startswith(q.FINISHED) for j in jobs):
-        return False
-    if any(not r.get("job") and not r.get("done") for r in d["reviews"].values()):  # a merged run still going
         return False
     due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed")}
     if not due or _busy_builds(jobs):
@@ -473,167 +471,26 @@ def _due(d: dict, jobs: list, now: float) -> bool:
     return now - max(float(e.get("at") or 0) for e in due.values()) >= SETTLE
 
 
-RUN_TRIES = 2  # the merged run started at most this many times for a review before it goes on without it
-
-
-def start_run() -> str:
-    """11 November 2026 (his words: "we can do testing at the end, because once everything is built, we can then fix it one time and its
-    done"): the 17 happy flows once, on the merged code, by the program, before the review job; the review is queued when it's back."""
+def queue_review() -> str:
+    """One review job over everything built (and fixed) since the last one; the 17 happy flows are the night's, not its."""
     import sprint as S
-    with changing() as d:
-        due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed")}
-        if not due:
-            return "nothing built to review"
-        try:
-            order = {l: i for i, l in enumerate(S.order())}
-        except Exception:
-            order = {}
-        labels = sorted(due, key=lambda l: (order.get(l, 10 ** 6), l))
-        rid = str(d["next"])
-        d["next"] += 1
-        again = [l for l in labels if due[l]["stage"] == "fixed"]
-        base = base_of([s for l in labels for b in due[l]["builds"] for s in _shas(b.get("commits"))])
-        d["reviews"][rid] = {"job": None, "items": {l: (2 if l in again else 1) for l in labels}, "at": _now(), "base": base,
-                             "run": {"state": "starting", "tries": 0}}
-        for l in labels:
-            due[l].update(stage="testing", review=rid, round_of=2 if l in again else 1)
-    _spawn_run(rid)
-    return f"the 17 happy flows run once on the merged code for review {rid} ({', '.join(labels)}); the review follows"
-
-
-def _spawn_run(rid: str) -> None:
-    import proof
-    cmd = f"{json.dumps(sys.executable)} {json.dumps(os.path.join(HERE, 'wholebuild.py'))} run {rid}"
-    if not hqpaths.under_test() or os.environ.get("HQ_WHOLE_RUN_LOCK"):
-        cmd = f"flock {json.dumps(proof.lock_path())} {cmd}"
-    p = subprocess.Popen(["sh", "-c", cmd], cwd=hqpaths.HQ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-                         start_new_session=True, env={**os.environ, "HQ_ROLE_HERE": "1"})
-    with changing() as d:
-        r = d["reviews"][rid]["run"]
-        r.update(state="running", pid=p.pid, started=time.time(), tries=int(r.get("tries") or 0) + 1)
-
-
-def _alive(pid) -> bool:
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (OSError, TypeError, ValueError):
-        return False
-
-
-def _runs_minute() -> list[str]:
-    """A merged run that's back queues its review; one that died starts again once, then the review goes on, saying so."""
-    out = []
-    d = load()
-    for rid, r in d["reviews"].items():
-        run = r.get("run") or {}
-        if r.get("job") or r.get("done"):
-            continue
-        if run.get("state") == "done":
-            out.append(queue_review(rid))
-        elif run.get("state") == "running" and not _alive(run.get("pid")) and time.time() - float(run.get("started") or 0) > 30:
-            if int(run.get("tries") or 0) < RUN_TRIES:
-                _spawn_run(rid)
-                out.append(f"the merged run of review {rid} died; started once more")
-            else:
-                with changing() as d2:
-                    d2["reviews"][rid]["run"].update(state="died", why="it died twice without a result")
-                out.append(queue_review(rid))
-    return out
-
-
-def whole_run(rid: str) -> dict:
-    """The run itself (wholebuild.py run R, in the background, on the full-run lock): the 17 happy flows on a copy of HQ as it is
-    (the merged build); every red one run again on a copy of the base, so what was red before these builds is told apart."""
-    import happy
-    import nightly
-    import proof
-    r = load()["reviews"].get(rid) or {}
-    head = _git("rev-parse", "HEAD")
-    base = r.get("base")
-    res = {"state": "done", "head": head, "base": base, "ran": 0, "passed": 0, "failed": [], "red_before": [], "new_red": [],
-           "not_tried": proof._not_tried(), "at": _now()}
-    logp = os.path.join(proof.folder(), f"whole-{rid}.log")
-    os.makedirs(proof.folder(), exist_ok=True)
-    with open(logp, "w", encoding="utf8") as log:
-        wt = proof._copy(head)
-        try:
-            code, out = proof._flows(wt, happy.gate_args(), log)
-        finally:
-            proof._uncopy(wt)
-        res["passed"], res["ran"] = nightly.summary(out)
-        res["failed"] = nightly.failures(out) or ([] if code == 0 and res["ran"] else [f"the happy flows ended with exit {code}"])
-        nums = [m.group(1) for f in res["failed"] if (m := re.match(r"\s*(\d+): FAILED - ", f))]
-        if nums and base:
-            wb = proof._copy(base)
-            try:
-                _, out2 = proof._flows(wb, ["--only", ",".join(nums)], log)
-            finally:
-                proof._uncopy(wb)
-            before = {m.group(1) for f in nightly.failures(out2) if (m := re.match(r"\s*(\d+): FAILED - ", f))}
-            res["red_before"] = [f for f in res["failed"] if re.match(r"\s*(\d+):", f).group(1) in before]
-            res["new_red"] = [f for f in res["failed"] if f not in res["red_before"]]
-        else:
-            res["new_red"] = list(res["failed"])
-    res["log"] = logp
-    with changing() as d:
-        d["reviews"][rid]["run"].update(res)
-    return res
-
-
-def run_words(run: dict) -> str:
-    if not run or run.get("state") not in ("done", "died"):
-        return "The program's run of the 17 happy flows on the merged code: not back."
-    if run["state"] == "died":
-        return f"The program's run of the 17 happy flows on the merged code didn't come back ({run.get('why')}): no item passes without it."
-    return (f"The program ran the 17 happy flows ONCE on the merged code ({str(run.get('head'))[:10]}): {run['passed']} of {run['ran']} passed."
-            + (f" Red before these builds too (on {str(run.get('base'))[:10]}), not the items' doing: {'; '.join(run['red_before'])[:1200]}."
-               if run.get("red_before") else "")
-            + (f" Red only on the build, name the item that made it red and fail it: {'; '.join(run['new_red'])[:1200]}." if run.get("new_red") else "")
-            + (f" Not tried here: {'; '.join(run['not_tried'])[:600]}." if run.get("not_tried") else ""))
-
-
-def run_refuses(label: str) -> str | None:
-    """qa.py pass with the switch on (11 November 2026): the build's own record no longer holds the 17; the merged run does. A pass waits
-    for it, and is refused while it's red on a flow the item's own row names, or while a happy flow wasn't tried."""
-    if not on():
-        return None
-    e = load()["items"].get(label) or {}
-    rid = e.get("review")
-    r = (load()["reviews"].get(rid or "") or {}) if rid else {}
-    run = r.get("run")
-    if not run:
-        return None  # an item reviewed before this was built: its own record holds the 17, as before
-    if run.get("state") != "done":
-        return f"the program's run of the 17 happy flows on the merged code for review {rid} isn't back ({run.get('state')})."
-    if run.get("not_tried"):
-        return f"the merged run couldn't try every happy flow: {'; '.join(run['not_tried'])[:300]}."
-    try:
-        import proof
-        import sprint as S
-        named = {str(x) for x in proof.named_flows((S.row_of(label) or {}).get("line") or "")}
-    except Exception:
-        named = set()
-    mine = [f for f in run.get("new_red") or [] if (m := re.match(r"\s*(\d+):", f)) and m.group(1) in named]
-    if mine:
-        return f"the merged run is red on a flow {label}'s row names, only on the build: {'; '.join(mine)[:300]}."
-    return None
-
-
-def queue_review(rid: str) -> str:
-    import qa
     with q.locked():
         text, jobs, onq = q.read()
         with changing() as d:
-            r = d["reviews"][rid]
-            due = {l: d["items"][l] for l in r["items"] if (d["items"].get(l) or {}).get("stage") == "testing" and d["items"][l].get("review") == rid}
-            labels = [l for l in r["items"] if l in due]
-            if not labels:
-                r["done"] = _now() + " (nothing left to review)"
-                return f"review {rid}: nothing left to review"
-            first = [l for l in labels if r["items"][l] == 1]
-            again = [l for l in labels if r["items"][l] == 2]
-            base = r.get("base")
+            due = {l: e for l, e in d["items"].items() if e.get("stage") in ("built", "fixed")}
+            if not due:
+                return "nothing built to review"
+            try:
+                order = {l: i for i, l in enumerate(S.order())}
+            except Exception:
+                order = {}
+            labels = sorted(due, key=lambda l: (order.get(l, 10 ** 6), l))
+            rid = str(d["next"])
+            d["next"] += 1
+            first = [l for l in labels if due[l]["stage"] == "built"]
+            again = [l for l in labels if due[l]["stage"] == "fixed"]
+            base = base_of([s for l in labels for b in due[l]["builds"] for s in _shas(b.get("commits"))])
+            r = d["reviews"][rid] = {"job": None, "items": {l: (2 if l in again else 1) for l in labels}, "at": _now(), "base": base}
             jt = (f"{REVIEW_START} (review {rid}): one review over everything built since the last one, each item tried for real on the "
                   f"built code, one verdict per item. " + (f"First looks: {' / '.join(first)}. " if first else "")
                   + (f"Rechecks after the one fix round: {' / '.join(again)}. " if again else "")
@@ -770,9 +627,10 @@ def prompt(text: str, n: int | None = None) -> str:
         "- Try every \"done means\" example of every item for real, the way he would see it, on a copy of the built code: "
         f"{me} {wb} on HEAD -- 'COMMAND' runs COMMAND in a throwaway copy of exactly that commit (the workspace linked, as proof.py's "
         "copy) and removes it after. A second HQ, a phone-sized page, a real command, as QA does.\n"
-        "- The whole set ran ONCE already, by the program, on the merged code (below): don't run it again. Run only the flows the items "
-        f"name, under the full-run lock: {me} {wb} on HEAD -- 'flock ~/hq-fullrun.lock timeout 30m .venv/bin/python app/happy_flows.py --only N,N' "
-        "(in the background when it's long; a tool call ends at ten minutes).\n"
+        "- Don't run the 17 happy flows: they run once a night, in the nightly run, on dev (his words: \"the 17 happy flows should only run "
+        "once at night in the nightly run\"). Each item's own record below ran its named flows and her sealed tests on its build; run the "
+        f"flows the items name once more on the merged code, under the full-run lock: {me} {wb} on HEAD -- 'flock ~/hq-fullrun.lock timeout "
+        "30m .venv/bin/python app/happy_flows.py --only N,N' (in the background when it's long; a tool call ends at ten minutes).\n"
         f"- For every red check, prove whether it was already red before these builds: run it again on the base, {r.get('base') or '(unknown: the parent of the oldest commit below)'}, "
         f"with {me} {wb} on BASE -- 'COMMAND'. Red there too: not the item's fault; say so in its verdict, by flow and commit. Red only on the "
         "build: name the item whose change made it red.\n"
@@ -787,7 +645,6 @@ def prompt(text: str, n: int | None = None) -> str:
         "the laptop's answer becomes the verdict (F216). An item you can't give a verdict is reviewed once more, then held.\n"
         "- A recheck: only the items marked RECHECK, plus the other items the fix's files belong to (named under it). Rerun your whole set "
         "of checks for them; a still-failing item is held after this, no third round.\n\n"
-        + run_words(r.get("run") or {}) + "\n\n"
         f"The items ({len(items)}):\n\n")
     blocks = [_item_words(l, d["items"].get(l) or {}, rnd, d, rid) for l, rnd in items.items()]
     return head + "\n\n".join(blocks) + "\n"
@@ -911,8 +768,6 @@ def main(argv: list[str]) -> int:
         print(prompt(f"{REVIEW_START} (review {argv[1]})", r.get("job")))
     elif cmd == "lift" and len(argv) > 1:
         print(lift(argv[1].upper()))
-    elif cmd == "run" and len(argv) > 1:
-        print(json.dumps(whole_run(argv[1]))[:2000])
     elif cmd == "on" and len(argv) > 3 and argv[2] == "--":
         return on_copy(argv[1], " ".join(argv[3:]))
     else:

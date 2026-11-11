@@ -250,6 +250,16 @@ def night_refuses(target: str | None = None) -> str | None:
     if run.get("failed") or not run.get("ran") or run.get("passed") != run.get("ran"):
         return (f"the night of {run.get('at')} was red: {run.get('passed')} of {run.get('ran')} passed"
                 + (f"; failed: {'; '.join(run.get('failed') or [])[:300]}" if run.get("failed") else ""))
+    try:  # 11 November 2026: the 17 happy flows run only at night (every night, or once a week); the last run of them has to be green
+        import wholebuild
+        if wholebuild.on() and nightly.happy_at_night():
+            lh = nightly.last_happy()
+            if not lh:
+                return "the 17 happy flows haven't run at night yet"
+            if not lh.get("green"):
+                return f"the last night run of the 17 happy flows ({lh.get('at')}) was red: {'; '.join((lh.get('failed') or []) + (lh.get('not_tried') or []))[:300]}"
+    except ImportError:
+        pass
     return night_tied(run, target or "HEAD")
 
 

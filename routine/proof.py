@@ -510,7 +510,7 @@ def _run(n: int) -> int:
            "skipped": [], "ran": 0, "passed": 0, "failed": [], "not_tried": [] if whole else _not_tried(), "green": False,
            "at": time.strftime("%Y-%m-%d %H:%M"), "t": time.time()}
     if whole:
-        rec["whole_build"] = "the 17 happy flows run once over the whole build, on the merged code, before its review (routine/wholebuild.py)"
+        rec["whole_build"] = "the 17 happy flows run only at night, in the nightly run, on dev as it stands then (routine/nightly.py)"
     logpath = path(n)[:-5] + ".log"
     os.makedirs(folder(), exist_ok=True)
     import wall
@@ -696,10 +696,13 @@ def _run_rows(labels: list[str]) -> int:
         try:
             wt = _copy(head)
             with open(os.path.join(folder(), f"rows-{runid}.log"), "w", encoding="utf8") as log:
-                code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real
-                p, r_ = nightly.summary(out)
-                shared.update(ran=r_, passed=p, not_tried=_not_tried(), failed=nightly.failures(out)
-                              or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"]))
+                if _whole_on():  # 11 November 2026, his words: "the 17 happy flows should only run once at night in the nightly run"
+                    shared["night"] = True
+                else:
+                    code, out = _flows(wt, happy.gate_args(), log)  # H313: the 17 happy flows, for real
+                    p, r_ = nightly.summary(out)
+                    shared.update(ran=r_, passed=p, not_tried=_not_tried(), failed=nightly.failures(out)
+                                  or ([] if code == 0 and r_ else [f"the happy flows ended with exit {code}, {p} of {r_}{_last_words(out)}"]))
                 import qatests  # H342: an item built outside a job is proven like one: her sealed tests on the same copy
                 for label, row in rows.items():
                     row.update(ran=0, passed=0, failed=[], skipped=[])
@@ -719,7 +722,7 @@ def _run_rows(labels: list[str]) -> int:
                 wall.forget(key)
             if wt:
                 _uncopy(wt)
-        sgreen = not shared["failed"] and not shared.get("not_tried") and shared["ran"] > 0 and shared["passed"] == shared["ran"]
+        sgreen = not shared["failed"] and not shared.get("not_tried") and (shared["ran"] > 0 or shared.get("night")) and shared["passed"] == shared["ran"]
         red = 0
         for label, row in rows.items():
             ran, passed = shared["ran"] + row["ran"], shared["passed"] + row["passed"]
