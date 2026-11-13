@@ -1172,6 +1172,28 @@ const server = createServer(async (req, res) => {
       .end(JSON.stringify({ ok: !!t && t.n === String(body.n) && Date.now() - t.at < 30000 }));
     return;
   }
+  // F214: his tap lifting his hold on a planned item, through routine/schedule.py hold N off with a one-use ticket only this
+  // server makes (as F100's tap): a job can't stand in for it. The POST needs the x-hq header.
+  if (path0 === '/api/schedule-hold') {
+    if (req.method !== 'POST' || req.headers['x-hq'] !== 'schedule') {
+      res.writeHead(403).end('Only the HQ page can lift his hold');
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch {}
+    const n = Number.isInteger(body.n) && body.n > 0 ? String(body.n) : null;
+    if (!n || body.off !== true) {
+      res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ ok: false, said: 'An item (n) and off: true.' }));
+      return;
+    }
+    const ticket = randomBytes(24).toString('hex');
+    tickets.set(ticket, { n: `item ${n}`, at: Date.now() });
+    execFile('/usr/bin/python3', [join(root, 'routine/schedule.py'), 'hold', n, 'off', '--ticket', ticket], { timeout: 30000 }, (err, out, errOut) => {
+      const said = String(err ? errOut || out : out).trim();
+      res.writeHead(err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(JSON.stringify({ ok: !err, said }));
+    });
+    return;
+  }
   if (path0 === '/api/team') {
     if (req.method !== 'POST' || req.headers['x-hq'] !== 'team') {
       res.writeHead(403).end('Only the HQ page can change the team\'s work');

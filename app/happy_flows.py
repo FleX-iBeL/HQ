@@ -293,6 +293,14 @@ def norm(s: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9 ]", "", s.lower()).split())
 
 
+def heard_sentences(reply: str) -> int:
+    """F211: the sentences a listener hears. The markdown marks (* and `) go first, as the voice drops them; a
+    full stop, question mark or exclamation mark ends a sentence only with a space or the end right after it
+    (so example.com, 12.30 and S.H.I.E.L.D stay inside one); a piece with no letter or digit is never one."""
+    text = re.sub(r"[*`]", "", reply)
+    return len([x for x in re.split(r"[.?!]+(?=\s|$)", text) if re.search(r"[^\W_]", x)])
+
+
 def heard_share(heard: str, said: str) -> float:
     """How much of what was said Whisper heard (share of the spoken words found in the transcript)."""
     want, got = norm(said).split(), set(norm(heard).split())
@@ -897,7 +905,7 @@ class Run:
         if asked:
             need(live.call.policy.pending, "no question was waiting for his answer")
         say(f"   yes question: {' '.join(r1['reply'].split())!r}")  # F172: so the question can be read on a green run too
-        n_sentences = len([x for x in re.split(r"[.?!]+", r1["reply"]) if x.strip()])
+        n_sentences = heard_sentences(r1["reply"])
         need(n_sentences <= 3, lambda: f"the check-in is not one natural sentence ({n_sentences} sentences): {r1['reply']!r}")
         need(not re.search(r"say yes|yes or no", r1["reply"].lower()), f"robotic check-in: {r1['reply']!r}")
         r2 = await live.ask(A_NO, "answering no")
@@ -41509,6 +41517,252 @@ FLOWS.update({
 })
 FLOW_LIMITS.update({620: 420, 621: 300, 622: 600, 623: 600, 624: 300, 625: 420})
 # == end of FB-front's block ==
+# == F211's block: flow 5 counts the sentences a listener hears ==
+F211_REPLY = ("Tuesday the 10th, noon to 1 in the afternoon, Test Call, with test at example.com invited. "
+              "**Shall I put that in and send the invite?**")  # job 9471's reply, the one flow 5 failed on at 4 sentences
+F211_FOUR = "I can add that. It is on Tuesday at noon. Test at example.com is invited. Shall I send it?"
+
+
+async def _f211_flow511(self) -> str:
+    """F211: flow 5 itself, its call answering with a fixed reply and then the no: job 9471's two sentences pass (the dot in
+    example.com and the ** marks are no sentence), four real ones still fail with the same message, and every count holds."""
+    async def run5(reply: str) -> str:
+        class Policy:
+            log, pending = [], []
+
+        class Call:
+            policy = Policy()
+
+        class Live:
+            call = Call()
+
+            async def ask(self, text, what):
+                return {"reply": "Alright, I've left it out." if text == A_NO else reply, "turn": {"sent": text}}
+
+        r = object.__new__(Run)
+
+        async def get_live():
+            return Live()
+        r.get_live = get_live
+        try:
+            return "passed: " + await r.flow5()
+        except Failed as e:
+            return "FAILED: " + str(e)
+
+    real = await run5(F211_REPLY)
+    say(f"   job 9471's reply: {real}")
+    need(real.startswith("passed"), f"job 9471's two sentences still fail flow 5: {real}")
+    four = await run5(F211_FOUR)
+    say(f"   four real sentences: {four}")
+    need(four.startswith("FAILED: the check-in is not one natural sentence (4 sentences)"), f"four real sentences: {four}")
+    counts = {t: heard_sentences(t) for t in (
+        F211_REPLY, F211_FOUR, "It is at 12.30 with S.H.I.E.L.D. Okay?", "Shall I send it?**", "**Yes.** `Okay`!", "... ?! **")}
+    want = [2, 4, 2, 1, 2, 0]
+    need(list(counts.values()) == want, f"the counts: {list(counts.values())}, want {want}")
+    need(all(heard_sentences(t) == n for t, n in counts.items()), "the same reply gave another count")
+    robot = await run5("Shall I put Test Call in on Tuesday? Say yes or no.")
+    need(robot.startswith("FAILED: robotic check-in"), f"the yes-or-no check: {robot}")
+    return "job 9471's reply counts 2 and flow 5 goes on to the no; four real sentences still fail at 4; say yes or no still fails"
+
+
+setattr(Run, "flow511", _f211_flow511)
+FLOWS.update({511: ("F211: flow 5 counts the sentences a listener hears: a dot in example.com and the ** marks are no sentence; four real ones still fail", False, "flow511")})
+# == end of F211's block ==
+# == F210: a team job's hook refuses a stop by a name or pattern and a pgrep -f wait loop that finds itself ==
+async def _f210_flow504(self) -> str:
+    """F210, no Claude: through a team job's hook (cyclehook.py --mail-only, as tick.start writes it into every job's settings), job 9188's
+    until-loop on pgrep -f and its pkill -f line, word for word, are refused: the wait with the tool's background run named, the kill with
+    a job stopping only its own process by its pid; so are 9448's pkill, killall, kill on pgrep or pidof, xargs kill and a while-loop on
+    pgrep -f. A kill of the job's own child by its exact pid, $! or a pid file, one pgrep look outside a loop, and the words pkill or
+    pgrep inside a grep or a commit message go through."""
+    import subprocess as _sp
+    ws, env = self._h298_ws("f210kill")
+    hook = [sys.executable, str(ROOT / "routine/cyclehook.py"), "--mail-only"]
+    def run(cmd):
+        r = _sp.run(hook, input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(ws)}), capture_output=True, text=True, env=env, timeout=60)
+        return r.returncode, r.stderr
+    tasks = "/tmp/claude-1000/-home-openclaw-HQ-workspace/b4077bc0/tasks/bqoqsid23.output"
+    wait = 'until ! pgrep -f "qatests.py check F165" >/dev/null; do sleep 5; done; cat ' + tasks + ' | tail -20'  # job 9188, 02:07
+    stop = 'pkill -f "until ! pgrep -f" ; cat ' + tasks + ' | tail -25; cd /home/openclaw/HQ && python3 routine/jobs.py notes 9188'  # job 9188, 02:17
+    code, why = run(wait)
+    need(code == 2 and "background" in why, f"job 9188's wait loop went through or didn't name the background run: {code} {why}")
+    code, why = run(stop)
+    need(code == 2 and "exact pid" in why, f"job 9188's pkill -f went through or didn't say a job stops its own process by its pid: {code} {why}")
+    for cmd in ('pkill -f "until ! pgrep"', 'pkill -f "happy_flows.py --only 41"', "killall python3", "kill python3", 'kill $(pgrep -f "routine/push.py")',
+                "kill -9 `pidof python3`", "pgrep -f push.py | xargs kill -9", 'while pgrep -f "routine/push.py" >/dev/null; do sleep 3; done',
+                "while pgrep -af push.py; do sleep 3; done", "until ! pgrep --full x; do sleep 1; done",
+                "pkill -f x 2>/dev/null", "killall python3 >/dev/null 2>&1", "kill python3 2>/dev/null", 'kill $(pgrep -f x) 2>/dev/null',
+                "kill -9 $(pidof python3) >/dev/null 2>&1 || true", "pgrep -f x | xargs kill 2>/dev/null", "kill > /dev/null python3"):
+        code, why = run(cmd)
+        need(code == 2 and "HQ: refused" in why, f"a team job's {cmd!r} went through: {code} {why}")
+    child = _sp.Popen(["sleep", "30"])
+    try:
+        for cmd in (f"kill {child.pid}", f"kill -9 {child.pid}", f"kill -s TERM {child.pid}", 'kill -TERM "$PID"; kill $!', "kill $(cat scratch/job.pid)",
+                    'pgrep -af "routine/push.py" | head', 'grep -n "pkill -f" routine/cyclehook.py', 'git commit -m "refuse pkill -f and until pgrep loops"',
+                    "while read l; do echo $l; done < x.txt", "until [ -f done.txt ]; do sleep 2; done",
+                    "kill $PID 2>/dev/null", f"kill {child.pid} 2>/dev/null", f"kill {child.pid} >/dev/null 2>&1", "kill -9 $pid 2>/dev/null || true",
+                    f"kill {child.pid} > /dev/null", "kill -- -$PGID", "kill -- -123", "kill -TERM -$PGID 2>/dev/null"):
+            code, why = run(cmd)
+            need(code == 0, f"a team job's {cmd!r} was refused: {why}")
+    finally:
+        child.kill()
+        child.wait()
+    rules = (ROOT / "MAINTAINING.md").read_text()
+    need(re.search(r"pkill[^\n]*refuse|refuse[^\n]*pkill", rules) and re.search(r"pgrep[^\n]*background|background[^\n]*pgrep", rules),
+         "MAINTAINING.md doesn't say the hook refuses a kill by a pattern and a pgrep wait loop, and that a wait is the background run")
+    return "job 9188's wait loop and pkill -f, word for word, and the other kills by name and pgrep -f waits are refused with the way that works; a kill by its own pid, a pgrep look and the words in a grep or a message go through"
+
+
+setattr(Run, "flow504", _f210_flow504)
+FLOWS.update({504: ("F210: a team job's hook refuses a kill by a name or pattern and a pgrep -f wait loop (job 9188's, word for word), with the pid and the background run named; a kill of its own child by pid and a pgrep look go through", False, "flow504")})
+FLOW_LIMITS.update({504: 120})
+# == end of F210's block ==
+# == F214: his hold on a planned item: nothing moves or starts it but his own say-so ==
+async def _f214_flow517(self) -> str:
+    """F214, no Claude: the daily release he held (his words of 7 November 2026, "before we release i first wanna check with
+    you") stays where he put it. On a throwaway workspace: a planned release, held with his words; a job's move of it is
+    refused naming his hold, and so is a say-so from a job's own process; his own move (--said) moves it and keeps the hold,
+    and a second job's move is refused again; schedule.py list, the routine's line, parse.mjs (the status page's schedule)
+    and QA's and the review's asks show it held by him with his words; its time comes and the routine's minute doesn't
+    start it; a tap that didn't come from the status page, or a job's request to the page's endpoint (its hook), doesn't lift it;
+    the page as served (page.json) carries the hold, and his tap through the page's own request lifts it; his words lift it, then a plain move goes through
+    and the routine's minute starts it like any item."""
+    import subprocess as _sp
+    ws, env = self._h298_ws("f214hold")
+    env["HQ_UNDER_TEST"] = "1"
+    rm = ws / "HQ/roadmap.md"
+    HIS = "before we release i first wanna check with you"
+
+    def sched(*a, **e):
+        return _sp.run([sys.executable, str(ROOT / "routine/schedule.py"), *a], capture_output=True, text=True,
+                       env={**env, **e}, cwd=str(ROOT), timeout=120)
+
+    def out(r):
+        return (r.stdout + r.stderr).strip()
+
+    def line():
+        return next((l for l in rm.read_text().splitlines() if l.startswith(f"- Item {n} ")), "")
+
+    def at():
+        m = re.search(r" · at (\S+ \S+) · ", line())
+        return m.group(1) if m else None
+
+    r = sched("add", "saturday 05:05", "H178: the daily release after the nightly", "--every", "day")
+    m = re.search(r"Item (\d+) is planned", r.stdout)
+    need(r.returncode == 0 and m, f"the release wasn't planned: {out(r)[-300:]}")
+    n = m.group(1)
+    start = at()
+    # not held: a move goes through, as before
+    r = sched("move", n, "friday 05:05")
+    need(r.returncode == 0 and at() != start, f"a plain move of an item he doesn't hold didn't go: {out(r)[-200:]}")
+    r = sched("move", n, "saturday 05:05")
+    need(r.returncode == 0 and at() == start, f"moving it back didn't go: {out(r)[-200:]}")
+    # his hold, with his words; a hold needs his words
+    r = sched("hold", n)
+    need(r.returncode != 0 and "held" not in line(), f"a hold without his words was taken: {out(r)[-200:]}")
+    r = sched("hold", n, "--said", HIS, HQ_IN_JOB="9303")
+    need(r.returncode != 0 and "held by him" not in line(), f"a job's own process put a hold on: {out(r)[-200:]}")
+    r = sched("hold", n, "--said", HIS)
+    need(r.returncode == 0 and f'held by him: "{HIS}"' in line(), f"his hold wasn't written with his words: {out(r)[-200:]} {line()[:200]}")
+    # a job's move: refused, naming his hold; the item stays where he put it
+    r = sched("move", n, "tomorrow 05:05")
+    need(r.returncode != 0 and "his hold" in out(r) and HIS in out(r) and at() == start, f"a job's move of the held item: {out(r)[-300:]}, at {at()}")
+    for cmd in (("cancel", n), ("every", n, "off")):
+        r = sched(*cmd)
+        need(r.returncode != 0 and "his hold" in out(r) and "held by him" in line(), f"{cmd[0]} of the held item wasn't refused: {out(r)[-200:]}")
+    r = sched("move", n, "tomorrow 05:05", "--said", "move the release to tomorrow please", HQ_IN_JOB="9410")
+    need(r.returncode != 0 and at() == start, f"a say-so from a job's own process moved it: {out(r)[-200:]}")
+    # his own move: moved, and the hold stays with it; a second job's move is refused again
+    r = sched("move", n, "friday 05:05", "--said", "move the release to friday, i still wanna check first")
+    moved = at()
+    need(r.returncode == 0 and moved != start and f'held by him: "{HIS}"' in line(), f"his own move: {out(r)[-200:]}, {line()[:200]}")
+    r = sched("move", n, "tomorrow 05:05")
+    need(r.returncode != 0 and "his hold" in out(r) and at() == moved, f"a job's move after his move wasn't refused: {out(r)[-200:]}")
+    # where he looks: the list, the routine's line, the status page's own parse of the schedule
+    li = next((l for l in sched("list").stdout.splitlines() if l.startswith(f"Item {n} ")), "")
+    need("held by him" in li and HIS in li, f"schedule.py list doesn't show it held by him with his words: {li[:300]}")
+    st = json.loads(sched("status").stdout)
+    need(f"held by him (item {n})" in st["text"], f"the routine's line doesn't say he holds it: {st}")
+    js = ("import { parseRoadmap } from %s; let t = ''; process.stdin.on('data', d => t += d); process.stdin.on('end', () => "
+          "console.log(JSON.stringify(parseRoadmap(t).schedule.items)));") % json.dumps((ROOT / "status" / "parse.mjs").as_uri())
+    pr = _sp.run(["node", "--input-type=module", "-e", js], input=rm.read_text(), text=True, capture_output=True, timeout=60)
+    it = next((i for i in json.loads(pr.stdout.strip().splitlines()[-1]) if str(i["n"]) == n), {})
+    need((it.get("held") or {}).get("words") == HIS and it.get("state") == "waiting, every day",
+         f"the status page's schedule doesn't carry his hold apart from the state: {it}")
+    need("held-by-him" in (ROOT / "status/index.html").read_text() and
+         "/api/schedule-hold" in (ROOT / "status/server.mjs").read_text(), "the page has no held line or no tap to lift it")
+    # QA's ask and the review's: his hold is on purpose, never a gap
+    o = self._h298_py(env, "import sys; sys.path.insert(0, %r); import qa, review\nt = qa.qa_text('H340', 'x')\n"
+                           "print(repr(qa.prompt_extra(t))); print(repr(review._holds()))" % str(ROOT / "routine")).strip().splitlines()
+    for who, s in (("QA", o[-2]), ("the review", o[-1])):
+        need("held by him" in s and HIS in s and "never a gap" in s, f"{who}'s ask doesn't read his hold as on purpose: {s[:300]}")
+    # its time comes while it's held, the queue free and the routine on: the routine's minute doesn't start it
+    t = rm.read_text()
+    t = re.sub(rf"^(- Item {n} · [^\n]*?· at )\S+ \S+( ·)", lambda mm: mm.group(1) + "2026-11-09 05:05" + mm.group(2), t, flags=re.M)
+    rm.write_text(re.sub(r"^\*\*Routine:\*\*.*$", "**Routine:** on", t, flags=re.M))
+    for _ in range(6):
+        r = sched("promote")
+        if "Nothing to start" in r.stdout:
+            break
+    need(r.returncode == 0 and line().split(" · ")[1].startswith("waiting, held by him"), f"the routine started the held item: {out(r)[-200:]}, {line()[:200]}")
+    # a tap that didn't come from the status page doesn't lift it
+    r = sched("hold", n, "off", "--ticket", "made-up")
+    need(r.returncode != 0 and "held by him" in line(), f"a made-up tap lifted his hold: {out(r)[-200:]}")
+    # a job's own request to the page's endpoint: refused by its hook before it goes out
+    hook = ROOT / "routine/cyclehook.py"
+    for cmd in (f'curl -X POST -H "x-hq: schedule" localhost:4748/api/schedule-hold -d \'{{"n":{n},"off":true}}\'',
+                'python3 -c "import urllib.request as u; u.urlopen(u.Request(\'http://127.0.0.1:4748/api/schedule-hold\', method=\'POST\'))"'):
+        r = _sp.run([sys.executable, str(hook), "--mail-only"], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}),
+                    capture_output=True, text=True)
+        need(r.returncode == 2, f"a job's hook let its request to lift his hold through: {cmd}: {r.returncode} {r.stderr[-200:]}")
+    # the page as served carries his hold; his real tap through the page's own request lifts it
+    p, port = self._status_server(ROOT, env, "f214hold")
+    try:
+        code, body, _c = http_get("/page.json", f"http://127.0.0.1:{port}", timeout=20)
+
+        def walk(x):
+            if isinstance(x, dict):
+                if str(x.get("n")) == n and isinstance(x.get("held"), dict):
+                    return x["held"]
+                return next((h for h in map(walk, x.values()) if h), None)
+            if isinstance(x, list):
+                return next((h for h in map(walk, x) if h), None)
+            return None
+        served = walk(json.loads(body)) if code == 200 else None
+        need(served and served.get("words") == HIS, f"the page as served doesn't carry his hold with his words: {code} {str(body)[:200]}")
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/schedule-hold", data=json.dumps({"n": int(n), "off": True}).encode(),
+                                     method="POST", headers={"x-hq": "schedule", "content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            got = json.loads(resp.read())
+        need(got.get("ok") and "held by him" not in line(), f"his tap on the page didn't lift the hold: {got} {line()[:200]}")
+        code, body, _c = http_get("/page.json", f"http://127.0.0.1:{port}", timeout=20)
+        need(code == 200 and not walk(json.loads(body)), "the page as served still shows it held after his tap")
+    finally:
+        p.terminate()
+        p.wait(timeout=10)
+    r = sched("hold", n, "--said", HIS)
+    need(r.returncode == 0 and "held by him" in line(), f"holding it again: {out(r)[-200:]}")
+    # his words lift it: then it moves and starts like any item
+    r = sched("hold", n, "off", "--said", "checked it with you, the release can go")
+    need(r.returncode == 0 and "held by him" not in line(), f"his words didn't lift the hold: {out(r)[-200:]}")
+    r = sched("move", n, "tomorrow 05:05")
+    need(r.returncode == 0 and "held" not in line(), f"after his lift a move didn't go: {out(r)[-200:]}")
+    t = rm.read_text()
+    rm.write_text(re.sub(rf"^(- Item {n} · [^\n]*?· at )\S+ \S+( ·)", lambda mm: mm.group(1) + "2026-11-09 05:05" + mm.group(2), t, flags=re.M))
+    went = False
+    for _ in range(6):
+        r = sched("promote")
+        went = went or f"item {n} became job" in r.stdout
+        if went or "Nothing to start" in r.stdout:
+            break
+    need(went, f"after his lift the routine's minute didn't start it: {out(r)[-200:]}, {line()[:200]}")
+    return "held with his words: a job's move, cancel and say-so refused, his move keeps the hold, shown held everywhere, not started; his words lift it and it runs"
+
+
+setattr(Run, "flow517", _f214_flow517)
+FLOWS.update({517: ("F214: a planned item he holds, with his words: a job can't move, cancel or start it; his own move keeps the hold; list, page, QA and the review read it as held by him; his words or his tap lift it", False, "flow517")})
+FLOW_LIMITS.update({517: 300})
+# == end of F214's block ==
 
 
 def limit_of(n: int) -> int:

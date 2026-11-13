@@ -666,7 +666,55 @@ def job_guard(cmd: str) -> str | None:
         return "HQ: refused: the routine runs the data changes, once they're committed and on dev; a job never runs them by hand."
     if any(_JOB_NO_USAGE_LINE.search(p) for p in pieces):  # F114: the same tier as a call, where it takes his own words
         return "HQ: refused: the usage stop lines are his: they change on his own words on a call or a chat, or on the status page; a job never moves them."
+    if any(by_name_kill(p) for p in pieces) or _KILL_FED.search(runs):
+        return ("HQ: refused: a job never stops processes by a name or a pattern (pkill, killall, kill on pgrep or pidof): a pattern can match "
+                "its own shell or something that isn't the job's. A job stops only a process it started, by its exact pid: kill PID.")
+    if _SELF_WAIT.search(runs):
+        return ("HQ: refused: a loop (until or while) on pgrep -f waits on a pattern that is in the loop's own command line, so it always finds "
+                "itself and never ends. Run the long command with the tool's own background run (run_in_background), which says when it's done; "
+                "one pgrep look outside a loop is fine.")
     return None
+
+
+# F210: a stop by a name or pattern (job 9448's `pkill -f "until ! pgrep"` killed its own shell), and a wait that finds itself (job 9188's
+# `until ! pgrep -f "qatests.py check F165"; do sleep 5; done` hung ten minutes). Read on what `ran` leaves: a quoted pattern is a Q.
+_KILL_PID = re.compile(r"-?(?:\d+|\$\{?!\}?|\$\{?[A-Za-z_]\w*\}?|\$\$)|%\d+")  # a pid, a process group (-PGID, -$PGID), a shell job, $!, a variable
+_REDIRECT = re.compile(r"\d*(?:[<>]+|&>>?)&?(\S*)")  # 2>/dev/null, >, 2>, &>file: where the output goes, no argument of kill's
+_KILL_FED = re.compile(r"\|\s*xargs\b[^;&|\n]*?(?<![\w-])kill\b|(?<![\w-])kill\b[^;&|\n]*(?:\$\(|`)\s*(?:pgrep|pidof|ps)\b")  # pids found by a search
+_SELF_WAIT = re.compile(r"(?<![\w-])(?:until|while)\s+(?:!\s*)?[^;&\n]*?(?<![\w-])pgrep\s+(?:\S+\s+)*?(?:-[a-zA-Z]*f[a-zA-Z]*|--full)(?=\s|$)")
+
+
+def by_name_kill(piece: str) -> bool:
+    """F210: a piece that stops processes by a name or pattern: pkill or killall at all, or kill with anything but signals and pids."""
+    words = _program(piece)
+    if not words:
+        return False
+    prog = os.path.basename(words[0])
+    if prog in ("pkill", "killall"):
+        return True
+    if prog != "kill":
+        return False
+    args, i = words[1:], 0
+    while i < len(args):
+        a = args[i]
+        r = _REDIRECT.fullmatch(a)
+        if r:
+            i += 1 if r.group(1) else 2  # a bare `>` takes the next word as its file
+        elif a in ("-s", "-n"):
+            i += 2
+        elif a in ("-l", "-L", "--list", "--table", "--"):
+            i += 1
+        elif re.fullmatch(r"-[A-Za-z][A-Za-z0-9+]*|-\d+", a) and i + 1 < len(args):  # a signal before the pids
+            i += 1
+        elif a.startswith(("$(", "`")):  # a pid read from somewhere, $(cat job.pid); one from a search is _KILL_FED's
+            while i < len(args) and not args[i].endswith((")", "`")) or (i < len(args) and args[i] in ("$(", "`")):
+                i += 1
+            i += 1
+        elif not _KILL_PID.fullmatch(a):
+            return True
+        else:
+            i += 1
+    return False
 
 
 _JOB_NO_USAGE_LINE = re.compile(r"(?<![\w-])usageline\.py\b(?:\s+(?:5-hour|five|5h|weekly|week|fable))?\s+(?:moving|fixed|reserve\s+\d)")
@@ -788,7 +836,7 @@ def decide(ask: dict, mail_only: bool = False, fix: tuple | None = None, who: tu
         why = job_guard(str(inp.get("command") or ""))
         if why:
             return 2, why
-    if name == "Bash" and re.search(r"jobs\.py[\"']?\s+(?:now\b|(?:add|add-row|send-row)\b[^\n]*\s--now\b)|/api/team\b|/api/sayso\b|/api/forward\b|\bHQ_IN_JOB\b", str(inp.get("command") or "")):
+    if name == "Bash" and re.search(r"jobs\.py[\"']?\s+(?:now\b|(?:add|add-row|send-row)\b[^\n]*\s--now\b)|/api/team\b|/api/sayso\b|/api/forward\b|/api/schedule-hold\b|\bHQ_IN_JOB\b", str(inp.get("command") or "")):
         return 2, "HQ: refused: a build in his day hours goes only on his own say-so; a job can't give it to itself."
     if mail_only:
         why = job_list_write(name, inp, ask.get("cwd"))  # F114: a team job writes his lists only through their own scripts

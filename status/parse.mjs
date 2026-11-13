@@ -177,7 +177,11 @@ export function parseRoadmap(markdown) {
     for (const line of lines.slice(sStart + 1)) {
       if (/^#{1,2} /.test(line)) break;
       const m = /^- Item (\d+) · (.+?) · at (\S+ \S+) · added (\S+ \S+) · (.*)$/.exec(line);
-      if (m) schedule.items.push({ n: Number(m[1]), state: m[2], at: m[3], added: m[4], text: plain(m[5]) });
+      if (!m) continue;
+      // F214: his hold sits in the state ("waiting, held by him: "his words" (where), every day"): kept apart, the state without it
+      const h = /, held by him: "([^"]*)" \(([^()]*)\)/.exec(m[2]);
+      schedule.items.push({ n: Number(m[1]), state: h ? m[2].replace(h[0], '') : m[2], at: m[3], added: m[4], text: plain(m[5]),
+        held: h ? { words: h[1], where: h[2] } : null });
     }
   }
 

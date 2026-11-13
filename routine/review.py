@@ -345,7 +345,17 @@ def capped_e(label, e):
 
 def _input(row):
     return ("The checklist (" + ("a small bug fix" if points_of(row) == THREE else "a feature or bigger change") + "): "
-            + points_of(row) + "\n\nThe item, as written on the planning:\n\n" + S.ask_of(row["line"])[:24000])
+            + points_of(row) + "\n\nThe item, as written on the planning:\n\n" + S.ask_of(row["line"])[:24000] + _holds())
+
+
+def _holds():
+    """F214: the schedule's items held by him, so a held time is read as on purpose, never a hole; "" when none are held."""
+    try:
+        import schedule as sc
+        now = sc.holds()
+    except Exception:
+        return ""
+    return f"\n\n{sc.HOLD_NOTE} Held by him right now:\n{now}" if now else ""
 
 
 def _fake(row):
@@ -447,7 +457,7 @@ def again_input(row, prior):
     pts = prior.get("findings") or []
     return ("The earlier points:\n" + ("".join(f"{i + 1}. {f}\n" for i, f in enumerate(pts)) or "(none)\n")
             + "\nThe changed sentences:\n" + ("".join(f"- {x}\n" for x in ch) or "(none)\n")
-            + "\nThe item as it is now:\n\n" + ask)
+            + "\nThe item as it is now:\n\n" + ask + _holds())  # F214
 
 
 def again_verdict(a, ask, prior):

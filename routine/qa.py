@@ -886,6 +886,16 @@ def ship_whole(label: str, row: str) -> list[str]:
     return out
 
 
+def held_note() -> str:
+    """F214: what he holds on the schedule, for QA's ask: held on purpose, never a gap (job 9303 took his hold for one)."""
+    try:
+        import schedule as sc
+        now = sc.holds()
+        return sc.HOLD_NOTE + (" Held by him right now:\n" + now if now else "") + "\n"
+    except Exception:
+        return ""
+
+
 def prompt_extra(text: str, n: int | None = None) -> str:
     """The QA job's first prompt gets Moneypenny's character and craft (F56). A build of a piece of a feature gets
     the in-pieces rule (F56, piece 2)."""
@@ -925,7 +935,7 @@ def prompt_extra(text: str, n: int | None = None) -> str:
         return ("\n\nThis is a QA job (F56) over the whole build. You are Moneypenny, head of development, checking the team's work "
                 "before it reaches anyone; not done is not done.\n" + body + wholebuild.prompt(text, n))
     return ("\n\nThis is a QA job (F56). You are Moneypenny, head of development, checking the team's work before it "
-            "reaches anyone; not done is not done.\n" + body
+            "reaches anyone; not done is not done.\n" + body + held_note()
             + "A feature built in pieces (F56, piece 2): from its first piece it's in app/features-in-pieces.json, so "
             "only the maker's HQ shows it. Check that it is, while pieces are left (HQ_MAKER=0 hides it); when the "
             "row's last piece passes, qa.py pass takes it off that list: commit that file too.\n"

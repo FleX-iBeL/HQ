@@ -2536,7 +2536,7 @@
           const isWaiting = (i) => /^waiting/.test(i.state);
           const coming = sc.items.filter(isWaiting).sort((a, b) => a.at.localeCompare(b.at) || a.n - b.n);
           const back = sc.items.filter((i) => !isWaiting(i)).sort((a, b) => b.n - a.n);
-          const due = coming.filter((i) => i.at <= nowStamp).length;
+          const due = coming.filter((i) => i.at <= nowStamp && !i.held).length;  // F214: a held item is not due
           const isPrio = (i) => /, priority(, past the line)?$/.test(i.state);  // H99
           // H171: a repeating item says so, and when the one after it is (a day or a week on from its time).
           const everyOf = (i) => (/, every (day|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(,|$)/.exec(i.state) || [])[1];
@@ -2561,9 +2561,10 @@
             const part = foldPart(`schedule-${key}`, start, title, `${list.length}${key === 'coming' && itemsTotal ? ` · ${itemsTotal}` : ''}`, true, key === 'coming' ? itemsLate : '');
             const card = el('div', 'card');
             for (const i of list) {
-              const isDue = key === 'coming' && i.at <= nowStamp;
+              const isHeld = key === 'coming' && !!i.held;  // F214: held by him, with his words: never due, only his say-so moves it
+              const isDue = key === 'coming' && i.at <= nowStamp && !isHeld;
               // H99: a tagged item doesn't wait for the job list; it goes first once no job runs.
-              const word = isDue ? (isPrio(i) ? 'Due, goes first' : 'Due, after the job list') : key === 'coming' ? 'Planned' : i.state.charAt(0).toUpperCase() + i.state.slice(1);
+              const word = isHeld ? 'Held by him' : isDue ? (isPrio(i) ? 'Due, goes first' : 'Due, after the job list') : key === 'coming' ? 'Planned' : i.state.charAt(0).toUpperCase() + i.state.slice(1);
               const row = el('div', `row ${isDue ? 'doing' : /cancelled|stopped|ended/.test(i.state) ? 'soft' : st}`);
               const mark = el('span', 'mark');
               mark.append(el('i'), document.createTextNode(word.replace(/, past the line$/, '').replace(/, priority$/, '').replace(/, every \w+$/, '')));
@@ -2576,6 +2577,29 @@
               // H95: a planned item shows its estimate too, as a job does.
               const left = el('div', 'jobtext');
               left.append(text);
+              if (isHeld) {
+                // F214: his hold, with his words and where they stand; his tap lifts it (a second tap to be sure)
+                const hl = el('div', 'soft held-by-him');
+                hl.append(document.createTextNode(`Held by him: "${i.held.words}" (${i.held.where}). Only his own say-so moves or starts it. `));
+                const lift = el('button', 'team-btn', 'Lift my hold');
+                lift.title = `Lift your hold on item ${i.n}`;
+                lift.addEventListener('click', async (ev) => {
+                  ev.stopPropagation();
+                  if (!window.confirm(`Lift your hold on item ${i.n}? It then runs at its time like any item.`)) return;
+                  lift.disabled = true;
+                  try {
+                    const r = await fetch('/api/schedule-hold', { method: 'POST', headers: { 'x-hq': 'schedule', 'content-type': 'application/json' }, body: JSON.stringify({ n: i.n, off: true }) });
+                    const out = await r.json().catch(() => ({ ok: false, said: `The status server said ${r.status}` }));
+                    if (!out.ok) hl.append(el('span', 'soft', ` ${out.said || 'Not lifted.'}`));
+                  } catch {
+                    hl.append(el('span', 'soft', ' The status server is not answering.'));
+                  } finally {
+                    redraw();
+                  }
+                });
+                hl.append(lift);
+                left.append(hl);
+              }
               const w = key === 'coming' ? etaItem(routines?.estimate, i.n) : '';
               if (w) left.append(etaSpan('eta', w, routines.estimate.items[i.n]));
               const gi = key === 'coming' ? guessLine(routines?.estimate?.items?.[i.n]) : '';

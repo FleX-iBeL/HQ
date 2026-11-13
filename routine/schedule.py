@@ -57,6 +57,11 @@ usage (from the workspace):
                                                                       the tag off again
   python3 "routine/schedule.py" every N R|off                         make waiting item N repeat (H171), or stop
                                                                       the repeating and keep this one
+  python3 "routine/schedule.py" hold N --said "his words"             F214: his hold on waiting item N, with his words
+  python3 "routine/schedule.py" hold N off --said "his words"         F214: his words lift it (the page's tap: --ticket)
+        While an item is held by him, nothing moves, cancels or starts it but his own say-so: move, cancel and every
+        take --said "his words" (his yes, sprint.his_yes); a move on his say-so keeps the hold. The routine never starts
+        a held item, and QA and the review are told a held item is on purpose, never a gap.
 Used by the routine itself: promote (and status, for its routine line).
 """
 import datetime as dt
@@ -81,6 +86,11 @@ DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sun
 JOB_FINISHED = jobs.FINISHED
 PRIORITY = ", priority"  # H99: the tag, written in the state, before ", past the line"
 EVERY = re.compile(r", every (day|" + "|".join(DAYS) + r")$")  # H171: before ", priority"
+# F214: his hold, written in the state right after it (before ", every"): his words and where they stand, with when.
+HELD = re.compile(r', held by him: "([^"]*)" \(([^()]*)\)$')
+HOLD_NOTE = ("A planned item held by him on the schedule (it says \"held by him\", with his words) is held on purpose, for his own "
+             "check: never a gap, a missed time or something to fix. Don't move, cancel or start it, and don't report its time as wrong; "
+             "only his own say-so changes it (F214).")
 
 
 def section(text):
@@ -108,8 +118,11 @@ def read(text):
                 prio = state.endswith(PRIORITY)
                 state = state[: -len(PRIORITY)] if prio else state
                 ev = EVERY.search(state)
-                items.append({"n": int(m.group(1)), "state": state[: ev.start()] if ev else state,
+                state = state[: ev.start()] if ev else state
+                hd = HELD.search(state)  # F214
+                items.append({"n": int(m.group(1)), "state": state[: hd.start()] if hd else state,
                               "past": past, "priority": prio, "every": ev.group(1) if ev else None,
+                              "held": {"words": hd.group(1), "where": hd.group(2)} if hd else None,
                               "at": m.group(3), "added": m.group(4), "text": m.group(5)})
     return items
 
@@ -181,7 +194,8 @@ def say_when(at):
 def tags(i):
     """The state as written: with the repeat (H171), the priority tag (H99) and past the line, when they're there."""
     ev = f", every {i['every']}" if i.get("every") else ""
-    return f"{i['state']}{ev}{PRIORITY if i.get('priority') else ''}{jobs.PAST if i['past'] else ''}"
+    hd = f", held by him: \"{i['held']['words']}\" ({i['held']['where']})" if i.get("held") and i["state"] == "waiting" else ""  # F214
+    return f"{i['state']}{hd}{ev}{PRIORITY if i.get('priority') else ''}{jobs.PAST if i['past'] else ''}"
 
 
 def rule(words, at=None):
@@ -228,9 +242,54 @@ def due(item, now=None):
     return item["state"] == "waiting" and item["at"] <= (now or dt.datetime.now()).strftime(FMT)
 
 
+def held_words(i):
+    """F214: his hold in words, for list, a call, QA and the review; "" when it isn't held."""
+    h = i.get("held") if i.get("state") == "waiting" else None
+    return (f"held by him: \"{h['words']}\" ({h['where']}); held on purpose, only his own say-so moves or starts it" if h else "")
+
+
+def holds(text=None):
+    """F214: the items held by him right now, one line each, for QA's and the review's ask; "" when none (or no planning)."""
+    try:
+        items = read(text if text is not None else open(jobs.ROADMAP, encoding="utf8").read())
+    except Exception:
+        return ""
+    return "\n".join(f"- Item {i['n']} at {say_when(i['at'])} ({i['text'][:160]}): {held_words(i)}." for i in items if held_words(i))
+
+
+def his_say(words, about, names=()):
+    """F214: where his own yes stands (sprint.his_yes), or exits with why. Never from a job's own process (as F100)."""
+    if os.environ.get("HQ_IN_JOB"):
+        sys.exit("Refused: his say-so counts from him, on a call, in a text or on the page, never from a job's own process. Nothing changed.")
+    import sprint as sp_
+    where, no = sp_.his_yes(words, about, names=names) if words and words.strip() else (None, "")
+    if not where:
+        sys.exit("Refused: --said needs his own words, as they stand in a call, a text or a quick note of his, and his yes to this"
+                 + (f" ({no})" if no else "") + ". Nothing changed.")
+    return jobs.one_line(where).replace("·", "-").replace("(", "[").replace(")", "]")
+
+
+def opt(args, name):
+    """(the value of --name, the other args): --name VALUE or --name=VALUE."""
+    rest, val, k = [], None, 0
+    while k < len(args):
+        a = args[k]
+        if a == name:
+            val, k = (args[k + 1] if k + 1 < len(args) else ""), k + 2
+            continue
+        if a.startswith(name + "="):
+            val = a.split("=", 1)[1]
+        else:
+            rest.append(a)
+        k += 1
+    return val, rest
+
+
 def show(i, now=None):
     state = i["state"]
-    if due(i, now):
+    if held_words(i):  # F214: his hold, not a due item waiting for the job list
+        state = held_words(i)
+    elif due(i, now):
         state = ("due, goes first in line once no job runs" if i.get("priority")
                  else "due, waits for the job list to be empty")
     return (f"Item {i['n']} · {say_when(i['at'])} · {state}{PRIORITY if i.get('priority') else ''}"
@@ -278,7 +337,7 @@ def passed(items, now=None):
     """H111: the waiting items whose time has come, in the order they run: tagged first (H99), then the
     earliest time first."""
     now = now or dt.datetime.now()
-    return sorted((i for i in items if due(i, now)), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
+    return sorted((i for i in items if due(i, now) and not i.get("held")), key=lambda i: (not i.get("priority"), i["at"], i["n"]))
 
 
 RELEASE_ITEM = re.compile(r"release\.py|daily release|\bH178\b", re.I)
@@ -309,7 +368,7 @@ def promote():
         running = any(jobs.open_job(j) and not jobs.waiting(j) for j in queue)
         busy = any(jobs.open_job(j) for j in queue)
         now = dt.datetime.now()
-        ready = [i for i in passed(items, now) if not waits_for_night(i, now)]  # H111: every item whose time has passed; H324: a release waits
+        ready = [i for i in passed(items, now) if not waits_for_night(i, now)]  # F214: passed() leaves out what he holds  # H111: every item whose time has passed; H324: a release waits
         did = ""
         item = ready[0] if ready else None
         if on and item and (not busy or (item.get("priority") and not running)):
@@ -357,6 +416,11 @@ def status():
     coming = sorted((i for i in items if i["state"] == "waiting"), key=lambda i: (i["at"], i["n"]))
     if not coming:
         return {"state": "ok", "text": "Nothing planned; looks every minute", "next": None}
+    held = [i for i in coming if i.get("held")]  # F214: a held item waits for his say-so, it isn't next or due
+    coming = [i for i in coming if not i.get("held")]
+    hw = f"; {len(held)} held by him (item {', '.join(str(i['n']) for i in held)})" if held else ""
+    if not coming:
+        return {"state": "ok", "text": f"Nothing planned but what he holds{hw}", "next": None}
     first = coming[0]
     prio = [i for i in coming if i.get("priority") and due(i, now)]
     if prio and on:
@@ -369,10 +433,10 @@ def status():
         more = len(passed(items, now)) - 1  # H111: the others whose time passed wait their turn, none skipped
         more = f", {more} more after it, earliest first" if more > 0 else ""
         # Waiting for the job list is how it's meant to work, so it's not shown as a warning.
-        return {"state": "ok", "text": f"Item {first['n']} is due{more}; waits: {why}", "next": None}
+        return {"state": "ok", "text": f"Item {first['n']} is due{more}; waits: {why}{hw}", "next": None}
     at = dt.datetime.strptime(first["at"], FMT)
     more = f", {len(coming) - 1} more after it" if len(coming) > 1 else ""
-    return {"state": "ok", "text": f"Next: item {first['n']}, {say_when(first['at'])}{rp}{more}", "next": at.timestamp()}
+    return {"state": "ok", "text": f"Next: item {first['n']}, {say_when(first['at'])}{rp}{more}{hw}", "next": at.timestamp()}
 
 
 def main(argv):
@@ -480,7 +544,47 @@ def main(argv):
             lk = " A first look at it is on its way." if looks else ""
             print(f"Item {n} is planned for {say_when(item['at'])}.{after}{rp}{lk}" + (f"\nEstimate: {w}" if w else ""))
             return
+        if cmd == "hold":  # F214: his hold on a waiting item, with his words; off on his words or his tap
+            said, args = opt(args, "--said")
+            ticket, args = opt(args, "--ticket")
+            if not args or not args[0].isdigit():
+                sys.exit('Usage: hold N --said "his words"  or  hold N off --said "his words" (or --ticket, his tap on the page)')
+            i = find(items, int(args[0]))
+            if i["state"] != "waiting":
+                sys.exit(f"Item {i['n']} isn't waiting any more ({i['state']}); only a waiting item can be held.")
+            if len(args) > 1 and args[1].lower() in ("off", "lift", "no", "remove"):
+                if not i.get("held"):
+                    sys.exit(f"Item {i['n']} isn't held. Nothing changed.")
+                if ticket:  # his tap on the status page: a one-use ticket only its server can make good (F100)
+                    if os.environ.get("HQ_IN_JOB") or not jobs.page_tap(f"item {i['n']}", ticket):
+                        sys.exit("Refused: that tap didn't come from the status page. Nothing changed.")
+                    where, how = "tapped on the status page", "his tap"
+                else:
+                    where, how = his_say(said, f"lifting his hold on planned item {i['n']} ({i['text'][:200]}), so it can be moved and started again",
+                                         names=[f"item {i['n']}"]), "his words"
+                was = i["held"]["words"]
+                i["held"] = None
+                write(text, items)
+                print(f"Item {i['n']} isn't held any more ({how}, {where}); it was held with his words \"{was}\". "
+                      f"It runs at {say_when(i['at'])} like any item, and can be moved again.")
+                return
+            if not said or not said.strip():
+                sys.exit('Refused: a hold is his, with his own words: hold N --said "his words". Nothing changed.')
+            if os.environ.get("HQ_IN_JOB"):
+                sys.exit("Refused: his hold is put on by him, on a call, in a text or on the page, never by a job's own process. Nothing changed.")
+            import sprint as sp_
+            where = sp_.his_quote(said)
+            if not where:
+                sys.exit("Refused: those aren't his own words as they stand in a call, a text or a quick note of his (at least three of them). Nothing changed.")
+            words = jobs.one_line(said).replace("·", "-").replace('"', "'")
+            where = jobs.one_line(f"{where}, {time.strftime(FMT)}").replace("·", "-").replace("(", "[").replace(")", "]")
+            i["held"] = {"words": words, "where": where}
+            write(text, items)
+            print(f"Item {i['n']} is held by him now, with his words \"{words}\" ({where}). Nothing moves, cancels or starts it "
+                  f"but his own say-so; it stays at {say_when(i['at'])}.")
+            return
         if cmd in ("cancel", "move", "priority", "every"):
+            said, args = opt(args, "--said")  # F214: his say-so for a held item
             if not args or not args[0].isdigit():
                 sys.exit(f"Usage: {cmd} N" + (' "WHEN"' if cmd == "move" else " [off]" if cmd == "priority"
                                               else " day|saturday|off" if cmd == "every" else ""))
@@ -488,6 +592,13 @@ def main(argv):
             if i["state"] != "waiting":
                 verb = {"cancel": "cancelled", "move": "moved", "priority": "tagged", "every": "made to repeat"}[cmd]
                 sys.exit(f"Item {i['n']} isn't waiting any more ({i['state']}); only a waiting item can be {verb}.")
+            if i.get("held") and cmd != "priority":  # F214: only his own say-so changes a held item; his hold stays with it
+                if not said:
+                    sys.exit(f"Refused: item {i['n']} is held by him, with his words \"{i['held']['words']}\" ({i['held']['where']}). "
+                             f"That is his hold, on purpose: only his own say-so changes it ({cmd} {i['n']} ... --said \"his words\"), "
+                             f"or his words lifting the hold (hold {i['n']} off --said \"his words\"). Nothing changed.")
+                his_say(said, f"to {cmd} planned item {i['n']} ({i['text'][:200]}), which he holds"
+                        + (f", to {' '.join(args[1:])}" if len(args) > 1 else ""), names=[f"item {i['n']}"])
             if cmd == "priority":  # H99: the tag, on (default) or off
                 on_ = (args[1].lower() if len(args) > 1 else "on") not in ("off", "no", "remove")
                 i["priority"] = on_
@@ -530,7 +641,8 @@ def main(argv):
                     i["every"] = DAYS[at.weekday()]
                 rp = f" It repeats {say_every(i['every'])} from there."
             write(text, items)
-            print(f"Item {i['n']} is now planned for {say_when(i['at'])}.{rp}")
+            hk = f" His hold stays: \"{i['held']['words']}\"." if i.get("held") else ""  # F214
+            print(f"Item {i['n']} is now planned for {say_when(i['at'])}.{rp}{hk}")
             return
     sys.exit(f"Unknown command {cmd!r}. See --help.")
 

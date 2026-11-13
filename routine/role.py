@@ -77,7 +77,7 @@ PY = sys.executable or "/usr/bin/python3"
 # chat's own edits to the files only the main writes (handover.py edit, see ONE_WRITER).
 WRITES = {"sprint": {"rank", "plan", "moscow", "ready", "go"},  # H269: a row's place on the planning; piece 2: Plan the sprint; H271: its MoSCoW tag
           "jobs": {"add", "add-row", "write-row", "feedback", "send-row", "tell", "stop", "overrule", "move", "on", "off", "pause", "now", "mail-on", "mail-off", "mail-fast", "mail-hourly", "resume", "done"},  # F57: done only with --at is ever forwarded
-          "schedule": {"add", "cancel", "move", "priority", "every"},
+          "schedule": {"add", "cancel", "move", "priority", "every", "hold"},
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},
           "pings": {"appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
