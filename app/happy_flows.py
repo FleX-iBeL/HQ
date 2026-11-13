@@ -32679,14 +32679,18 @@ window.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: tru
         git("config", "user.email", "test@example.com")
         git("config", "user.name", "test")
         saved = {k: os.environ.get(k) for k in ("HQ_DIRECT_DIR",)}
+        # F197 (9 November 2026): the thread is cut back to the 400 only once it passes TRIM_AT (800), in one go, so the
+        # line has to go past that for the oldest texts to be only in git: 20 texts past it, the newer one 30 from the end
+        total = dl.TRIM_AT + 20
+        kept = total - (dl.TRIM_AT + 1 - dl.KEEP)
         try:
             for who, f in lines.items():
                 os.environ["HQ_DIRECT_DIR"] = str(f)
-                for i in range(460):  # one text an hour; a commit every 20, as the workspace commits
+                for i in range(total):  # one text an hour; a commit every 20, as the workspace commits
                     at = base + i * 3600
                     if i == 3:
                         text, sender = "The parcel from the bike shop comes on Thursday", "me"
-                    elif i == 430:
+                    elif i == total - 30:
                         text, sender = "Put the plant pot on the list please", "me"
                     else:
                         text, sender = f"Small talk number {i} with {who}", ("me" if i % 2 else "agent")
@@ -32698,8 +32702,8 @@ window.fetch = async (u, o) => { sent.push(JSON.parse(o.body)); return { ok: tru
                         git("add", "-A")
                         git("commit", "-q", "-m", f"{who} {i}")
                 now = dl.thread()
-                need(len(now) == dl.KEEP and not any("parcel" in m["text"] for m in now),
-                     f"H279: the test line isn't past the 400 ({len(now)}), or the old text is still in the file")
+                need(len(now) == kept and dl.KEEP <= len(now) <= dl.TRIM_AT and not any("parcel" in m["text"] for m in now),
+                     f"H279: the test line wasn't trimmed back past the {dl.TRIM_AT} ({len(now)}, not {kept}), or the old text is still in the file")
                 need(not any("plant pot" in m["text"] for m in now[-15:]) and any("plant pot" in m["text"] for m in now),
                      "H279: the newer text isn't between the last 15 and the 400")
                 # past the 400: only in git, found by words (any case), once, marked older
