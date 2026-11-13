@@ -245,6 +245,21 @@ print("1 of 1 passed")
 '''
 
 
+def standin_usage(root: Path) -> None:
+    """A saved usage reading under the lines, so the routine may start a job. Written again before every tick of the stand-in run:
+    the copy's texts still open a real session, and its reading of the real account (usage-live.json, merged into usage.json by the
+    usage check) put her runs over her line whenever the real week was past it, so the chain stopped at the mark, day-dependent.
+    The week resets in two hours: the moving weekly line is then near its top, so with the agents' reserve taken off (up to 50,
+    F149/F168) the team's line still has room for the build's first estimate. With a reset three days out the line sat at its
+    least, 15, and a fresh copy's build (about 18%) never fitted, so the chain stopped at the job."""
+    (root / "HQ/scratch/routine").mkdir(parents=True, exist_ok=True)
+    (root / "HQ/.status").mkdir(exist_ok=True)
+    (root / "HQ/scratch/routine/usage-live.json").unlink(missing_ok=True)
+    (root / "HQ/.status/usage.json").write_text(json.dumps({
+        "checkedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "by": "the chain's stand-in", "readable": True, "plan": "Max",
+        "limits": [{"label": "Weekly · all models", "percent": 5, "resetsAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)).isoformat(timespec="seconds").replace("+00:00", "Z")}]}))
+
+
 def standin_files(root: Path, env: dict) -> dict:
     """The stand-ins' files and environment."""
     b = root / "bin"
@@ -260,13 +275,13 @@ def standin_files(root: Path, env: dict) -> dict:
     env.update({"HQ_CLAUDE": str(b / "claude"), "HQ_PROOF_RUNNER": str(b / "runner"), "HQ_CHAIN_HQ": str(root / "HQ"), "HQ_CHAIN_LOG": str(root / "standin.log"),
                 "HQ_CHAIN_WORDS": WORDS, "HQ_CHAIN_OLD": OLD, "HQ_CHAIN_NEW": NEW, "HQ_CHAIN_PAGE": PAGE,
                 "HQ_REVIEW_FAKE": "auto", "HQ_REVIEW_QUIET": "0", "HQ_LOOK": "0", "HQ_PROOF_ON": "1", "HQ_PROOF_ROOT": str(root / "HQ"),
-                "HQ_PRIVACY_PASSED": "1"})
-    # a saved usage reading under the lines, so the routine may start a job
-    (root / "HQ/scratch/routine").mkdir(parents=True, exist_ok=True)
-    (root / "HQ/.status").mkdir(exist_ok=True)
-    (root / "HQ/.status/usage.json").write_text(json.dumps({
-        "checkedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "by": "the chain's stand-in", "readable": True, "plan": "Max",
-        "limits": [{"label": "Weekly · all models", "percent": 5, "resetsAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=3)).isoformat(timespec="seconds").replace("+00:00", "Z")}]}))
+                "HQ_PRIVACY_PASSED": "1",
+                # 11 November 2026: the copy is the maker's HQ, where builds side by side and the one whole-build review are on by
+                # default; this chain is the road of one build in HQ's own folder and a QA job per item (the stand-in builds and
+                # commits in HQ's own folder), so the copy runs with both back switches off. The front (front_cap, fed_prep) stays
+                # as the template has it. The new road has its own flows (630, 631).
+                "HQ_BACKEND_SIDE_BY_SIDE": "0", "HQ_BACKEND_WHOLE_BUILD_REVIEW": "0"})
+    standin_usage(root)
     (root / "HQ/scratch/routine/nightly-started").write_text(dt.date.today().isoformat())
     for key, v in (("daily", "20"), ("weekly", "50")):  # a fresh copy has no history, so its first estimate is over her share
         _run(env, root, "routine/cycles.py", "set", "moneypenny", key, v)
@@ -370,9 +385,13 @@ def bring(env, root, marker: str) -> bool:
 
 
 def her_session(env, root) -> None:
-    """Her Thursday comes now: the session's time moves, through her own setting."""
+    """Her Thursday comes now: the session's time moves, through her own setting, and its still-useful-until with it (the
+    template's "friday 12:30" made a session moved to a Friday afternoon or evening too late before it started, so the chain
+    stopped there every Friday night)."""
+    now = dt.datetime.now()
     _run(env, root, "routine/cycles.py", "set", "moneypenny", "session_every", "day")
-    _run(env, root, "routine/cycles.py", "set", "moneypenny", "session_at", (dt.datetime.now() + dt.timedelta(minutes=1)).strftime("%H:%M"))
+    _run(env, root, "routine/cycles.py", "set", "moneypenny", "session_at", (now + dt.timedelta(minutes=1)).strftime("%H:%M"))
+    _run(env, root, "routine/cycles.py", "set", "moneypenny", "session_until", (now + dt.timedelta(hours=2)).strftime("%H:%M"))
 
 
 def night(env, root, real: bool) -> None:
@@ -476,6 +495,7 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
     while time.time() - t0 < deadline_s:
         clock += 301  # the review's own clock: a round waits for five quiet minutes
         env["HQ_REVIEW_NOW"] = str(int(clock))
+        standin_usage(root)
         tick(env, root)
         _, label = order_item(env, root)
         if not label:
@@ -500,7 +520,8 @@ def standin_run(root: Path, deadline_s: int = 280) -> dict:
             break
         time.sleep(1)
     missing = hand_offs(env, root, label, want_round=True) if label else ["no row was written"]
-    if "PROOF LEFT TO THE JOB" in (root / "standin.log").read_text():
+    log = root / "standin.log"  # no log: the stand-in never ran; hand_offs above says where the chain stopped
+    if log.exists() and "PROOF LEFT TO THE JOB" in log.read_text():
         missing.append("the job was told to run the proof itself")
     return {"label": label, "missing": missing, "stopped": where_it_stands(env, root, label), "said": said_lines}
 
