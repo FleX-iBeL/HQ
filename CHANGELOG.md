@@ -4,6 +4,10 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 1.0.3 · 14 November 2026
+
+- Your data: The front capped and the preparation fed are on by default: two review rounds an item, and a prep job that starts with the item, his words and the real case, in one chat. Going back a version undoes it.
+
 - The team can work a new way, off until you turn it on in the backend switches: one builder holds an item from start to end, up to three build side by side, and one review runs over everything once they are through, with one fix round after it. On a friend's HQ both stay off until turned on there.
 - Getting an item ready is capped: the item's review and the review of the tests run at most two rounds each, and what is still open goes along to the build instead of going round again. The preparation starts with the item whole, your own words with where and when, and what was found so far, and carries on in one chat.
 - The happy flows with the real model run once a night with the night run, no longer after every build, so they stop eating your usage.
