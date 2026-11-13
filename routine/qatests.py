@@ -21,6 +21,10 @@ The program, not a prompt, holds them:
     flagged one a single message to him with all the open points;
   - the Ready mark (sprint.set_ready), the way to the team (sprint.gate: jobs.py add and send-row, his now too) and the end
     (proof.py runs the sealed tests on the built copy; jobs.py done and qa.py pass read that, his words on done don't skip it).
+The front capped (11 November 2026, the backend switch front_cap; routine/front.py): at most front.CAP flagged rounds per road (one per
+version of the tests); after the second flag the tests go on as they are, sealed, their open points kept with the item for the build, and
+no third round runs and no text goes to him for it. The hard checks that refuse a seal stay as they are. Each round from the second on sees
+its own earlier points and what changed in the tests since (H343's fix, AGAIN_SYSTEM; the diff from the copy kept of each reviewed version).
 F151: flagged tests never go to the team, his now neither; after the 20th flagged round they're his decision, in one text. A QA
 failure opens a fix road (fix_why): a new test of hers that fails on the build, sealed, and that version's own 20 fresh rounds. The team sees her tests as the target and can't change them: the fingerprint is checked at the end.
 
@@ -120,6 +124,23 @@ SYSTEM = (
     "isn't checked, the real-case probe finds no replay, or you found another real hole; at most four findings, the most important first.")
 
 
+# H343 (10 November 2026): her tests' review settles, the way the item's review does (review.py RESYSTEM). Each round used to be a fresh
+# reviewer that never saw its own earlier points, so it hunted for new holes every round and H344's tests went eight rounds without
+# settling. From the second round on, the reviewer gets its earlier points and checks those; a new point counts only when it names a
+# test and says it lets a wrong build pass or holds a right build back. The sentences and the real-case probe stay as in every round.
+AGAIN_SYSTEM = (
+    SYSTEM + " This is not the first round: an earlier review of these tests raised the points listed, and the tests were changed to answer "
+    "them. Do the sentences and the real-case probe as above, then two more things. 1. For each earlier point, in order: name the test (its "
+    "name as in the tests' list) that now settles it, or null when nothing does. A point is settled when the tests now answer it, or the item "
+    "puts it out of scope. 2. A new point only when it is a real hole of the two kinds above, naming the test and which kind: a wrong build "
+    "passes, or a right build is held back. Not a new point: a command, file or function name the item doesn't fix (the build may name them "
+    "its own way, so a test that depends on one is a hole of the second kind only when the item itself gives the name), wording, style, a "
+    "what-if the earlier points didn't raise. Answer with the same JSON, plus "
+    '"earlier": [{"point": "...", "settled_by": "the test\'s name" or null}, ... one per earlier point, in order], '
+    '"new": [{"hole": "one plain sentence", "test": "the test\'s name", "kind": "wrong build passes" or "right build held back"}], at most two new.'
+)
+NEW_KINDS = ("wrong build passes", "right build held back")
+
 # ---------- F151: a fix found by QA goes the same road as a new item ----------
 # His words, 5 November 2026: "when you find something in QA that was not of expected quality, and you propose a fix, that fix needs to be
 # checked if it still make sense in the total picture of things. so it needs to be reviewed again, and also checked against the intial
@@ -178,7 +199,8 @@ def fix_why(row) -> str | None:
                 f"check {label}); the fix is held until then")
     rv = in_road(state(label).get("reviews") or [], label)
     last = rv[-1] if rv else {}
-    if not (last.get("fp") == fp and last.get("verdict") == "pass" and last.get("rules") == RULES):
+    import front
+    if not (last.get("fp") == fp and last.get("verdict") == "pass" and last.get("rules") == RULES) and not front.tests_capped(label):
         flagged = last.get("fp") == fp and last.get("verdict") == "flag"
         return (f"{label} isn't ready: the new version of her QA tests, with the test for the QA finding, needs its own review first"
                 + (f"; it flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(last.get("findings") or []) if flagged else
@@ -186,7 +208,7 @@ def fix_why(row) -> str | None:
     import review
     e = ((review._state()[1].get("rows") or {}).get(label)) or {}
     nr = in_road(review.now_rounds(e), label)
-    if not (nr and nr[-1].get("fp") == S.ask_fp(row["line"]) and nr[-1].get("verdict") == "pass"):
+    if not (nr and nr[-1].get("fp") == S.ask_fp(row["line"]) and nr[-1].get("verdict") == "pass") and not front.item_capped(label, e):
         return (f"{label} isn't ready: after the QA failure the item itself goes through its review again, the fix against his words, the "
                 f"first request and the whole picture, before it goes to the team: python3 routine/review.py now {label} "
                 f"(round {len(nr) + 1} of {review.NOW_ROUNDS})")
@@ -196,6 +218,9 @@ def fix_why(row) -> str | None:
 def flagged_why(label: str) -> str | None:
     """F151: tests their review flagged never go to the team, his now neither: why, or None."""
     rv = in_road(state(label).get("reviews") or [], label)
+    import front
+    if front.tests_capped(label):  # the front capped: they go on as they are
+        return None
     if rv and rv[-1].get("verdict") == "flag":
         return (f"Refused: the review of {label}'s QA tests flagged them (round {len(rv)} of {ROUNDS}): " + "; ".join(rv[-1].get("findings") or [])
                 + ". Flagged tests never go to the team, on his now neither; after the 20th round they're his decision. Nothing added.")
@@ -755,6 +780,9 @@ def why_not(row, now: bool = False) -> str | None:
                 f"failing on the code as it is): python3 routine/qatests.py check {label}")
     if (e.get("sealed") or {}).get("rules") != RULES:
         return _rules_why(label)
+    import front
+    if front.tests_capped(label):  # the front capped: sealed, and past its rounds the review holds nothing; its points go with the item
+        return None
     rv = in_road(e.get("reviews") or [], label)
     last = rv[-1] if rv else {}
     if last.get("fp") == fp and last.get("verdict") == "pass" and last.get("rules") == RULES:
@@ -806,10 +834,15 @@ def _before_lines(row) -> str:
             + "".join(f"- {n}: {w}\n" for n, w in list(whys.items())[:40]))[:4000]
 
 
-def _input(row, d) -> str:
+def _input(row, d, prior=None, changed=None) -> str:
     fs = _files(d)
     sents = his_sentences(row)
-    return ("The item, as written on the planning:\n\n" + S.ask_of(row["line"])[:8000]
+    earlier = ""
+    if prior:  # H343: the earlier points, for the round that checks them
+        earlier = "The earlier review's points:\n" + "".join(f"{i + 1}. {f}\n" for i, f in enumerate(prior)) + "\n"
+        earlier += ("What changed in the tests since that review (a diff of test.py and tests.json):\n" + changed + "\n\n" if changed else
+                    "What changed in the tests since that review: not known here (no copy of that version was kept).\n\n")
+    return (earlier + "The item, as written on the planning:\n\n" + S.ask_of(row["line"])[:8000]
             + "\n\nThe user's own words in it, sentence by sentence:\n" + "".join(f"{i + 1}. {s}\n" for i, s in enumerate(sents))
             + "\nThe tests' list (tests.json):\n" + (fs["tests.json"] or "")[:4000]
             + "\n\nThe test script (test.py), run as `python3 test.py HQDIR` on the built code:\n" + (fs["test.py"] or "")[:READS]
@@ -841,6 +874,40 @@ def verdict(a, sents) -> tuple[bool, list[str]] | None:
         fs = ["the reviewer flagged the tests without saying why"]
     return ok, ([] if ok else fs[:5])
 
+
+def _named(test, d) -> bool:
+    """H343: a test name the reviewer gives is one of her tests: it stands in the tests' list or the script."""
+    t = str(test or "").strip()
+    if len(t) < 3:
+        return False
+    fs = _files(d)
+    return t in (fs.get("tests.json") or "") or t in (fs.get("test.py") or "")
+
+
+def again_verdict(a, sents, prior, d) -> tuple[bool, list[str]] | None:
+    """H343: a later round's answer to (pass, findings), or None when it isn't one. The sentences and the real-case probe as verdict();
+    an earlier point stays open unless a test of hers that exists settles it; a new point counts only when it names a test of hers that
+    exists and one of the two kinds of hole. So the review settles: what it raised is checked, and it doesn't start over each round."""
+    base = verdict({**a, "pass": True, "findings": []} if isinstance(a, dict) else a, sents)
+    if base is None or not isinstance(a.get("earlier", []), list) or not isinstance(a.get("new", []), list):
+        return None
+    open_ = list(base[1])
+    got = [x for x in a.get("earlier") or [] if isinstance(x, dict)]
+    for i, f in enumerate(prior):
+        by = got[i].get("settled_by") if i < len(got) else None
+        if not _named(by, d):
+            open_.append(f)
+    news = [x for x in a.get("new") or [] if isinstance(x, dict)]
+    for x in news[:2]:
+        if str(x.get("hole") or "").strip() and x.get("kind") in NEW_KINDS and _named(x.get("test"), d):
+            open_.append(re.sub(r"\s+", " ", f"{x['hole']} ({x['test']}: {x['kind']})").strip()[:400])
+    seen, out = set(), []
+    for f in open_:
+        k = S._bare(f)[:120]
+        if k and k not in seen:
+            seen.add(k)
+            out.append(f)
+    return (not out), out[:5]
 
 def _last_object(text: str) -> dict:
     """The last JSON object in the reviewer's answer that holds a verdict: the answer may carry text or a second block
@@ -888,8 +955,8 @@ def trace_holes(d) -> list[str]:
         return []
 
 
-def ask_reviewer(row, d) -> dict:
-    a = _ask_reviewer(row, d)
+def ask_reviewer(row, d, prior=None, changed=None) -> dict:
+    a = _ask_reviewer(row, d, prior, changed)
     holes = [] if a.get("failed") else program_holes(row, d)
     if holes:
         a = {**a, "pass": False, "findings": (holes + [f for f in a.get("findings") or [] if f not in holes])[:5],
@@ -900,7 +967,11 @@ def ask_reviewer(row, d) -> dict:
     return a
 
 
-def _ask_reviewer(row, d) -> dict:
+def _ask_reviewer(row, d, prior=None, changed=None) -> dict:
+    seen = os.environ.get("HQ_QA_REVIEW_INPUT")  # a test: what the reviewer would be given, written where the flow reads it
+    if seen and hqpaths.under_test():
+        with open(seen, "a", encoding="utf8") as f:
+            f.write(("AGAIN\n" if prior else "FIRST\n") + _input(row, d, prior, changed) + "\n=====\n")
     fake = _fake(d)
     if fake:
         return fake
@@ -911,15 +982,17 @@ def _ask_reviewer(row, d) -> dict:
     try:
         p = subprocess.run([claude, "-p", "--model", MODEL, "--output-format", "json", "--tools", "", "--strict-mcp-config",
                             "--setting-sources", "", "--effort", EFFORT, "--max-budget-usd", str(BUDGET), "--no-session-persistence",
-                            "--system-prompt", SYSTEM], input=_input(row, d), capture_output=True, text=True, timeout=REVIEW_TIMEOUT, cwd=E.ROOT)
+                            "--system-prompt", AGAIN_SYSTEM if prior else SYSTEM], input=_input(row, d, prior, changed), capture_output=True, text=True,
+                           timeout=REVIEW_TIMEOUT, cwd=E.ROOT)
         dd = json.loads(p.stdout)
         cost = dd.get("total_cost_usd")
         if dd.get("is_error") or dd.get("subtype") not in (None, "success"):
             raise ValueError(f"the run ended {dd.get('subtype') or 'with an error'}")
         obj = _last_object(dd.get("result") or "")
-        v = verdict(obj, sents)
+        v = again_verdict(obj, sents, prior, d) if prior else verdict(obj, sents)
         if v is None:
-            raise ValueError("the answer wasn't a verdict on every sentence with the real-case probe")
+            raise ValueError("the answer wasn't a verdict on every sentence with the real-case probe"
+                             + (" and the earlier points" if prior else ""))
         return {"pass": v[0], "findings": v[1], "cost": cost, "s": round(time.time() - t0, 1), "real_case": obj.get("real_case")}
     except subprocess.TimeoutExpired:
         return {"failed": True, "why": f"timed out after {REVIEW_TIMEOUT} s", "cost": cost}
@@ -942,13 +1015,21 @@ def review(label: str) -> tuple[int, str]:
         return 2, (f"Refused: {label}'s QA tests were sealed before the real-case rules ({RULES}): python3 routine/qatests.py check {label} "
                    "first, so they're held to fail first for the row's reason; then their review.")
     rv, k_ = in_road(e.get("reviews") or [], label), cycle(label)
+    import front
+    cap = front.tests_capped(label)
+    if cap:  # the front capped: no third round; the tests go on as they are, sealed, their points with the item
+        return 0, (f"No round: {label}'s QA tests have had their {front.CAP} flagged rounds in this road (the front capped), so they go on "
+                   f"as they are, sealed. Their open points stay with the item for the build: " + ("; ".join(cap["findings"]) or "none written")
+                   + f". Nothing more to do on them: sprint.py check {label}.")
     if len(rv) >= ROUNDS:
         return 2, (f"Refused: {ROUNDS} rounds have run on {label}'s QA tests; no round {ROUNDS + 1}. They're his decision now, with the "
                    "open points he has; flagged tests never go to the team, his now neither.")
     if rv and rv[-1].get("fp") == fp and rv[-1].get("rules") == RULES:  # the same version again: the verdict stands, no new look, and it counts as a round
         a = {"pass": rv[-1].get("verdict") == "pass", "findings": list(rv[-1].get("findings") or []), "cost": 0, "same": True}
     else:
-        a = ask_reviewer(row, d)
+        # H343: from the second round on, the last flagged version's points go with it, so this round checks them instead of starting over
+        last = next((x for x in reversed(rv) if x.get("verdict") == "flag" and x.get("fp") != fp and x.get("findings")), None)
+        a = ask_reviewer(row, d, list(last["findings"]) if last else None, changed_since(label, last["fp"], d) if last else None)
     rec = {"row": label, "at": int(time.time()), "fp": fp[:16], "kind": "qa-tests", "model": MODEL, "effort": EFFORT, "cost": a.get("cost")}
     if a.get("failed"):
         _cost_line({**rec, "failed": True, "why": a.get("why")})
@@ -958,6 +1039,7 @@ def review(label: str) -> tuple[int, str]:
     entry = {"fp": fp, "at": int(time.time()), "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "cost": a.get("cost"),
              "cycle": k_, "rules": RULES, **({"real_case": a["real_case"]} if a.get("real_case") else {})}
     e = _put(label, lambda x: x.update({"reviews": [y for y in x.get("reviews") or [] if isinstance(y, dict)] + [entry]}))
+    _keep_reviewed(label, fp, d)
     _cost_line({**rec, "verdict": entry["verdict"], "findings": len(a["findings"])})
     try:
         import trail
@@ -969,6 +1051,8 @@ def review(label: str) -> tuple[int, str]:
     if a["pass"]:
         return 0, f"Round {k} of {ROUNDS}: the review passed {label}'s QA tests{same}."
     fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
+    if front.tests_capped(label):  # the front capped: this was its last round; no text to him for it, the item goes on
+        return 1, (f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests{same}:{fs}\n" + front.capped_words(label, "the review of her QA tests"))
     if k >= ROUNDS:
         tell(label, "qa-tests" + (f"-{k_}" if k_ else ""), f"Her QA tests for {label} were flagged {ROUNDS} times by their review; it's your "
              "decision now. The open points: " + " ".join(f"({i + 1}) {f}" for i, f in enumerate(a["findings"]))
@@ -977,6 +1061,54 @@ def review(label: str) -> tuple[int, str]:
                    "decision, the open points in one text; flagged, it never goes to the team.")
     return 1, (f"Round {k} of {ROUNDS}: the review flagged {label}'s QA tests{same}:{fs}\nAnswer each in the tests, python3 routine/qatests.py "
                f"check {label}, then review {label} for round {k + 1}.")
+
+
+KEEP_REVIEWED = 4  # versions of her tests kept per item, for the next round's diff
+
+
+def _reviewed_dir(label: str) -> str:
+    return os.path.join(seal_root(), label.strip().upper(), "reviewed")
+
+
+def _keep_reviewed(label: str, fp: str, d: str) -> None:
+    """The tests as this round reviewed them, kept outside the workspace (the seals' place), so the next round sees what changed."""
+    try:
+        root = _reviewed_dir(label)
+        to = os.path.join(root, fp[:16])
+        os.makedirs(to, exist_ok=True)
+        for f, v in _files(d).items():
+            if v is not None:
+                with open(os.path.join(to, f), "w", encoding="utf8") as fh:
+                    fh.write(v)
+        old = sorted((os.path.join(root, x) for x in os.listdir(root)), key=os.path.getmtime)
+        for x in old[:-KEEP_REVIEWED]:
+            shutil.rmtree(x, ignore_errors=True)
+    except OSError:
+        pass
+
+
+CHANGED_MOST = 6000
+
+
+def changed_since(label: str, fp: str | None, d: str) -> str | None:
+    """What changed in her tests since the version FP was reviewed: a short diff, or None when that version wasn't kept."""
+    if not fp:
+        return None
+    old = os.path.join(_reviewed_dir(label), str(fp)[:16])
+    if not os.path.isdir(old):
+        return None
+    import difflib
+    now = _files(d)
+    out = []
+    for f in ("tests.json", "test.py"):
+        try:
+            a = open(os.path.join(old, f), encoding="utf8").read()
+        except OSError:
+            a = ""
+        b = now.get(f) or ""
+        out += list(difflib.unified_diff(a.splitlines(), b.splitlines(), f"{f} (reviewed)", f"{f} (now)", n=1, lineterm=""))
+    text = "\n".join(out) or "(no change in the files)"
+    return text if len(text) <= CHANGED_MOST else text[:CHANGED_MOST] + f"\n[… {len(text) - CHANGED_MOST:,} more characters of the diff left out]"
 
 
 def _cost_line(rec: dict) -> None:

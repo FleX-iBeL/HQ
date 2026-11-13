@@ -7,7 +7,9 @@ push without any rollback possibilities". At the stable version (H301) those fiv
 has them on from the template, and an HQ that updates gets them once, by its data change (routine/datachanges/003),
 unless its file holds switches set by hand; each can still be turned off. The file is the workspace's
 `HQ/backend.json`: {"on": ["briefing", …]}. A computer can override one with
-HQ_BACKEND_<NAME>=1 or 0 (a test, or one computer only), and HQ_BACKEND names another file.
+HQ_BACKEND_<NAME>=1 or 0 (a test, or one computer only), and HQ_BACKEND names another file. The front capped and the
+preparation fed (front_cap, fed_prep; 11 November 2026) are on by default the same way: in the template, and once for an HQ whose
+file is still one HQ gave it (routine/datachanges/005).
 
     python3 app/backend.py                  the switches and what each does
     python3 app/backend.py on NAME          turn one on (from the next call, text or job)
@@ -35,7 +37,25 @@ SWITCHES = {
     "handover": "With one-way sync, the backup hands what it holds that the main doesn't (its own changes, its "
                 "conflict copies) to the main every minute, and takes the main's copy back once all of it is there "
                 "(F115). Off: it waits, said on the sync line; `sync.py handover` does it once by hand.",
+    "front_cap": "The front capped (11 November 2026): the item's review and the review of her QA tests run at most two rounds an "
+                 "item each (per road); after the second flag the item goes on as it is, its open points kept with it for the "
+                 "build (sprint.py show, the build's first prompt). A point only he can answer still goes to him. Off: up to "
+                 "twenty rounds each, then his decision, as before.",
+    "fed_prep": "The preparation fed (11 November 2026): a prep job starts with the item's full text, his own words it came from "
+                "(where and when, with his lines around them), the real cases it names and every finding so far, and is told to "
+                "understand and prepare the ask before the checks; a second prep step of the same item carries on in the same "
+                "chat (claude --resume), a fresh fed start only when that chat can't be picked up. Off: the short start, a new "
+                "chat each time, as before.",
+    "whole_build_review": "One builder holds an item from start to end, and one review runs over the whole build once the "
+                          "builds are through, in place of a QA job per item; a fail goes back to the builder's own chat, "
+                          "then one recheck, then it's held (routine/wholebuild.py). Off: a QA job per built item, as before.",
+    "side_by_side": "Up to three builds run at once (side_by_side_most in this file), each in its own worktree on its own branch "
+                    "cut from dev; once they're through, the program brings the branches together into dev (a collision back to the "
+                    "later builder's own chat) and then the one whole-build review runs (routine/sidebyside.py). Needs headless_jobs. "
+                    "Off: one build after another in HQ's own folder, as before.",
 }
+# 11 November 2026: switches that are on unless turned off (the file's "off" list), so an HQ has them without a data change.
+DEFAULT_ON = ("whole_build_review", "side_by_side")
 
 
 def _folder() -> Path:
@@ -66,22 +86,47 @@ def on(name: str, folder: Path | None = None) -> bool:
     env = os.environ.get(f"HQ_BACKEND_{name.upper()}")
     if env in ("0", "1"):
         return env == "1"
+    if name in DEFAULT_ON:  # on by default only on the maker's HQ; a friend's has it off until it's turned on there
+        d = _read(folder)
+        if name in (d.get("on") or []):
+            return True
+        return _maker(folder) and name not in (d.get("off") or [])
     return name in (_read(folder).get("on") or [])
+
+
+def _maker(folder: Path | None = None) -> bool:
+    """The maker's HQ (hqpaths.is_maker: HQ_MAKER, else the workspace's features.json says maker)."""
+    env = os.environ.get("HQ_MAKER")
+    if env in ("0", "1"):
+        return env == "1"
+    f = (Path(folder) if folder is not None else _folder()) / "HQ" / "features.json"
+    try:
+        return json.loads(f.read_text(encoding="utf8")).get("maker") is True
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def listing() -> list[dict]:
     d = _read()
-    return [{"id": k, "on": on(k), "set": k in (d.get("on") or []), "what": v} for k, v in SWITCHES.items()]
+    return [{"id": k, "on": on(k), "set": k in (d.get("off" if k in DEFAULT_ON else "on") or []), "what": v} for k, v in SWITCHES.items()]
 
 
 def switch(name: str, want: bool) -> dict:
     if name not in SWITCHES:
         raise KeyError(name)
     d = _read()
-    now = [k for k in (d.get("on") or []) if k in SWITCHES and k != name]
-    if want:
-        now.append(name)
-    d["on"] = [k for k in SWITCHES if k in now]
+    if name in DEFAULT_ON:  # on by default on the maker's HQ ("off" turns it off); elsewhere "on" turns it on
+        off = [k for k in (d.get("off") or []) if k in DEFAULT_ON and k != name] + ([] if want else [name])
+        on_ = [k for k in (d.get("on") or []) if k in SWITCHES and k != name] + ([name] if want and not _maker() else [])
+        d["off"] = [k for k in SWITCHES if k in off]
+        d["on"] = [k for k in SWITCHES if k in on_]
+        if not d["off"]:
+            d.pop("off")
+    else:
+        now = [k for k in (d.get("on") or []) if k in SWITCHES and k != name and k not in DEFAULT_ON]
+        if want:
+            now.append(name)
+        d["on"] = [k for k in SWITCHES if k in now]
     p = file()
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + ".tmp")

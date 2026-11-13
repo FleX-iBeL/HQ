@@ -52,7 +52,7 @@ edits to the files only the main writes go the same way, through hand()).
 """
 from __future__ import annotations
 
-import contextlib, fcntl, hashlib, http.client, json, os, socket, ssl, subprocess, sys, time, uuid
+import contextlib, fcntl, hashlib, http.client, json, os, re, socket, ssl, subprocess, sys, time, uuid
 import urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -315,6 +315,12 @@ def busy() -> str:
         n = json.load(open(os.path.join(run, "job.json"))).get("n")
         return f"job {n}"
     except (OSError, ValueError):
+        pass
+    try:  # 11 November 2026: builds side by side, each with its own file
+        side = sorted(f for f in os.listdir(os.path.join(run, "side")) if re.fullmatch(r"job-\d+\.json", f))
+        if side:
+            return "jobs " + ", ".join(f[4:-5] for f in side)
+    except OSError:
         pass
     if os.path.exists(os.path.join(run, "mail.json")):
         return "the mail check"

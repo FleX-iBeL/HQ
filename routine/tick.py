@@ -34,6 +34,7 @@ H30: whatever goes down, why, what was done about it and when it was back goes i
 (routine/incidents.py), shown under Routines. The helper also checks the watchdog, and starts it again
 when it has stopped: the watchdog checks the helper, the helper checks the watchdog.
 """
+import contextlib
 import importlib, json, os, re, signal, subprocess, sys, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -301,16 +302,45 @@ def start(job):
         roadmap = ""
     plan = carryon.plan(job, roadmap, FOLDER)
     cycle = cycles.is_cycle_job(job)  # H298: an agent's own run: her prompt, a fresh session, the box, always headless
+    fed, fresh_why = None, None  # the preparation fed (routine/prepfeed.py): a prep job's item, and why its own chat isn't picked up
+    if not cycle and plan["mode"] in ("new", "fresh"):  # a held prep whose own chat is gone ("fresh") gets the whole fed start too
+        try:
+            import prepfeed
+            fed = prepfeed.label_of(job)
+            if fed and plan["mode"] == "fresh":
+                fresh_why = plan.get("why")
+            elif fed:  # one preparation in one chat: the item's earlier prep chat carries on, when it still can
+                got = prepfeed.chat_to_continue(fed, FOLDER)
+                if got.get("session"):
+                    plan = {"mode": "continue", "session": got["session"], "prev": got["rec"]}
+                else:
+                    fresh_why = got.get("why")
+        except Exception as ex:
+            log(f"the preparation fed: {ex!r}")
+            fed = None
+    side_info = None
+    if not cycle:
+        try:  # 11 November 2026: side by side, every build on its own branch in its own worktree (routine/sidebyside.py)
+            import sidebyside
+            side_info = sidebyside.prepare(job)
+        except Exception as e:
+            log(f"side by side: job {n} gets no worktree of its own ({e!r}); it builds in HQ's own folder")
     if cycle:  # always a fresh chat: a held run's own session id is taken ("already in use"), and the run would end at once
         plan = {"mode": "new", "session": plan["session"] if plan["mode"] == "new" else str(uuid.uuid4())}
         prompt = cycles.prompt(job, cycle)
+    elif plan["mode"] == "resume" and plan.get("continues") and not carryon.load(n).get("started"):
+        import wholebuild  # 11 November 2026: the fix round of the whole-build review, in the chat that built the item
+        prompt = wholebuild.resume_prompt(n, where, plan, job)
     elif plan["mode"] == "resume":
         prompt = carryon.resume_prompt(n, where, plan, job["text"], past_note)
+    elif plan["mode"] == "continue":
+        prompt = prepfeed.continue_prompt(job, fed, where, plan) + importlib.import_module("qa").prompt_extra(job["text"])
     else:
         prompt = (
             f"let's go. This is job {n} from the queue on the HQ roadmap, started by the routine "
             f"(phase L) in {where}. The job, as agreed on the call: {job['text']}"
-            + (carryon.fresh_note(n, plan) if plan["mode"] == "fresh" else "") + "\n\n"
+            + ((importlib.import_module("wholebuild").fresh_note(n, plan, job) if plan.get("continues") else carryon.fresh_note(n, plan))
+               if plan["mode"] == "fresh" else "") + "\n\n"
             f"Follow the HQ build notes, the section \"Jobs started by the routine\": they're in "
             f"{json.dumps(os.path.join(FOLDER, 'HQ', 'CLAUDE.md'))}, a big file, so read that section, not all of it. "
             # F99: a job starts without his private folder; what it needs, it reads by path.
@@ -318,7 +348,8 @@ def start(job):
             "None of his private files are loaded at your start, on purpose: open only what this job needs, by path, and "
             "nothing of his life goes into HQ's code. "
             # H90: one HQ code on every computer: the working branch on GitHub is where every job starts and ends.
-            + ("Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
+            + ("Your own copy of HQ is named below: no pull and no push in this job. " if side_info else
+               "Before the first step, bring HQ up to date with its working branch (dev) from GitHub with "
                "routine/push.py --pull; when done, push HQ's commits to dev with routine/push.py, after its privacy check. "
                "A refused pull or push is never passed over: say so in the status block's log and the coaching log (F31). "
                "Never main, never the version tags. " if hqpaths.is_maker() else
@@ -345,7 +376,16 @@ def start(job):
             + importlib.import_module("jobs").notes_for_prompt(job)
             + importlib.import_module("qa").prompt_extra(job["text"])  # F56: a QA job runs as Moneypenny
         )
+        if fed:  # the preparation fed: the item, his words, the real case and every finding, gathered by the program
+            try:
+                prompt += prepfeed.start_text(fed, fresh_why)
+            except Exception as ex:
+                log(f"the preparation fed, job {n}: {ex!r}")
+        else:
+            prompt += _front_points(job, roadmap)
         prompt += _steps_extra(job, plan)
+    if side_info:
+        prompt += importlib.import_module("sidebyside").prompt_note(side_info, job)
     # F57: the done mark is always the very last step, after any restart; a job that said it was finished and
     # never ran it sat idle for over an hour (jobs 377 and 393, QA job 389).
     if plan["mode"] != "resume" and not cycle:  # the resume prompt already ends its rules with the done mark
@@ -366,7 +406,7 @@ def start(job):
                    "(proof.py) doesn't count. Past it the run is ended and the job is boxed, not done, and waits for a call. "
                    f"A call can let it go on at most {wall.MOST_RESUMES} times, and in all it never goes past {box['cap']:g} minutes; "
                    "then it stops for good and the item gets split, so save your work as you go.")
-    chat = (f"--resume {plan['session']}" if plan["mode"] == "resume" else f"--session-id {plan['session']}")
+    chat = (f"--resume {plan['session']}" if plan["mode"] in ("resume", "continue") else f"--session-id {plan['session']}")
     if box and headless:
         chat += f" --max-minutes {box['minutes']:g} --max-turns {box['turns']} --box-state"
     if cycle:  # H298: the box, read by runjob.py from the run's own stream and a wall clock
@@ -393,7 +433,7 @@ def start(job):
     open(pfile, "w").write(prompt)
     cmd = os.path.join(RUN, f"job-{n}.command")
     if headless:
-        open(cmd, "w").write(job_script_headless(n, chat))
+        open(cmd, "w").write(job_script_headless(n, chat, importlib.import_module("sidebyside").runner_env(side_info) if side_info else ""))
     else:
         open(cmd, "w").write(job_script_tmux(n, settings, pfile, chat) if LINUX_WINDOWS else f"""#!/bin/zsh
 # Job {n}, started by the HQ routine (phase L).
@@ -424,7 +464,13 @@ JT=$(tty)
                "proof": wall.proof_seconds(n)}, open(STATE, "w"))
     open_window(cmd, f"job-{n}")
     carryon.started(n, plan)
+    if fed:
+        try:
+            prepfeed.started(fed, n, plan["session"], plan["mode"])
+        except Exception as ex:
+            log(f"the preparation fed, job {n}: its chat wasn't kept ({ex!r})")
     how = {"resume": "carries on in its own chat after the usage hold",
+           "continue": "a prep step in the item's own earlier prep chat (the preparation fed)",
            "fresh": "started again after the usage hold, in a fresh chat with a note"}.get(plan["mode"])
     if cycle:
         how = f"{cycle['agent'].capitalize()}'s own run ({cycle['name']}), headless inside its box"
@@ -439,6 +485,21 @@ NIGHT_AT = (5, 0)  # the same time as the H169 item that ran it; H340: 05:00 in 
 NIGHT_END = 8  # H340: the window closes at 08:00, the agents' day and Donna's morning text
 SWEEP_DAY = 0  # H340: Monday at 05:00 the weekly sweep (H162) runs every flow in the nightly's place: no nightly that morning
 NIGHT_LATE = (6, 0)  # F112: a job still running by now no longer keeps the night waiting, or there'd be no night at all [Claude's choice]
+
+
+def _front_points(job, roadmap) -> str:
+    """The front capped (routine/front.py): a build's first prompt carries the open points the front kept with each item it names,
+    with the one sentence; a QA job, a prep job or an agent's run gets none."""
+    try:
+        import front
+        text = job.get("text") or ""
+        if not front.cap_on() or importlib.import_module("qa").is_qa(text) or text.startswith("Prep of "):
+            return ""
+        import sprint
+        return front.build_note([r["label"] for r in sprint.named_open_rows(roadmap, text)])
+    except Exception as ex:
+        log(f"the front's open points, job {job.get('n')}: {ex!r}")
+        return ""
 
 
 def _pid_there(pid) -> bool:
@@ -579,7 +640,7 @@ def _headless() -> bool:
         return False
 
 
-def job_script_headless(n, chat=""):
+def job_script_headless(n, chat="", env=""):
     """Fable, 27 October 2026: job n as a process (routine/runjob.py) in the same window or tmux session as before,
     so it can still be watched; no nudge, nothing typed. The window closes itself when the run ends, as before."""
     shell = "#!/bin/bash" if LINUX_WINDOWS else "#!/bin/zsh"
@@ -591,7 +652,7 @@ cd {json.dumps(FOLDER)} || exit 1
 {mini}echo "HQ · job {n}, started by the routine at $(date +%H:%M), headless: this window only shows its steps."
 echo
 echo $$ > {json.dumps(PIDFILE)}
-{json.dumps(PY)} {json.dumps(os.path.join(HERE, 'runjob.py'))} {n} {chat}
+{env}{json.dumps(PY)} {json.dumps(os.path.join(HERE, 'runjob.py'))} {n} {chat}
 """ + close
 
 
@@ -1392,7 +1453,10 @@ def watchdog_check():
 def jobs_line(q):
     running = q.get("running") or []
     waiting = len(q.get("ready") or []) + len(q.get("held") or [])
-    if running:
+    if len(running) > 1:  # 11 November 2026: side by side
+        text = (f"Jobs {', '.join(str(j['n']) for j in running)} running side by side" + (f", {waiting} waiting" if waiting else ""))
+        state = "running"
+    elif running:
         text = (f"Job {running[0]['n']} running" + (f", {waiting} waiting" if waiting else "")
                 + watch_line(running[0]["n"]))
         state = "running"
@@ -1430,10 +1494,31 @@ def job_need(job):
             log(f"what's left of held job {job['n']}: {e!r}")
         if hl:
             m, c = hl["latest"], hl["cost_latest"]
-        return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={c['five']},weekly={c['weekly']}"]
+        more = _running_need(job)  # 11 November 2026: side by side, the room the running ones still need
+        five, weekly = round(c['five'] + more['five'], 2), round(c['weekly'] + more['weekly'], 2)
+        return ["--minutes", str(max(1, int(round(m)))), "--need", f"five={five},weekly={weekly}"]
     except Exception as e:
         log(f"estimate for the usage gate: {e!r}")
         return []
+
+
+def _running_need(job):
+    """11 November 2026: what the jobs running beside this one still need of their estimated usage (their estimate's top less what
+    they used so far), so a build starts beside them only when all of it fits under the stop lines."""
+    out = {"five": 0.0, "weekly": 0.0}
+    try:
+        import usagecost
+        running = [j for j in json.loads(jobs("next")).get("running") or [] if j["n"] != job["n"]]
+        counts = usagecost._load()
+        for j in running:
+            _, c = usagecost.job_cost(j["n"], j.get("text", ""), latest=True)
+            rec = counts.get(str(j["n"])) or {}
+            used = usagecost._so_far(rec) if rec.get("seg") or rec.get("own") else {}
+            for k in out:
+                out[k] += max(0.0, float(c.get(k) or 0) - float(used.get(k) or 0))
+    except Exception as e:
+        log(f"what the running jobs still need: {e!r}")
+    return out
 
 
 def box_watch(job, s):
@@ -2056,6 +2141,16 @@ def tick():
             log(f"line: {l}")
         routines.good("line", "Carries the items with a switch on")
     guarded("line", _line)
+    def _whole_build():  # 11 November 2026: one review over the whole build once the builds are through (main only)
+        import wholebuild
+        for l in wholebuild.minute():
+            log(f"whole build: {l}")
+    def _side_merge():  # 11 November 2026: the side builds' branches brought together into dev once they're through (main only)
+        import sidebyside
+        for l in sidebyside.merge_minute():
+            log(f"side by side: {l}")
+    guarded("side-by-side", _side_merge)
+    guarded("whole-build", _whole_build)
     try:  # F107: the plan in use: set once, and following what Claude Code reports
         import usagecost
         usagecost.plan_minute(log=log)
@@ -2098,99 +2193,19 @@ def tick():
     except Exception as e:
         log(f"mail list: {e!r}")
     running = q["running"]
-    s = load_state()
-    if running:
-        job = running[0]
-        n = job["n"]
-        if s is None or s.get("n") != n:
-            # Marked running, but this routine didn't start it (or lost track): treat as ended.
-            s = {"n": n, "pid": None, "started": 0}
-        pid = s.get("pid")
-        if q.get("paused") and job["state"] != "stop asked":  # F100
-            pause_running(job, s)
-            return
-        if job["state"] == "stop asked":
-            end_chat(pid)
-            jobs("mark", str(n), "stopped " + time.strftime("%H:%M"))
-            clear()
-            status("STOPPED", f"Job {n} stopped from a call", f"job {n} stopped, as asked on a call")
-            log(f"stopped job {n}")
-            return
-        # H62: a pid from before a restart may belong to something else now, so after a restart the
-        # chat counts as gone whatever that pid is.
-        down = crash.went_down(job, s)
-        if (down or not alive(pid)) and time.time() - s.get("started", 0) > 90:
-            # H62: the Mac went down while it ran: the job runs again from the top of the line.
-            if down and crash.recover(job, s, jobs, incidents, status, log, boot=down):
-                clear()
-                quiet.clear_request()
-                return
-            if crash.window_closed(job, s, jobs, incidents, status, log, RUN):  # F138: ended from outside, as a crash would
-                clear()
-                quiet.clear_request()
-                return
-            jobs("mark", str(n), "ended " + time.strftime("%H:%M") + " without a done mark")
-            clear()
-            incidents.past("jobs", time.time(), time.time(), f"Job {n}'s chat closed before it said it was done",
-                           [(time.time(), "Marked it as ended, so the next job can start")], item=(job.get("item") or {}).get("id"))
-            status("STOPPED", f"Job {n} ended without saying it was done",
-                   f"job {n}: its chat closed before it said done; check the Terminal window or the log")
-            log(f"job {n} ended without a done mark")
-            return
-        try:
-            if cycles.out_of_hours(job):  # H298: nothing of theirs at night, whatever got it there
-                end_chat(s.get("pid"))
-                jobs("mark", str(n), "ended " + time.strftime("%H:%M") + ": her hours ended")
-                clear()
-                quiet.clear_request()
-                log(f"job {n}: an agent's run ended at the end of her hours")
-                return
-        except Exception as e:
-            log(f"cycles: hours: {e!r}")
-        try:
-            # H172, H221, H220: about four times the top of its estimated usage: paused for good.
-            if usage_overrun(job, s):
-                return
-        except Exception as e:
-            log(f"usage count: {e!r}")
-        try:
-            if box_watch(job, s):  # F100
-                return
-        except Exception as e:
-            log(f"box: {e!r}")
-        if _headless() or cycles.is_cycle_job(job):
-            try:
-                if not wall.off() and at_the_line(job, s):  # F100
-                    return
-            except Exception as e:
-                log(f"usage line: {e!r}")
-            return  # a headless run ends by itself; there's no chat to wake up (H298: a cycle always runs headless)
-        try:
-            # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
-            quiet.check(n, s, lambda x: json.dump(x, open(STATE, "w")), status,
-                        lambda **f: routines.beat("jobs", every=60, **f), incidents, log)
-        except Exception as e:
-            log(f"quiet check: {e!r}")
+    side = _side_on() or _side_files()  # the switch says whether new builds go side by side; the ones running are watched either way
+    if side:  # 11 November 2026: up to N builds side by side, each watched as one job alone was (routine/sidebyside.py)
+        _side_watch(q, running)
+        q = json.loads(jobs("next"))
+        running = q["running"]
+        s = None
+    else:
+        s = load_state()
+    if running and not side:
+        _watch(q, running[0], s)
         return
     if s:
-        # The last job is done (or held): end its chat, so its window closes by itself (L7).
-        pid = s.get("pid")
-        if alive(pid):
-            if not s.get("done_seen"):
-                s["done_seen"] = time.time()
-                json.dump(s, open(STATE, "w"))
-            wait = DONE_GRACE - (time.time() - s["done_seen"])
-            if wait > 0:
-                time.sleep(wait)
-            end_chat(pid)
-            log(f"job {s.get('n')} finished; closed its window")
-        # H162 (sweep of 25 October): a job that went quiet and then said done (or was held) kept its
-        # quiet incident open, and the next quiet job's would have been added to that one.
-        if incidents.is_down("jobs"):
-            incidents.fix("jobs", f"Job {s.get('n')} isn't running any more (done or held)")
-            incidents.up("jobs", what=f"Job {s.get('n')} isn't running any more (done or held)")
-        clear()
-        quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
+        _finished(s)
     try:
         settle_status(q)
     except Exception as e:
@@ -2229,8 +2244,12 @@ def tick():
     # F100: the wall: the cycles before the team; his day hours, a held job at night and the items in progress; the gate then
     # looks at the first that may go, and a job that can't go now never blocks one behind it.
     job, first_why = None, None
+    beside = q.get("running") or []
     for cand in wall.order(line):
         why = wall.why_not(cand, q.get("all") or line)
+        if not why and beside:  # 11 November 2026: side by side, only a build that may go beside the running ones
+            import sidebyside
+            why = sidebyside.may_go_beside(cand, beside)
         if why:
             first_why = first_why or (cand, why)
             continue
@@ -2252,7 +2271,8 @@ def tick():
         job = cand
         break
     if job is None:
-        routines.beat("jobs", state="waiting", text=f"Job {first_why[0]['n']} waits: {first_why[1]}", every=60)
+        if not beside:  # with builds running side by side the jobs line says they run
+            routines.beat("jobs", state="waiting", text=f"Job {first_why[0]['n']} waits: {first_why[1]}", every=60)
         return
     if LINUX_WINDOWS and not workspace_trusted():
         # H56.2: wait, and say what to do, instead of starting a chat into a question nobody answers.
@@ -2284,7 +2304,169 @@ def tick():
     except OSError:
         pass
     keep_day_yes(job)
-    start(job)
+    if _side_on():
+        with _as_job(job["n"]):
+            start(job)
+    else:
+        start(job)
+
+
+def _watch(q, job, s):
+    """The running job, looked at once a minute: stopped, gone, out of hours, over its usage, past its box, at the line, quiet.
+    (Before 11 November 2026 this stood in tick() for the one running job; side by side each running build gets it, with its own state.)"""
+    n = job["n"]
+    if s is None or s.get("n") != n:
+        # Marked running, but this routine didn't start it (or lost track): treat as ended.
+        s = {"n": n, "pid": None, "started": 0}
+    pid = s.get("pid")
+    if q.get("paused") and job["state"] != "stop asked":  # F100
+        pause_running(job, s)
+        return
+    if job["state"] == "stop asked":
+        end_chat(pid)
+        jobs("mark", str(n), "stopped " + time.strftime("%H:%M"))
+        clear()
+        status("STOPPED", f"Job {n} stopped from a call", f"job {n} stopped, as asked on a call")
+        log(f"stopped job {n}")
+        return
+    # H62: a pid from before a restart may belong to something else now, so after a restart the
+    # chat counts as gone whatever that pid is.
+    down = crash.went_down(job, s)
+    if (down or not alive(pid)) and time.time() - s.get("started", 0) > 90:
+        # H62: the Mac went down while it ran: the job runs again from the top of the line.
+        if down and crash.recover(job, s, jobs, incidents, status, log, boot=down):
+            clear()
+            quiet.clear_request()
+            return
+        if crash.window_closed(job, s, jobs, incidents, status, log, RUN):  # F138: ended from outside, as a crash would
+            clear()
+            quiet.clear_request()
+            return
+        jobs("mark", str(n), "ended " + time.strftime("%H:%M") + " without a done mark")
+        clear()
+        incidents.past("jobs", time.time(), time.time(), f"Job {n}'s chat closed before it said it was done",
+                       [(time.time(), "Marked it as ended, so the next job can start")], item=(job.get("item") or {}).get("id"))
+        status("STOPPED", f"Job {n} ended without saying it was done",
+               f"job {n}: its chat closed before it said done; check the Terminal window or the log")
+        log(f"job {n} ended without a done mark")
+        return
+    try:
+        if cycles.out_of_hours(job):  # H298: nothing of theirs at night, whatever got it there
+            end_chat(s.get("pid"))
+            jobs("mark", str(n), "ended " + time.strftime("%H:%M") + ": her hours ended")
+            clear()
+            quiet.clear_request()
+            log(f"job {n}: an agent's run ended at the end of her hours")
+            return
+    except Exception as e:
+        log(f"cycles: hours: {e!r}")
+    try:
+        # H172, H221, H220: about four times the top of its estimated usage: paused for good.
+        if usage_overrun(job, s):
+            return
+    except Exception as e:
+        log(f"usage count: {e!r}")
+    try:
+        if box_watch(job, s):  # F100
+            return
+    except Exception as e:
+        log(f"box: {e!r}")
+    if _headless() or cycles.is_cycle_job(job):
+        try:
+            if not wall.off() and at_the_line(job, s):  # F100
+                return
+        except Exception as e:
+            log(f"usage line: {e!r}")
+        return  # a headless run ends by itself; there's no chat to wake up (H298: a cycle always runs headless)
+    try:
+        # H36: gone quiet? Then continue is typed into its own window, and a stuck job shows as stuck.
+        quiet.check(n, s, lambda x: json.dump(x, open(STATE, "w")), status,
+                    lambda **f: routines.beat("jobs", every=60, **f), incidents, log)
+    except Exception as e:
+        log(f"quiet check: {e!r}")
+    return
+
+
+def _finished(s):
+    """The last job is done (or held): end its chat, so its window closes by itself (L7)."""
+    # The last job is done (or held): end its chat, so its window closes by itself (L7).
+    pid = s.get("pid")
+    if alive(pid):
+        if not s.get("done_seen"):
+            s["done_seen"] = time.time()
+            json.dump(s, open(STATE, "w"))
+        wait = DONE_GRACE - (time.time() - s["done_seen"])
+        if wait > 0:
+            time.sleep(wait)
+        end_chat(pid)
+        log(f"job {s.get('n')} finished; closed its window")
+    # H162 (sweep of 25 October): a job that went quiet and then said done (or was held) kept its
+    # quiet incident open, and the next quiet job's would have been added to that one.
+    if incidents.is_down("jobs"):
+        incidents.fix("jobs", f"Job {s.get('n')} isn't running any more (done or held)")
+        incidents.up("jobs", what=f"Job {s.get('n')} isn't running any more (done or held)")
+    clear()
+    quiet.clear_request()  # H36: a nudge that wasn't picked up is for nobody now
+
+
+def _side_files():
+    d = os.path.join(RUN, "side")
+    return os.path.isdir(d) and any(re.fullmatch(r"job-\d+\.json", f) for f in os.listdir(d))
+
+
+def _side_on():
+    try:
+        import sidebyside
+        return sidebyside.on()
+    except Exception as e:
+        log(f"side by side: {e!r}")
+        return False
+
+
+@contextlib.contextmanager
+def _as_job(n):
+    """11 November 2026: side by side, each running job has its own state and pid file (RUN/side/job-N.json, .pid); the functions
+    that read STATE and PIDFILE read that job's for the time of the block. A job started alone before (the old job.json) keeps it."""
+    global STATE, PIDFILE
+    was = (STATE, PIDFILE)
+    d = os.path.join(RUN, "side")
+    os.makedirs(d, exist_ok=True)
+    own = (os.path.join(d, f"job-{n}.json"), os.path.join(d, f"job-{n}.pid"))
+    try:
+        legacy = not os.path.exists(own[0]) and json.load(open(was[0])).get("n") == n
+    except (OSError, ValueError):
+        legacy = False
+    if not legacy:
+        STATE, PIDFILE = own
+    try:
+        yield
+    finally:
+        STATE, PIDFILE = was
+
+
+def _side_watch(q, running):
+    """11 November 2026: each running job watched with its own state; the side jobs that ended get their windows closed."""
+    try:
+        import usagecost
+        usagecost.SHARED = len(running) > 1  # several at once: a reading's rise isn't one job's alone
+    except Exception:
+        pass
+    for job in running:
+        with _as_job(job["n"]):
+            _watch(q, job, load_state())
+    here = {j["n"] for j in running}
+    d = os.path.join(RUN, "side")
+    for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        m = re.fullmatch(r"job-(\d+)\.json", f)
+        if m and int(m.group(1)) not in here:
+            with _as_job(int(m.group(1))):
+                s = load_state()
+                if s:
+                    _finished(s)
+    if not running:  # one started alone before side by side was on
+        s = load_state()
+        if s:
+            _finished(s)
 
 
 def day_yes_first(line):

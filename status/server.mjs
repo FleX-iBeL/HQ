@@ -764,25 +764,24 @@ function effective(r) {
 // builds. So we can compare what went offline when we were building". "j" is a list of {n, st}, empty when
 // no job runs; a sample with "j" marks the time the minute-by-minute record covers. A job that just finished
 // gets one minute of DONE (or STOPPED, when it was stopped or ended without a done mark, or held by the usage line).
-let lastJob = null;
+// 11 November 2026: builds can run side by side (routine/sidebyside.py): every running job gets its bar, not only the first.
+let lastJobs = [];
 async function jobsNow() {
   let p;
   try { p = parseRoadmap(await readFile(ROADMAP, 'utf8')); } catch { return null; }
   const jobs = p.queue.jobs;
   const out = [];
-  if (lastJob !== null) {
-    const was = jobs.find((x) => x.n === lastJob);
+  for (const n of lastJobs) {
+    const was = jobs.find((x) => x.n === n);
     if (was && !/^(running|stop asked)/.test(was.state)) {
       if (/^done/.test(was.state)) out.push({ n: was.n, st: 'DONE' });
       else if (/^(stopped|ended|held)/.test(was.state)) out.push({ n: was.n, st: 'STOPPED' });
-      lastJob = null;
     }
   }
-  const run = jobs.find((x) => /^(running|stop asked)/.test(x.state));
-  if (run) {
-    lastJob = run.n;
-    out.push({ n: run.n, st: p.state ?? 'BUILDING' });
-  } else if (p.state === 'STOPPED') {
+  const runs = jobs.filter((x) => /^(running|stop asked)/.test(x.state));
+  lastJobs = runs.map((x) => x.n);
+  for (const run of runs) out.push({ n: run.n, st: runs.length > 1 ? 'BUILDING' : (p.state ?? 'BUILDING') });
+  if (!runs.length && p.state === 'STOPPED') {
     const held = jobs.find((x) => /^held/.test(x.state));
     if (held && !out.some((o) => o.n === held.n)) out.push({ n: held.n, st: 'STOPPED' });
   }

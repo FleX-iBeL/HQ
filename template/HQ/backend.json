@@ -5,6 +5,8 @@
     "headless_jobs",
     "one_way_sync",
     "planning_index",
-    "handover"
+    "handover",
+    "front_cap",
+    "fed_prep"
   ]
 }

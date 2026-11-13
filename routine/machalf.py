@@ -293,7 +293,8 @@ def _passed(label: str, job: int | None) -> None:
     """What qa.py pass does after its mark (the trail, her road, the replaced rows, the tick on the planning)."""
     import qa
     for step in (lambda: __import__("trail").step(qa.item_id(label), "qa", state="passed", job=job),
-                 lambda: __import__("qatests").qa_passed(label), lambda: qa.close_replaced(label), lambda: qa.tick_done(label)):
+                 lambda: __import__("qatests").qa_passed(label), lambda: qa.close_replaced(label), lambda: qa.tick_done(label),
+                 lambda: __import__("wholebuild").on_pass(label, job)):
         try:
             step()
         except Exception as e:  # noqa: BLE001 - the verdict stands; the rest is said in the watcher's log

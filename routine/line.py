@@ -34,6 +34,9 @@ the record, never anyone's word, and does the next step:
     no longer holds the item: the line starts a fresh one with the record's next step, each one a try (F178, 7 November 2026). Before
     it gives up on her tests not through the hard checks, it runs qatests.py check itself once: sealed, it moves on with no text.
 
+  - The preparation fed (11 November 2026, the backend switch fed_prep; routine/prepfeed.py): the prep's task reads as understand and
+    prepare the ask, the checks after it as its check (prep_text); its start carries the item, his words, the real case and every
+    finding (tick.start), and the next prep step of the same item carries on in the same chat. Off: as before.
   - On her sit-down list for a point only he can answer (F207, 8 November 2026: H336 was prepared twice in a row, each prep stopping on
     the same laptop-chat quotes): no prep while its row is unchanged, nor after the one prep its changed words get, while its quotes
     still aren't found. Once one of the row's quotes is in a line of his said since (a call, a quick note, a text), one prep starts with
@@ -43,6 +46,10 @@ the record, never anyone's word, and does the next step:
     its prepare went off at 11:16): the pick keeps it back (wall.why_not, switched_off), the line's log says so once with the item
     and the switch, and switched on again the same job goes back in line, once: no second prep is queued. A running one finishes.
     The same for a build the line sent while its item's build switch goes off (QA, 9 November 2026: F197's job 9521).
+
+  - Built with the switch whole_build_review on (11 November 2026, routine/wholebuild.py): while it waits for the whole-build review,
+    is back with its builder for its one fix round, or waits for its recheck, the line waits (wholebuild.line_step); held after the
+    recheck, it holds until its words change or wholebuild.py lift.
 
 His pause of the team (jobs.py off) holds the line too.
 
@@ -195,6 +202,13 @@ def next_step(row, g, jobs, now=None, e=None):
                 return "split", f"job {j['n']} is red only on {len(other)} check(s) unrelated to {label}"
             return "rerun", f"job {j['n']} ended without a green record"
         return "wait", f"with the team: job {j['n']} ({j['state']})"
+    try:  # 11 November 2026: built and in the whole-build road (its review, its fix in its builder's chat, its recheck, held after)
+        import wholebuild
+        wb = wholebuild.line_step(row)
+        if wb:
+            return wb
+    except Exception:
+        pass
     if held:  # F192: her hold is on the item (its Waits on), and no job of it starts, by day or at night, until it's lifted;
         return "hold", held  # a prep of it queued before the hold doesn't hide it: wall.why_not keeps that one back
     p = prep_of(jobs, label)
@@ -478,6 +492,24 @@ def _tell(label, key, words):
 
 def prep_text(label, why, row):
     title = (row.get("title") or "").strip()
+    try:
+        import prepfeed
+        fed = prepfeed.fed_on()
+    except Exception:
+        fed = False
+    if fed:  # the preparation fed (routine/prepfeed.py): understand and prepare the ask first; the checks check that preparation
+        return (f"{PREP}{label} (the line): prepare item {label} for the team. {title[:160]} The next step, from the record: {why}. "
+                f"First understand what he asks and why: his own words and the real case it names are gathered for you in this job's "
+                f"start (or, in your own earlier chat for it, already known), with the item as it stands and every finding so far. Then "
+                f"prepare the item so a builder who has never seen it can build it: what's asked, what done looks like with real examples "
+                f"from that real case, what's out of scope; write it in the item's own words (review.py add or reword). The checks come "
+                f"after, as the check on that preparation, not as the goal: your QA tests (qatests.py new, check, review: H342, the row's "
+                f"own done example replayed on the real data of the copy they run on, read where he looks, the status page as served and "
+                f"a text as it lands, with routine/realcase.py, failing first on the code from before the build for the row's reason), the "
+                f"review's findings answered, sprint.py check {label}. Before you end, run python3 routine/qatests.py check {label} once "
+                f"yourself, so tests that pass the hard checks are sealed and the line moves on. Never send it to the team, never jobs.py "
+                f"send-row or now: the program sends it once it's ready and its build switch is on. Text him only for a real decision, never "
+                f"for a step you can take yourself. You never build HQ.")
     return (f"{PREP}{label} (the line): get item {label} ready for the team. {title[:160]} The next step, from the record: {why}. "
             f"Do that step and every one after it you can, until sprint.py check {label} says it's ready: answer the review in the "
             f"item's own words (review.py add or reword), write or fix your QA tests (qatests.py new, check, review: H342, the row's own "

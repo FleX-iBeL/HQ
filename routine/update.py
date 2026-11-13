@@ -582,6 +582,21 @@ def end_tree(pid: int) -> None:
         stop_pid(p)
 
 
+def running_windows() -> list[tuple[int, int | None, list[str]]]:
+    """11 November 2026 (side by side): every running job, with its window's pid and the routine's files for it: the old job.json for
+    one started alone, RUN/side/job-N.json for each build side by side."""
+    try:
+        ns = [int(x) for x in re.findall(r"^- Job (\d+) · (?:running|stop asked)", open(hqpaths.ROADMAP).read(), re.M)]
+    except OSError:
+        ns = []
+    out = []
+    for n in ns:
+        side = (os.path.join("side", f"job-{n}.json"), os.path.join("side", f"job-{n}.pid"))
+        files = side if os.path.exists(os.path.join(RUN_DIR, side[0])) else ("job.json", "job.pid")
+        out.append((n, window_pid(*files), list(files)))
+    return out
+
+
 def running_job() -> int | None:
     try:
         m = re.search(r"^- Job (\d+) · running", open(hqpaths.ROADMAP).read(), re.M)
@@ -615,15 +630,15 @@ def force_out(stop_call: bool = False) -> list[str]:
     if os.environ.get("HQ_UPDATE_RESTART") == "0":
         return []
     ended, mine = [], ancestors()
-    n, pid = running_job(), window_pid("job.json", "job.pid")
-    if n and pid and pid in mine:
-        ended.append(f"left job {n}'s chat running: it started this update")
-    elif n:
+    for n, pid, files in running_windows():  # 11 November 2026: every running job, side by side too
+        if pid and pid in mine:
+            ended.append(f"left job {n}'s chat running: it started this update")
+            continue
         if pid:
             end_tree(pid)
         subprocess.run([sys.executable, os.path.join(HERE, "jobs.py"), "held", str(n),
                         "an update was installed; it carries on by itself"], capture_output=True, text=True)
-        for f in ("job.json", "job.pid"):
+        for f in files:
             try:
                 os.remove(os.path.join(RUN_DIR, f))
             except OSError:
@@ -740,6 +755,7 @@ def parts() -> dict:
             "helper": helper_pids() if platform() == "darwin" else None,
             "app": app_pids(),
             "job": {"n": running_job(), "pid": window_pid("job.json", "job.pid")},
+            "jobs": [{"n": n, "pid": pid} for n, pid, _ in running_windows()],  # side by side: every running job
             "mail": {"pid": window_pid("mail.json", "mail.pid")},
             "fresh": "the routine (tick.py), the watchdog on Linux, jobs, the mail check, the helpers: started anew each time"}
 
@@ -1581,17 +1597,20 @@ def _job_item() -> str | None:
 
 def stop_job() -> list[str]:
     """F104: a job that runs, stopped by exact pid, for good, and nothing else."""
-    n, pid = running_job(), window_pid("job.json", "job.pid")
-    if pid:
-        end_tree(pid)
-    if n:
-        subprocess.run([sys.executable, os.path.join(HERE, "jobs.py"), "mark", str(n), "stopped " + time.strftime("%H:%M")], capture_output=True, text=True)
-    for f in ("job.json", "job.pid"):
-        try:
-            os.remove(os.path.join(RUN_DIR, f))
-        except OSError:
-            pass
-    return [f"job {n}" + (f" (pid {pid})" if pid else "")] if n or pid else []
+    said = []
+    for n, pid, files in running_windows() or [(None, window_pid("job.json", "job.pid"), ["job.json", "job.pid"])]:
+        if pid:
+            end_tree(pid)
+        if n:
+            subprocess.run([sys.executable, os.path.join(HERE, "jobs.py"), "mark", str(n), "stopped " + time.strftime("%H:%M")], capture_output=True, text=True)
+        for f in files:
+            try:
+                os.remove(os.path.join(RUN_DIR, f))
+            except OSError:
+                pass
+        if n or pid:
+            said.append(f"job {n}" + (f" (pid {pid})" if pid else ""))
+    return said
 
 
 def guard_restart(was: dict) -> tuple[list[str], list[str]]:

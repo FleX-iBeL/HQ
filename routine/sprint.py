@@ -173,6 +173,13 @@ def show_words(labels, text=None):
                     s += f' (his words: "{st["cleared_words"]}")'
             except Exception:
                 pass
+            try:  # the front capped (front.py): past its rounds the item goes on, its open points kept with it, under this heading
+                import front
+                ow = front.open_words(r["label"])
+                if ow:
+                    s += f"\n\nPast its review rounds ({front.CAP} flagged rounds), it goes on as it is.\n" + ow
+            except Exception:
+                pass
         for i, c in enumerate(r["cells"], 1):
             if c:
                 s += f"\n\n[{i}] {c}"

@@ -52,6 +52,11 @@ Run the low usage Claude prompt check if your checklist passes."
     before it (round_before, round_after, outside her session): only her one addition on her one row may differ; anything else is put back. At most ROUNDS rounds an item,
     then the sit-down list, for good: no day starts them again. A stop holds until the row's words change. Rows flagged
     before the loop was switched on wait for her calls, unless they have a rank.
+  - The front capped (11 November 2026, the backend switch front_cap; routine/front.py): at most front.CAP flagged rounds an
+    item per road, counted over every route (each verdict is kept in the row's "history" by _attempt). After the second flag
+    the item goes on as it is: no third review (tick, now_review, next_round), the flag no longer holds the Ready mark or his
+    now (why_not_ready, now_door_why), and its findings go with it as open points for the build. A stop for his answer
+    (sitdown, no) still holds it for him. Off: as before.
 
 usage:
   python3 routine/review.py list                 the review state of every open row
@@ -234,6 +239,12 @@ def why_not_ready(row, st=None):
     no_ = _said_no(row)
     if no_:
         return f"{row['label']} isn't ready: Moneypenny said no to it, and it's his to decide: {no_.get('why', '')}"
+    import front
+    if front.item_capped(row["label"]):  # the front capped: past its rounds the review holds nothing, but his answer still does
+        stop = on_list(row)
+        if stop and stop.get("kind") == "his":
+            return f"{row['label']} isn't ready: it's on her sit-down list for his answer: {stop.get('why', '')}"
+        return None
     if not (on() or q.is_paused()) or not _state()[1].get("since"):  # F86: a pause holds the reviewer, it doesn't open this gate
         return None
     st = st or states([row]).get(row["label"]) or {}
@@ -292,6 +303,8 @@ def tick(log=None, now=None, start=True):
                 fp = e["seen"]
                 if e.get("ask") == fp or r["label"] in pending or now - e["seen_at"] < QUIET:
                     continue
+                if capped_e(r["label"], e):  # the front capped: no third round; the item goes on as it is
+                    continue
                 tries = e.get("tries") or [None, 0]
                 if tries[0] == fp and now < (e.get("next_try") or 0):
                     continue
@@ -317,6 +330,15 @@ def tick(log=None, now=None, start=True):
     if started and log:
         log(f"review: a review for {', '.join(started)} on the planning (F77)")
     return started
+
+
+def capped_e(label, e):
+    """The front capped (front.py): whether this row's review is past its rounds (switch on), from its entry E."""
+    try:
+        import front
+        return bool(front.item_capped(label, e))
+    except Exception:
+        return False
 
 
 # ---------- the review itself ----------
@@ -542,6 +564,15 @@ def _attempt(label, now_fn=_clock, extra=None):
             e.update({"ask": fp, "verdict": "pass" if a["pass"] else "flag", "findings": a["findings"], "at": now,
                       "cost": a.get("cost"), "s": a.get("s"), "model": a.get("model"), "effort": a.get("effort"),
                       "text": S.ask_of(r["line"])[:REVIEW_READS], "again": bool(a.get("again"))})  # nowroad: the words this verdict is on
+            try:  # the front capped: every verdict kept, whatever the route, so the rounds are counted once and a prep sees them all
+                import qatests
+                road = qatests.cycle(label)
+            except Exception:
+                road = 0
+            e["history"] = ([h for h in e.get("history") or [] if isinstance(h, dict)] + [{
+                "at": now, "verdict": "pass" if a["pass"] else "flag", "findings": list(a["findings"]), "fp": fp, "cycle": road,
+                "changed": [x[:400] for x in (prior or {}).get("changed") or []][:8], "again": bool(a.get("again")),
+                "prior": [x[:400] for x in (prior or {}).get("findings") or []][:5]}])[-HISTORY_MOST:]
             e.pop("tries", None)
             import trail  # F105: the verdict on the item's record
             trail.step(trail.resolve(label), "review", verdict="pass" if a["pass"] else "flag", findings=len(a["findings"]))
@@ -614,6 +645,12 @@ def now_review(label, now_fn=_clock):
         import qatests
         k_ = qatests.cycle(label)
         rounds = qatests.in_road(now_rounds(e), label)
+        import front
+        cap = front.item_capped(label, e)
+        if cap:  # the front capped: no third round; it goes on as it is
+            return (f"No round: {label}'s review has had its {front.CAP} flagged rounds in this road (the front capped), so it goes on as it "
+                    f"is, without the review's mark. Its open points stay with it for the build: "
+                    + ("; ".join(cap["findings"]) or "none written") + f". Mark it ready (sprint.py ready {label}).")
         if len(rounds) >= NOW_ROUNDS:
             sys.exit(f"Refused: {NOW_ROUNDS} rounds have run on {label}; no round {NOW_ROUNDS + 1}. It's his decision now, with the open points "
                      "he has; flagged, it never goes to the team, his now neither.")
@@ -644,6 +681,11 @@ def now_review(label, now_fn=_clock):
 
 
 def _now_words(label, a, k, road, same=""):
+    import front
+    if not a["pass"] and front.item_capped(label):  # the front capped: this flag was its last round, and it goes on as it is
+        fs = "".join(f"\n{i + 1}. {f}" for i, f in enumerate(a["findings"]))
+        return (f"Round {k} of {NOW_ROUNDS}: the review flagged {label}{same}:{fs}\n" + front.capped_words(label, "the item's review")
+                + f" Mark it ready (sprint.py ready {label}).")
     if a["pass"]:
         return (f"Round {k} of {NOW_ROUNDS}: the review passed {label}{same}. Mark it ready (sprint.py ready {label}), then send-row {label} "
                 f"--now --said \"HIS WORDS\".")
@@ -671,6 +713,12 @@ def now_door_why(row):
     rounds = qatests.in_road(now_rounds(e), row["label"])
     reviewed = e.get("ask") == fp and e.get("verdict") in ("pass", "flag")
     if reviewed and e.get("verdict") == "pass":
+        return None
+    import front
+    if front.item_capped(row["label"], e):  # the front capped: past its rounds the flag holds nothing; a stop for his answer still does
+        st = on_list(row)
+        if st and st.get("kind") == "his":
+            return f"Refused: {row['label']} is on her sit-down list for his answer: {st.get('why', '')}"
         return None
     if len(rounds) >= NOW_ROUNDS:
         return (f"Refused: {row['label']} had its {NOW_ROUNDS} review rounds and its review flagged it: it's his decision, and a flagged "
@@ -954,6 +1002,7 @@ def golden_current():
 
 ADD_MOST = 4000  # F86: characters in one addition, about two pages; three rounds are 12,000. The review reads 24,000 of a row (_input)
 REVIEW_READS = 24000
+HISTORY_MOST = 12  # the front capped: the verdicts kept per row (a prep job reads them, the cap counts them)
 ROUNDS_DIR = roundlog.folder()
 ROUND_QUIET = 300  # F86: seconds no row may have changed before a round starts, his five minutes
 ROUNDS = 20  # rounds an item, then the sit-down list and one text to him (F86, his yes 30 October 2026; F101: per item, not per day;
@@ -1023,8 +1072,9 @@ def next_round(now=None):
         for r in order:
             e, label, fp = rs.get(r["label"]) or {}, r["label"], S.ask_fp(r["line"])
             f = e.get("fix") or {}
-            if e.get("ask") == fp and e.get("verdict") == "pass" and (f or int(e.get("at") or 0) >= since) and marks.get(label) != "ready" \
-                    and f.get("marked") != fp and not _stopped(e, fp):  # F105: a row that passes the first time gets its mark run too
+            passed = e.get("ask") == fp and e.get("verdict") == "pass"
+            if (passed or capped_e(label, e)) and (f or int(e.get("at") or 0) >= since) and marks.get(label) != "ready" \
+                    and f.get("marked") != fp and not _stopped(e, fp):  # F105: a row that passes the first time gets its mark run too; the front capped: one past its rounds too
                 pick = {"label": label, "mode": "mark", "round": 0}
                 break
         for r in ([] if pick else order):
@@ -1032,6 +1082,8 @@ def next_round(now=None):
             if e.get("ask") != fp or e.get("verdict") != "flag" or _stopped(e, fp):
                 continue
             if label not in place and int(e.get("at") or 0) < since:
+                continue
+            if capped_e(label, e):  # the front capped: no fix round past its rounds (its mark comes from the pick above)
                 continue
             f = e.setdefault("fix", {})
             if f.get("stop") and f["stop"].get("ask") != fp:  # new words lifted the stop; after the cap, rounds from nothing
@@ -1123,6 +1175,8 @@ def round_wanted(label, mode):
         e = (_state()[1].get("rows") or {}).get(label) or {}
     if not r:
         return False
+    if mode == "mark" and capped_e(label, e):  # the front capped: past its rounds it goes on as it is
+        return True
     return e.get("ask") == S.ask_fp(r["line"]) and e.get("verdict") == ("pass" if mode == "mark" else "flag")
 
 
@@ -1674,7 +1728,8 @@ def flagged(rows=None):
     """[(row, state)] for the flagged open rows, in the planning's order."""
     rows = S.open_rows() if rows is None else rows
     st = states(rows)
-    return [(r, st[r["label"]]) for r in rows if st[r["label"]]["state"] == "flagged"]
+    rs = _state()[1].get("rows") or {}  # the front capped: a row past its rounds goes on as it is, nothing to raise first
+    return [(r, st[r["label"]]) for r in rows if st[r["label"]]["state"] == "flagged" and not capped_e(r["label"], rs.get(r["label"]) or {})]
 
 
 def flag_words(rows=None):
