@@ -40801,7 +40801,11 @@ async def _h342_flow497(self) -> str:
             ("passes", "t('t', True, '')\n", ("already pass", "PASS t", "rewrite it to replay")),
             ("crashes", "t('t', False, 'not there yet')\nraise RuntimeError('a helper is missing')\n", ("crashed", "traceback")),
             ("exits", "t('t', False, 'not there yet')\nsys.exit(3)\n", ("crashed", "exit 3")),
-            ("bare", "t('t', False, \"KeyError('x')\")\n", ("without saying what he'd see",))):
+            # F190 (9 November 2026): a FAIL whose why is only an exception (KeyError('x')) is a run that raised, refused as
+            # a broken test; a FAIL with no why at all, or only an error's name that isn't an exception, is still bare
+            ("raises", "t('t', False, \"KeyError('x')\")\n", ("instead of failing on their own check", "KeyError('x')")),
+            ("bare", "t('t', False, '')\n", ("without saying what he'd see", "no why given")),
+            ("bare with an error's name", "t('t', False, 'SystemExit(1)')\n", ("without saying what he'd see", "SystemExit(1)"))):
         (qd / "test.py").write_text(head + body)
         r = script("qatests.py", "check", label)
         need(r.returncode != 0 and all(w in r.out for w in want) and "Nothing sealed" in r.out, f"a test that {case} on the old code: {r.out[-500:]}")
@@ -40816,7 +40820,8 @@ async def _h342_flow497(self) -> str:
     r = _sp.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import realcase; realcase.Case(sys.argv[2])",
                  str(ROOT / "routine"), str(ROOT)], capture_output=True, text=True, env={k: v for k, v in env.items() if k not in ("HQ_WALL", "HQ_QA_BOX")})
     need(r.returncode != 0 and "Refused" in r.stderr and "her test run" in r.stderr, f"realcase started outside her test run: {r.stderr[-300:]}")
-    return "a passing, a crashing, an exiting and a bare test refused on the old code; the real-case test sealed with its FAIL line and the rules"
+    return ("a passing, a crashing, an exiting, a raising and two bare tests refused on the old code; the real-case test sealed with "
+            "its FAIL line and the rules")
 
 
 async def _h342_flow498(self) -> str:
