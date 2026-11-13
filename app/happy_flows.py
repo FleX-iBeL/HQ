@@ -31022,18 +31022,24 @@ console.log(JSON.stringify({ to: L.to, toLatest: L.toLatest, late: L.pieces.map(
                "HQ_LINES": str(status / "lines.json"), "HQ_PLANNING_INDEX": str(status / "planning-index.json"),
                "HQ_ACTIVITY": str(status / "job-activity.json")}
         for k in ("HQ_BACKEND_BRIEFING", "HQ_BACKEND_OPEN_LINE", "HQ_BACKEND_HEADLESS_JOBS", "HQ_BACKEND_ONE_WAY_SYNC",
-                  "HQ_BACKEND_PLANNING_INDEX"):
+                  "HQ_BACKEND_PLANNING_INDEX", "HQ_BACKEND_HANDOVER", "HQ_BACKEND_FRONT_CAP", "HQ_BACKEND_FED_PREP",
+                  "HQ_BACKEND_WHOLE_BUILD_REVIEW", "HQ_BACKEND_SIDE_BY_SIDE", "HQ_MAKER"):
             env.pop(k, None)
         py = _sys.executable
 
         def sh(*args, extra=None, timeout=120):
             return _sp.run([py, *args], capture_output=True, text=True, timeout=timeout, env={**env, **(extra or {})})
 
-        # 1. the switches: on a fresh install all five on (H301, the stable version; the hand-over too); on, off, listed; a computer's own setting wins
+        # 1. the switches: on a fresh install all five on (H301, the stable version; the hand-over too), and since
+        # 11 November 2026 the front capped and the preparation fed on as well (template/HQ/backend.json); the two
+        # back switches (whole_build_review, side_by_side) are on by default only on the maker's HQ, so a fresh
+        # install (not the maker's) has them off; on, off, listed; a computer's own setting wins
         r = sh(root / "app" / "backend.py")
-        need(r.returncode == 0 and r.stdout.count(": off.") == 0
-             and all(f"{k}: on" in r.stdout for k in ("briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index")),
-             f"a fresh install: all five switches on (H301): {r.stdout}")
+        fresh_on = ("briefing", "open_line", "headless_jobs", "one_way_sync", "planning_index", "handover", "front_cap", "fed_prep")
+        fresh_off = ("whole_build_review", "side_by_side")
+        need(r.returncode == 0 and r.stdout.count(": off.") == len(fresh_off)
+             and all(f"{k}: on." in r.stdout for k in fresh_on) and all(f"{k}: off." in r.stdout for k in fresh_off),
+             f"a fresh install: all five switches on (H301), the front capped and the preparation fed on, the two back switches off: {r.stdout}")
         need(sh(root / "app" / "backend.py", "off", "open_line").returncode == 0 and "open_line: off." in sh(root / "app" / "backend.py").stdout,
              "a switch on by default can't be turned off")
         need(sh(root / "app" / "backend.py", "on", "briefing").returncode == 0, "the switch couldn't be turned on")
