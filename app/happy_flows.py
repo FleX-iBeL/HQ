@@ -29638,6 +29638,9 @@ print("RESULT " + json.dumps({"starts": starts, "marks": marks, "log": caught[-1
         need(any(x["text"].startswith("If the plumber's bill") for x in state["agents"]["donna"]["batch"]), f"the question isn't in her batch: {state['agents']['donna']}")
         kinds = json.loads((ws / "HQ/roadmap-estimates/schedule-kinds.json").read_text())
         need(all(kinds[x[0]]["kind"] == "step-donna" for x in steps), f"the steps' kinds: {[kinds[x[0]] for x in steps]}")
+        # by step number, not by the planning's order: the steps are planned at the next two hours, and late in the evening the
+        # second one's hour (past midnight) is already past today, so it is planned now and stands first (flow 191 red after 22:00)
+        steps = sorted(steps, key=lambda x: int(x[3]))
         # staleness: the first step's input (the to-do row) changes; promoted, its gatekeep says stale and cancels it
         r = sched("move", steps[0][0], "now"); need(r.returncode == 0, r.stdout + r.stderr)
         r = sched("promote"); need("became job" in r.stdout, r.stdout + r.stderr)
