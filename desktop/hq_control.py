@@ -139,7 +139,10 @@ def listening(port):
 
 def helper_pids():
     """The helper is the process whose program is the applet itself (as the watchdog finds it)."""
-    r = subprocess.run(["/bin/ps", "-ax", "-o", "pid=,comm="], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["/bin/ps", "-ax", "-o", "pid=,comm="], capture_output=True, text=True)
+    except OSError:  # F240: a computer without that program runs no helper app
+        return []
     out = []
     for line in r.stdout.splitlines():
         pid, _, comm = line.strip().partition(" ")
@@ -153,7 +156,12 @@ def watchdog_label():
 
 
 def watchdog_loaded(label):
-    r = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, text=True)
+    """F240: off a Mac there is no launchctl, so no Mac watchdog is loaded; the answer is no, never an error
+    (the night's flow 46 stopped on it whenever the status page was slow or the watchdog's line late)."""
+    try:
+        r = subprocess.run(["/bin/launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, text=True)
+    except OSError:
+        return False
     return r.returncode == 0
 
 
