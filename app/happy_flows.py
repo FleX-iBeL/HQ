@@ -4322,7 +4322,18 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
         need((down["mood"], down["light"]) == ("sleep", "down") and down["off"] == ["status"], f"status page down: {down}")
         need([r["key"] for r in hc.judge(lines())["routines"]] == [k for k, _ in hc.ROUTINES], "the routines aren't in the status page's order")
         # The real routines right now: the same JSON the app reads.
-        live = json.loads(run(["/usr/bin/python3", str(ROOT / "desktop/hq_control.py"), "health"]).stdout)
+        def ask(what, *args):
+            """F240: the watchdog part's one JSON line, or a failure in plain words: which question, and the end of what it said."""
+            r = run(["/usr/bin/python3", str(ROOT / "desktop/hq_control.py"), *args])
+            try:
+                got = json.loads((r.stdout or "").strip().splitlines()[-1])
+            except (ValueError, IndexError):
+                got = None
+            said = " ".join((r.stderr or r.stdout or "").strip().splitlines()[-3:])[-300:] or "nothing"
+            need(isinstance(got, dict), f"the watchdog part gave no JSON line when asked for {what} (exit {r.returncode}); it said instead: {said}")
+            return got
+
+        live = ask("its health (health)", "health")
         need({"light", "mood", "headline", "routines", "off"} <= set(live), f"health misses fields: {sorted(live)}")
         # Turning on: with everything faked off, it starts each of the four; nothing it runs stops anything.
         orig = (hc.listening, hc.helper_pids, hc.watchdog_loaded, hc.os.path.isdir, hc.os.path.exists)
@@ -4346,8 +4357,9 @@ console.log(JSON.stringify({{ problems: r.problems, current: r.current }}));"""
         need("--quiet" in cmds and "start.sh" in cmds and "open -g" in cmds, f"turning on isn't the usual start: {cmds}")
         src = (ROOT / "desktop/hq_control.py").read_text() + (ROOT / "desktop/HQ.swift").read_text()
         need(not re.search(r"pkill|killall|os\.kill|\.terminate\(\)", src), "the app or its watchdog part can stop processes")
-        dry = json.loads(run(["/usr/bin/python3", str(ROOT / "desktop/hq_control.py"), "fix", "--dry"]).stdout)
-        need(all(f.get("ok") is None for f in dry["fixed"]), "fix --dry did something")
+        dry = ask("the dry turn-on (fix --dry: what Turn everything on would start)", "fix", "--dry")
+        need(isinstance(dry.get("fixed"), list) and all(f.get("ok") is None for f in dry["fixed"]), f"the dry turn-on (fix --dry) did something: {dry}")
+        need(dry.get("nothing") is (not dry["fixed"]), f"the dry turn-on's nothing doesn't match its list: {dry}")
         # The strip in a headless browser: each mood, the light, the tabs, the button only when something is off.
         cands = sorted(Path.home().glob("Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"))
         cands += sorted(Path.home().glob(".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell"))
