@@ -29923,17 +29923,43 @@ print("ok")
 """
         idx = site / "status/index.html"
         idx.write_text(idx.read_text().replace("</body>", harness + "</body>", 1))
-        def look(port, name, on):
-            senv = {**env, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(rm)}
-            proc = _sp.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-            try:
+        def look(name, on):
+            # F239: the flow looks at the status server it started itself, on a port free at this moment (never a fixed one:
+            # another program held 4811 in the night of 17 November 2026 and its page was read as routines.json). An answer
+            # counts only while our own server is running and it is routines.json; a server that stops (the port taken
+            # after all) gets another free port, three times, then the flow says so in plain words.
+            r, why, port = None, "", 0
+            for _try in range(3):
+                port = _free_port()
+                senv = {**env, "HQ_STATUS_PORT": str(port), "HQ_ROADMAP": str(rm)}
+                proc = _sp.Popen([node, str(site / "status/server.mjs"), "--quiet"], env=senv, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
                 base = f"http://127.0.0.1:{port}"
-                for _ in range(50):
-                    if http_get("/routines.json", base)[0] == 200:
+                why = "it gave no routines.json within 20 seconds"
+                end = time.time() + 20
+                while time.time() < end:
+                    if proc.poll() is not None:
+                        why = f"it stopped by itself at once (exit code {proc.returncode}), as it does when the port is taken"
                         break
+                    code, body, _ = http_get("/routines.json", base)
+                    if code == 200 and proc.poll() is None:
+                        try:
+                            got_ = json.loads(body)
+                        except ValueError:
+                            got_ = None
+                        if isinstance(got_, dict):
+                            r = got_
+                            break
+                        why = "the answer on its port wasn't routines.json"
                     time.sleep(0.2)
-                _, body, _ = http_get("/routines.json", base)
-                r = json.loads(body)
+                if r is not None:
+                    break
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+            need(r is not None, f"the status server the flow started itself didn't come up on port {port} (switch {name}): {why}; tried three free ports")
+            try:
                 need(bool(r.get("agents", {}).get("on")) == on, f"routines.json's agents with the switch {'on' if on else 'off'}: {str(r.get('agents'))[:200]}")
                 res = _sp.run([chrome, "--headless", "--disable-gpu", "--no-first-run", *(["--no-sandbox"] if sys.platform != "darwin" else []),
                               f"--user-data-dir={self.tmp / ('h298-p7-' + name)}", "--window-size=390,2400", "--virtual-time-budget=20000", "--dump-dom", base + "/"],
@@ -29948,13 +29974,13 @@ print("ok")
                     proc.wait(timeout=5)
                 except Exception:
                     proc.kill()
-        r, got = look(4811, "on", True)
+        r, got = look("on", True)
         need(got["agents"] == "yes" and got["rows"] == "2" and got["names"] == "Donna,Moneypenny", f"the page's agents section: {got}")
         need(got["lines"] == "picked,moved,escalated,share" and got["over"] == "yes" and "3.3 of 3" in got["share"] and "over her line" in got["share"], f"Donna's card: {got}")
         need("2 running themselves" in got["sum"] and "Friday screen" in got["sum"], f"the fold's summary: {got['sum']}")
         need(int(got["wide"].split("/")[0]) <= int(got["wide"].split("/")[1]), f"the page is wider than a phone: {got['wide']}")
         (ws / "HQ/features.json").write_text('{"off": [], "on": [], "maker": true}\n')
-        r, got = look(4812, "off", False)
+        r, got = look("off", False)
         need(got["agents"] == "no", f"the section is drawn with the switch off: {got}")
         need("planning" in r and "estimate" in r, "the rest of routines.json isn't there with the switch off")
         return ("on: routines.json carries the agents and the page draws The agents with Donna's and Moneypenny's cards (picked, moved, "
