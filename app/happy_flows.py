@@ -304,14 +304,14 @@ def heard_sentences(reply: str) -> int:
 FLOW5_SAYS = 3  # F242: how often flow 5 says its sentence until the invite reaches her
 
 
-def flow5_invite_arrived(heard: str, reply: str, adds: list) -> bool | None:
-    """F242: did the invite in flow 5's sentence reach her? Read from the words she heard, the adds she tried (as the call
-    system decided them: summary, verdict, why) and her reply. True: the invite is in what she heard, an add was held for his
-    yes (only one with someone else in it is, H78), or her reply names the invite. False: none of that, and she heard other
-    words or tried an add that needed no yes (his own event, stopped only by the test call). None: nothing to tell it by (a
-    replay with no words heard and no add), judged as before."""
-    if (re.search(r"invit|example", (heard or "").lower()) or any(v == "ask" for _, v, _ in adds)
-            or re.search(r"invit|example|guest", (reply or "").lower())):
+def flow5_invite_arrived(heard: str, adds: list) -> bool | None:
+    """F242: did the invite in flow 5's sentence reach her? Read from the words she heard for that sentence and the adds she
+    tried (as the call system decided them: summary, verdict, why), never from her reply: "nobody is invited to it" names
+    the invite too, and says it was lost (the whole-build review, job 9643). True: the invite is in what she heard, or an add
+    was held for his yes (only one with someone else in it is, H78). False: neither, and she heard other words or tried an
+    add that needed no yes (his own event, stopped only by the test call). None: nothing to tell it by (a replay with no
+    words heard and no add), judged as before."""
+    if re.search(r"invit|example", (heard or "").lower()) or any(v == "ask" for _, v, _ in adds):
         return True
     if (heard or "").strip() or any(v == "deny" and str(why).startswith("test run: no changes") for _, v, why in adds):
         return False
@@ -519,7 +519,9 @@ class Live:
         llm, mic, wait_for = self.llm, self.mic, self.wait_for
         say(f"{label}: saying: {q}")
         n = len(llm.turns)
-        mic.say(await self.speak16(q))
+        audio = await self.speak16(q)
+        t_say = time.perf_counter()
+        mic.say(audio)
         await wait_for(lambda: mic.speech_end is not None, 30, "the question to be spoken")
         end = mic.speech_end
         await wait_for(lambda: len(llm.turns) > n and self.after_llm.first("llm_end", end)[0] is not None
@@ -538,6 +540,7 @@ class Live:
             "first_text": None if t_txt is None else t_txt - end,
             "first_audio": None if t_aud is None else t_aud - end,
             "heard": " ".join(v for _, v in self.after_stt.all("transcript", end - 30)),
+            "heard_turn": " ".join(v for _, v in self.after_stt.all("transcript", t_say)),  # F242: this sentence only
             "reply": " ".join(t["reply"].strip() for t in llm.turns[n:]).strip(),
         }
         say(f"   She said: {r['reply']!r}")
@@ -918,14 +921,15 @@ class Run:
         for tries in range(1, FLOW5_SAYS + 1):
             at = len(live.call.policy.log)
             r1 = await live.ask(sentence, "needs a yes" if tries == 1 else f"needs a yes, said again ({tries} of {FLOW5_SAYS})")
-            heard = " ".join(str(r1.get("heard") or "").split())
+            # Only the words heard for this sentence: "heard" alone reaches 30 seconds back, into the flow or the try before.
+            heard = " ".join(str(r1.get("heard_turn", r1.get("heard")) or "").split())
             say(f"   she heard: {heard!r}" if heard else "   she heard: (the words she heard aren't in this call's record)")
             asked = [(t, d.verdict) for t, _, d in live.call.policy.log[at:] if d.verdict == "ask"]
             say(f"   asked about: {asked} | pending: {[q for _, _, q in live.call.policy.pending]}")
             done = [t for t, _, d in live.call.policy.log[start:] if "create_event" in t and d.verdict == "allow"]
             need(not done, "the event was created before he said anything")
             adds = [(s, d.verdict, d.why) for t, s, d in live.call.policy.log[at:] if "create_event" in t]
-            arrived = flow5_invite_arrived(heard, r1["reply"], adds)
+            arrived = flow5_invite_arrived(heard, adds)
             if arrived is not False:
                 break
             say(f"   the invite didn't reach her (her adds: {[(s, v) for s, v, _ in adds]})"
