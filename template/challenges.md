@@ -58,11 +58,6 @@ Urgent: if nothing changes when it doesn't happen, it's not urgent.
 | Challenge | Done (date, time) | Notes |
 |---|---|---|
 
-## Shopping wishlist
-
-| Item | Type | When | Status | Added | Notes |
-|---|---|---|---|---|---|
-
 ## Groceries
 
 | Item | How often | Last bought | Notes |

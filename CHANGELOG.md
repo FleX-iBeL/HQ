@@ -5,7 +5,7 @@ What was added and changed in each version of HQ, newest first. The small grey v
 ## Coming next
 
 - A bucketlist: things you want to live, get or do. Each one can have a kind (an experience, a product, a service), a price that is once, a month or a year, links, a time goal, the hours it takes, a score for how much it brings your vision closer, and notes. Break it down into sub-items as deep as you like; each sub-item has all of the same, and the one above adds up the money, the hours and how many are done. It's in To-do, next to your groceries, and your agents keep it when you ask on a call or in a text.
-- The wishlist works the same way now: a price, links, notes and sub-items on every wish. Open Wishlist in To-do and tap once to bring your wishes over; the old list stays in your file as it was.
+- The wishlist works the same way now: a price, links, notes and sub-items on every wish. It replaces the old wishlist in your to-do file: your wishes move over by themselves, with everything each one had, and the old table is taken out of the file.
 
 ## 1.0.3 · 14 November 2026
 

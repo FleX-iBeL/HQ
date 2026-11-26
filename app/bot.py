@@ -1031,6 +1031,7 @@ if __name__ == "__main__":
     async def lists_read():
         if config.FREE_ONLY:
             return JSONResponse({"off": "Free", "lists": []}, headers=_NO_CACHE)
+        await asyncio.to_thread(_lists.settle)  # an old wishlist table in the to-do file moves over by itself
         return JSONResponse(await asyncio.to_thread(_lists.read), headers=_NO_CACHE)
 
     @app.post("/api/lists", include_in_schema=False)

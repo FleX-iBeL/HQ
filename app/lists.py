@@ -36,7 +36,7 @@ of the one-off money is still to spend (the open ones), the hours, and how many 
     python3 app/lists.py delete ITEM               gone, with everything under it (undo brings it back)
     python3 app/lists.py move ITEM up|down|top|bottom           its place among its neighbours
     python3 app/lists.py under ITEM PARENT|top     make it a sub-item of PARENT, or a main item again
-    python3 app/lists.py import-wish               copy the to-do list's wishlist in, once (the old one is left alone)
+    python3 app/lists.py import-wish               move an old wishlist table in the to-do file over (HQ does it by itself)
     python3 app/lists.py undo                      puts back the last change made here, if nothing changed since
 
 ITEM is an item's id (L12) or a few words of its name; --list says which list when the words fit both. Every change
@@ -49,6 +49,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -463,32 +464,88 @@ def under(d, ref: str, parent_ref: str, lst: str = "", by: str = "") -> str:
 _URL = re.compile(r"\[([^\]]*)\]\((https?://[^)\s]+)\)|(https?://[^\s)|]+)")
 
 
-@_change
-def import_wish(d, by: str = "") -> str:
-    """The to-do list's wishlist, copied in once. The old table is left as it is; nothing is taken off it here."""
-    if (d.get("moved") or {}).get("wish"):
-        return f"The wishlist was already brought over on {d['moved']['wish']}."
+def _old_wishes() -> list[dict]:
     import todo
-    doc = todo.read()
-    rows = [it for l in doc.get("lists") or [] if l.get("kind") == "wish" for it in l.get("items") or []]
-    n = 0
+    return todo.wish_rows()
+
+
+@_change
+def _move_wishes(d, by: str = "") -> str:
+    rows = _old_wishes()
+    made = filled = 0
     for r in rows:
-        cells = {str(k).lower(): str(v or "").strip() for k, v in (r.get("fields") or [])}
-        cells.setdefault("added", str(r.get("added") or ""))
+        title = str(r.get("title") or "")
+        name = _URL.sub(lambda m: m.group(1) or "", title).strip() or "Wish"
         notes = str(r.get("notes") or "")
-        links = [m.group(2) or m.group(3) for m in _URL.finditer(notes + " " + str(r.get("title") or ""))]
+        links = [m.group(2) or m.group(3) for m in _URL.finditer(notes + " " + title)]
         notes = _URL.sub(lambda m: "" if (m.group(1) or "").strip().lower() in ("", "link") else m.group(1), notes).strip()
-        bits = [notes] + [f"{k.capitalize()}: {cells[k]}" for k in ("when", "status") if cells.get(k) and cells[k] != "open"]
-        it = _new(d, _URL.sub(lambda m: m.group(1) or "", str(r.get("title") or "")).strip() or "Wish",
-                  notes="\n".join(b for b in bits if b), links=links)
-        added = cells.get("added", "")
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", added):
-            it["added"] = added
-        d["lists"]["wish"].append(it)
-        n += 1
-    d.setdefault("moved", {})["wish"] = _today()
-    _log(d, f"the wishlist brought over from the to-do list: {n} items", by)
-    return f"Brought {n} wish{'es' if n != 1 else ''} over from the to-do list. The old list is left as it was."
+        cells = [(str(k).strip(), str(v or "").strip()) for k, v in (r.get("fields") or [])]
+        # everything the old row had comes along: its notes, every other column, and the paragraphs in their own words
+        pieces = [notes] + [f"{k.capitalize()}: {v}" for k, v in cells
+                            if v and k.lower() not in ("notes", "why", "added") and not (k.lower() == "status" and v.lower() == "open")]
+        pieces += [str(x).strip() for x in r.get("details") or []]
+        pieces = [x for x in pieces if x]
+        added = next((v for k, v in cells if k.lower() == "added"), "") or str(r.get("added") or "")
+        it = next((x for x in d["lists"]["wish"] if x["name"].strip().lower() == _clean("name", name).strip().lower()), None)
+        if it is None:
+            it = _new(d, name, notes="\n".join(pieces), links=links)
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", added):
+                it["added"] = added
+            d["lists"]["wish"].append(it)
+            made += 1
+            continue
+        have = str(it.get("notes") or "")
+        more = [x for x in pieces if x not in have]
+        new_links = [u for u in (_link(x) for x in links) if u not in (it.get("links") or [])]
+        if more or new_links:
+            it["notes"] = _clean("notes", "\n".join([have] + more).strip())
+            it["links"] = list(it.get("links") or []) + new_links
+            filled += 1
+    import todo
+    took = todo.take_wishes(by=by)
+    d.setdefault("moved", {}).setdefault("wish", _today())
+    if not rows and took < 0:
+        return "Nothing to move: every wish is already on the wishlist."
+    _log(d, f"the wishlist moved over from the to-do list: {made} new, {filled} filled in; the old table is gone", by)
+    n = len(rows)
+    return (f"Moved {n} wish{'es' if n != 1 else ''} over from the to-do list, with everything each one had"
+            + (f" ({made} new, {filled} filled in)" if filled else "") + ". The old list is gone: the wishlist replaces it.")
+
+
+def import_wish(by: str = "") -> dict:
+    """Every wish still in the to-do file's old wishlist table moved to the wishlist, with all it had (its notes, every
+    other column, its links, the paragraphs in the user's own words, the day it was added), and the old table taken
+    out of the file: the wishlist replaces it. Safe to run again: a wish already here is only filled in, never twice.
+    It can't be undone from the lists (an undo would lose the wishes: the old table is gone)."""
+    r = _move_wishes(by=by)
+    try:
+        _undo_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+    return r
+
+
+_settle_tried = 0.0
+
+
+def settle(by: str = "HQ") -> None:
+    """An old wishlist table still in the to-do file is moved over by itself, the first time anything looks at the
+    lists. On the backup the main does it (asked at most once every two minutes)."""
+    global _settle_tried
+    try:
+        import todo
+        if not todo.has_wish_table():
+            return
+        if not os.environ.get("HQ_ROLE_HERE"):
+            import role
+            if role.is_backup():
+                if time.time() - _settle_tried > 120:
+                    _settle_tried = time.time()
+                    role.hand("lists", ["import-wish", "--by", by], keep=False)
+                return
+        import_wish(by=by)
+    except Exception:
+        pass  # a look at the lists never fails on this; the next look tries again
 
 
 def undo() -> dict:
@@ -605,6 +662,8 @@ def run(argv: list[str]) -> tuple[int, str]:
     by, lst = _opt(args, "--by"), _opt(args, "--list")
     lst = {"bucketlist": "bucket", "wishlist": "wish"}.get(lst.lower(), lst.lower()) if lst else ""
     cmd = args[0] if args else "summary"
+    if cmd not in ("import-wish", "undo"):
+        settle()
     try:
         if cmd in ("summary", "bucket", "wish", "bucketlist", "wishlist"):
             return 0, summary("" if cmd == "summary" else cmd[:6] if cmd.startswith("bucket") else "wish")

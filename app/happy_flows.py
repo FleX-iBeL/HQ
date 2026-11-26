@@ -34504,8 +34504,8 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
     # 112
     async def flow112(self) -> str:
         """H200: the to-do list, the Eisenhower way. No Claude turns. The template's list reads as its lists with
-        nothing on them, each in its place (0 commitments, 1 to 4 the matrix by their names, 5 let go, 7 done, the
-        wishlist, groceries); a list with its own name still finds its square. On a throwaway copy with made-up items:
+        nothing on them, each in its place (0 commitments, 1 to 4 the matrix by their names, 5 let go, 7 done,
+        groceries; the wishlist lives with the bucketlist, lists.py); a list with its own name still finds its square. On a throwaway copy with made-up items:
         add, done, let go, move (a column the other list lacks goes into its notes, nothing lost), a log line each,
         newest first; an unclear item is refused with the matches; undo puts the last change back, and not after the
         file changed since. The very important mail reads from the mail list. The call rules, Donna's chat and the
@@ -34520,7 +34520,7 @@ if (location.search.includes("fresh")) { try { localStorage.removeItem("hq-theme
         d = td.read(APP.parent / "template" / "challenges.md")
         kinds = {l["key"]: l["kind"] for l in d["lists"]}
         need(kinds == {"0": "commit", "1": "q2", "2": "q1", "3": "q3", "4": "q4", "5": "letgo", "7": "done",
-                       "shopping-wishlist": "wish", "groceries": "groceries"} and not any(l["items"] for l in d["lists"]),
+                       "groceries": "groceries"} and not any(l["items"] for l in d["lists"]),
              f"the template's list doesn't read as its empty lists in their places: {kinds}")
         for name, want in (("Big rocks (important, not urgent)", "q2"), ("Fires: important and urgent", "q1"),
                            ("Urgent but not important", "q3"), ("Not urgent and not important", "q4"), ("Promises", "other")):

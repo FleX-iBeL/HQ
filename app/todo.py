@@ -231,7 +231,7 @@ def _field(row: dict, name: str) -> str:
 
 
 def _wish_moved() -> bool:
-    """Has the wishlist been brought over to the lists (lists.py import-wish)? Then wishes are kept there."""
+    """Has the wishlist been moved to the lists (lists.py)? Then wishes are kept there."""
     try:
         import lists as _lists
         return bool((_lists._load().get("moved") or {}).get("wish"))
@@ -239,7 +239,82 @@ def _wish_moved() -> bool:
         return False
 
 
-def read(p: Path | None = None) -> dict:
+def _for_wishlist(doc: dict, want: str) -> bool:
+    """Is this a wish? Wishes live in the lists (lists.py), whether or not the file still has its old wishlist table."""
+    w = want.strip().lower().lstrip("#").strip()
+    if not re.search(r"wish|shopping", w):
+        return False
+    return not any(w == x["name"].lower() or w == x["key"] for x in doc["lists"] if x["kind"] != "wish")
+
+
+def has_wish_table(p: Path | None = None) -> bool:
+    """Does the to-do file still have a wishlist table of its own (from before the lists)? lists.settle() moves it."""
+    try:
+        return any(x["kind"] == "wish" for x in parse((p or path()).read_text(encoding="utf8"))["lists"])
+    except OSError:
+        return False
+
+
+def wish_rows(p: Path | None = None) -> list[dict]:
+    """The old wishlist table's rows with all each one has, for lists.py to move them: the title, every filled column,
+    the notes, the day added, and the paragraphs in the user's own words that are this wish's alone: the paragraph's
+    label names the wish as whole words and no other item on any list, or of several only this one's name starts with
+    it (a loose match would put a paragraph about something else into a wish for good)."""
+    p = p or path()
+    try:
+        doc = parse(p.read_text(encoding="utf8"))
+    except OSError:
+        return []
+    titles = [(it["title"], lst["kind"]) for lst in doc["lists"] for it in lst["items"]]
+    out = []
+    for lst in doc["lists"]:
+        if lst["kind"] != "wish":
+            continue
+        for it in lst["items"]:
+            r, own = it["row"], []
+            for d in doc["details"]:
+                key = re.split(r"[:?]", d["label"])[0].strip().lower()
+                if not key:
+                    continue
+                rx = re.compile(r"(?<!\w)" + re.escape(key) + r"(?!\w)")
+                hits = [t for t, _ in titles if rx.search(t.lower())]
+                if len(hits) > 1:  # named in several: it's the one whose name starts with it, when that's one
+                    hits = [t for t in hits if t.lower().startswith(key)]
+                if not hits:  # a label that goes on after an item's first two words ("Sous vide links" for "Sous vide and …")
+                    hits = [t for t, _ in titles if len(t.split()) >= 2
+                            and (key + " ").startswith(" ".join(t.lower().split()[:2]) + " ")]
+                if hits == [it["title"]]:
+                    own.append(f"{d['label']}. {d['text']}".strip())
+            out.append({"title": it["title"], "notes": _field(r, "notes"), "added": _field(r, "added"),
+                        "fields": [[c, v] for c, v in r.items() if v and c != lst["columns"][0]], "details": own})
+    return out
+
+
+def take_wishes(by: str = "", p: Path | None = None) -> int:
+    """The old wishlist table taken out of the to-do file, once every wish on it is in the lists (lists.py): the
+    heading stays, with one line saying where they are now. Returns how many rows it held, -1 when there was none."""
+    p = p or path()
+    with _lock:
+        try:
+            before = p.read_text(encoding="utf8")
+        except OSError:
+            return -1
+        doc = parse(before)
+        lst = next((x for x in doc["lists"] if x["kind"] == "wish" and x["table"]), None)
+        if lst is None:
+            return -1
+        n = len(lst["items"])
+        lines = list(doc["lines"])
+        day = _now().strftime("%Y-%m-%d")
+        lines[lst["head"] + 1:lst["table"][1]] = ["", f"Moved to the wishlist in HQ on {day}: open To-do, then Wishlist."]
+        stamp = _now().strftime("%Y-%m-%d %H:%M")
+        lines = _insert_log(lines, f"- {stamp}: the wishlist moved to the wishlist in HQ ({n} wish{'es' if n != 1 else ''}); "
+                                   f"its old table is gone from this file{_by(by)}.")
+        _write(p, before, lines, "the wishlist moved to the wishlist in HQ", by=by)
+    return n
+
+
+def read(p: Path | None = None, hide_moved: bool = True) -> dict:
     """What the app shows: the matrix, the lists outside it, every item with its fields and details."""
     p = p or path()
     try:
@@ -263,7 +338,7 @@ def read(p: Path | None = None) -> dict:
                                                  doc["details"]),
                           "planned": plans(it["title"]) if lst["kind"] not in ("done", "letgo", "grocoff") else None})
         out.append({"key": lst["key"], "num": lst["num"], "name": lst["name"], "kind": lst["kind"], "items": items})
-    if _wish_moved():  # the old wishlist table stays in the file, the app shows the new one
+    if hide_moved and _wish_moved():  # an old wishlist table still in the file: the app shows the new wishlist
         out = [l for l in out if l["kind"] != "wish"]
     return {"lists": out, "log": doc["log"][:12], "how": doc["how"], "file": p.name,
             "changed": int(p.stat().st_mtime), "mail": very_important(), "blocks": blocks()}
@@ -576,11 +651,13 @@ def split_items(text: str, kind: str) -> list[str]:
 def add(lst_want: str, title: str, notes: str = "", deadline: str = "", type_: str = "", for_: str = "",
         by: str = "", p: Path | None = None) -> dict:
     p = p or path()
-    dst = find_list(parse(p.read_text(encoding="utf8")), lst_want)
-    if dst["kind"] == "wish" and _wish_moved():  # the wishlist lives with the bucketlist now (lists.py)
+    doc0 = parse(p.read_text(encoding="utf8"))
+    if _for_wishlist(doc0, lst_want):  # the wishlist lives with the bucketlist (lists.py); an old table moves first
         import lists as _lists
+        _lists.settle()
         r = _lists.add(title, lst="wish", who=by, notes=notes)
-        return {"ok": True, "said": r["said"], "list": dst["key"]}
+        return {"ok": True, "said": r["said"], "list": "wish"}
+    dst = find_list(doc0, lst_want)
     many = split_items(title, dst["kind"])
     if len(many) > 1 or (many and dst["kind"] == "groceries"):
         return _add_many(dst, many, notes, deadline, type_, for_, by, p)

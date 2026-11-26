@@ -134,15 +134,7 @@
     todoTitle.textContent = l.name;
     todoBody.appendChild(totalsCard("Everything on it", l.totals));
     todoBody.appendChild(addBox(l.key === "wish" ? "Add a wish" : "Add to your bucketlist", { list: l.key }));
-    const old = l.key === "wish" && !(data.moved && data.moved.wish) ? ((typeof todoLists === "function" && todoLists("wish")[0]) || null) : null;
-    if (old && old.items.length) {
-      const c = el("button", "card"); c.type = "button";
-      c.appendChild(el("b", "", "Your wishlist so far · " + old.items.length));
-      c.appendChild(el("div", "few", "Bring them over, so each can have a price, links, notes and sub-items."));
-      c.addEventListener("click", async () => { c.disabled = true; if (await send({ do: "import-wish" })) { if (typeof loadTodo === "function") loadTodo(); todoDraw(); } });
-      todoBody.appendChild(c);
-    }
-    if (!l.items.length && !(old && old.items.length)) todoBody.appendChild(el("div", "empty", l.key === "wish" ? "Nothing on your wishlist yet." : "Nothing on your bucketlist yet. Things to live, get or do: add the first one above."));
+    if (!l.items.length) todoBody.appendChild(el("div", "empty", l.key === "wish" ? "Nothing on your wishlist yet." : "Nothing on your bucketlist yet. Things to live, get or do: add the first one above."));
     rows(l.items, l.key, []);
   }
   function field(label, node) { const f = el("div", "blf"); f.appendChild(el("label", "", label)); f.appendChild(node); return f; }

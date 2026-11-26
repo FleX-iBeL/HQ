@@ -1,7 +1,7 @@
 """The bucketlist and the wishlist, checked on a throwaway folder: python3 app/lists_test.py (no Claude, no network).
 
 The engine (add, sub-items as deep as wanted, the totals, links, the time goal, done, let go, move, under, delete,
-undo), the old wishlist brought over once and wishes going to the new one after that, what a call may and may not run,
+undo), an old wishlist in the to-do file moving over by itself, whole, with the old table gone after, what a call may and may not run,
 and the rule the agents get."""
 import json
 import os
@@ -19,13 +19,6 @@ tmp = Path(tempfile.mkdtemp(prefix="hq-lists-test-"))
 | Challenge | Type | Deadline | Status | In calendar | Added | Notes |
 |---|---|---|---|---|---|---|
 | Read a book | active | | open | | 2026-10-05 | |
-
-## Shopping wishlist
-
-| Item | Type | When | Status | Added | Notes |
-|---|---|---|---|---|---|
-| A lamp | | | open | 2026-10-09 | [Link](https://example.com/lamp) |
-| Headphones | passive | when there's money | on hold | 2026-10-05 | The old ones are worn out. |
 
 ## Log
 
@@ -90,20 +83,51 @@ run("add", "Car", "--list", "wish")
 need(run("show", "car")[0] == 1 and run("show", "car", "--list", "wish")[0] == 0, "a name on both lists asks which, --list answers")
 run("delete", "car", "--list", "wish")
 
-# the old wishlist, brought over once
+# an old wishlist in the to-do file: it moves over by itself, whole, and the old table goes
 import todo  # noqa: E402
-need(any(l["kind"] == "wish" for l in todo.read()["lists"]), "before: the to-do list shows its own wishlist")
-code, said = run("import-wish")
+run("add", "Headphones", "--list", "wish", "--notes", "The old ones are worn out.")  # one already on the new list
+todo_file = tmp / "challenges.md"
+todo_file.write_text(todo_file.read_text(encoding="utf8").replace(
+    "| Read a book | active | | open | | 2026-10-05 | |", "| Read a book | active | | open | | 2026-10-05 | |\n| Hang the lamp | active | | open | | 2026-10-06 | |").replace("## Log\n", """## Shopping wishlist
+
+Things to buy.
+
+| Item | Type | When | Status | Added | Notes |
+|---|---|---|---|---|---|
+| A lamp | | | open | 2026-10-09 | [Link](https://example.com/lamp) |
+| Headphones | passive | when there's money | on hold | 2026-10-05 | The old ones are worn out. |
+
+## Details in my own words
+
+**Headphones.** They broke in March.
+
+**Book.** A paragraph about reading, not about a lamp.
+
+**Lamp.** Loosely about lamps.
+
+## Log
+"""), encoding="utf8")
+need(todo.has_wish_table() and any(l["kind"] == "wish" for l in todo.read()["lists"]), "before: the to-do file has its own wishlist")
+run("wish")  # any look at the lists
 w = lists.read()["lists"][1]["items"]
-need(code == 0 and [i["name"] for i in w] == ["A lamp", "Headphones"], "the wishes come over by name: " + said)
-need(w[0]["links"] == ["https://example.com/lamp"] and w[0]["notes"] == "" and w[0]["added"] == "2026-10-09", "a link in the notes becomes a link, the date is kept")
-need("worn out" in w[1]["notes"] and "when there's money" in w[1]["notes"] and "on hold" in w[1]["notes"], "the notes, the when and the status are kept in the notes")
-need("already" in run("import-wish")[1] and len(lists.read()["lists"][1]["items"]) == 2, "a second time brings nothing twice")
-need("| A lamp |" in (tmp / "challenges.md").read_text(encoding="utf8"), "the old table is left as it was")
-need(not any(l["kind"] == "wish" for l in todo.read()["lists"]), "after: the app's to-do list no longer shows the old wishlist")
+need([i["name"] for i in w] == ["Headphones", "A lamp"], "every wish is on the wishlist, none twice")
+need(w[1]["links"] == ["https://example.com/lamp"] and w[1]["notes"] == "" and w[1]["added"] == "2026-10-09",
+     "a link in the notes becomes a link, the date is kept, and a paragraph that also names another item stays out")
+h = w[0]["notes"]
+need("reading" not in h and h.count("worn out") == 1 and "When: when there's money" in h and "Status: on hold" in h and "Type: passive" in h
+     and "They broke in March" in h, "one already there is filled in with everything the old row had: " + h.replace("\n", " / "))
+text = todo_file.read_text(encoding="utf8")
+need("| A lamp |" not in text and "| Headphones |" not in text and "Things to buy." not in text and not todo.has_wish_table(),
+     "the old table is gone from the to-do file")
+need("## Shopping wishlist" in text and "Moved to the wishlist in HQ on" in text and "the wishlist moved to the wishlist in HQ (2 wishes)" in text,
+     "the file says where the wishes went, and its log has the line")
+need("They broke in March" in text and "| Read a book |" in text, "the rest of the file is as it was")
+need(not any(l["kind"] == "wish" for l in todo.read()["lists"]), "the to-do list has no wishlist of its own any more")
+need("Nothing to move" in run("import-wish")[1] and len(lists.read()["lists"][1]["items"]) == 2, "a second time moves nothing twice")
+need(run("undo")[0] == 1 and len(lists.read()["lists"][1]["items"]) == 2, "the move can't be undone from the lists (the old table is gone)")
 r = todo.add("wishlist", "A kettle", by="test")
 need("wishlist" in r["said"].lower() and lists.read()["lists"][1]["items"][-1]["name"] == "A kettle"
-     and "kettle" not in (tmp / "challenges.md").read_text(encoding="utf8"), "a wish added through the to-do script lands on the new wishlist")
+     and "kettle" not in todo_file.read_text(encoding="utf8"), "a wish added through the to-do script lands on the wishlist")
 need(lists.read()["moved"].get("wish") == "2026-11-26", "the app is told the wishlist moved")
 
 # what a call may run, and what the agents are told
