@@ -163,14 +163,14 @@ def short_name() -> str:
 
 def support_dir() -> str:
     """HQ's own memory outside the workspace (the heartbeat, the watchdog's line and log, failures in a row):
-    ~/Library/Application Support/HQ2 on a Mac (where macOS lets the watchdog read without asking), else
-    $XDG_STATE_HOME/hq2 (~/.local/state/hq2). HQ_SUPPORT puts it elsewhere, e.g. for a second HQ on one
+    ~/Library/Application Support/HQ on a Mac (where macOS lets the watchdog read without asking), else
+    $XDG_STATE_HOME/hq (~/.local/state/hq). HQ_SUPPORT puts it elsewhere, e.g. for a second HQ on one
     computer. watchdog.py runs on its own and works this out the same way."""
     if os.environ.get("HQ_SUPPORT"):
         return os.path.expanduser(os.environ["HQ_SUPPORT"])
     if IS_MAC:
-        return os.path.expanduser("~/Library/Application Support/HQ2")
-    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq2")
+        return os.path.expanduser("~/Library/Application Support/HQ")
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq")
 
 
 SUPPORT = support_dir()
@@ -252,15 +252,15 @@ def waketime() -> int:
 def unit(name: str) -> str:
     """A systemd user unit of this HQ on Linux, e.g. unit("routine.timer") → hq-routine.timer. HQ_UNIT
     changes the prefix, so a second HQ on one server has its own units."""
-    return f"{os.environ.get('HQ_UNIT') or 'hq2'}-{name}"
+    return f"{os.environ.get('HQ_UNIT') or 'hq'}-{name}"
 
 
 def call_port() -> int:
-    return int(os.environ.get("HQ_PORT") or 7870)
+    return int(os.environ.get("HQ_PORT") or 7860)
 
 
 def status_port() -> int:
-    return int(os.environ.get("HQ_STATUS_PORT") or 4758)
+    return int(os.environ.get("HQ_STATUS_PORT") or 4748)
 
 
 def shell() -> str:
@@ -307,13 +307,18 @@ def tmux_env(base: dict | None = None, **extra) -> dict:
     return env
 
 
-AGENT_PREFIX = os.environ.get("HQ_AGENT_PREFIX") or "com.hq2"  # this HQ's own LaunchAgent and unit ids
-
-
-def agent_label(name: str, default_prefix: str = AGENT_PREFIX) -> str:
-    """The id of this HQ's LaunchAgent, e.g. agent_label("watchdog"): <prefix>.<name>. Only its own prefix counts, so
-    another HQ installed on the same computer is never taken for this one."""
-    return f"{default_prefix}.{name}"
+def agent_label(name: str, default_prefix: str = "com.hq") -> str:
+    """The id of an installed LaunchAgent, e.g. agent_label("watchdog"): the one in ~/Library/LaunchAgents ending in
+    .<name>.plist (an older install may use another prefix), else com.hq.<name>, as this HQ installs it. HQ_AGENT_PREFIX
+    names one prefix only (an HQ run beside another one on the same computer)."""
+    if os.environ.get("HQ_AGENT_PREFIX"):
+        return f"{os.environ['HQ_AGENT_PREFIX']}.{name}"
+    folder = os.path.expanduser("~/Library/LaunchAgents")
+    try:
+        found = sorted(f for f in os.listdir(folder) if f.endswith(f".{name}.plist") and not f.startswith("com.hq2."))
+    except OSError:
+        found = []
+    return found[0][:-len(".plist")] if found else f"{default_prefix}.{name}"
 
 
 # H59 (11 October 2026): the user's own builds. As asked on the call of 13:14: "if my friends on windows

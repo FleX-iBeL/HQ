@@ -2,7 +2,7 @@
 # H13: the status page on the phone, on its own address, independent of the call line.
 # Makes sure the status server runs (quietly, no browser window) and that Tailscale serves it
 # over HTTPS inside the tailnet only (never Funnel). Does nothing when both are already so.
-# Run every minute by the HQ2 Routine helper (routine/tick.py), so it also starts at login.
+# Run every minute by the HQ Routine helper (routine/tick.py), so it also starts at login.
 # Phone: https://<this-mac>.<tailnet>.ts.net:8444  (Tailscale on)
 # H56.1: plain sh too, so it runs on a Linux server (tick.py runs it with /bin/sh there). There Tailscale's
 # serve settings belong to root, so it goes through sudo -n (HQ_TS_SUDO=0 leaves that out). HQ_NO_PHONE=1
@@ -31,7 +31,7 @@ listening() {
     ss -Hltn "sport = :$1" 2>/dev/null | grep -q .
   fi
 }
-PORT="${HQ_STATUS_PORT:-4758}"
+PORT="${HQ_STATUS_PORT:-4748}"
 TS_HTTPS_PORT="${HQ_TS_STATUS_PORT:-8444}"   # the phone address of the status server (443 is another service)
 mkdir -p scratch
 if ! listening "$PORT"; then

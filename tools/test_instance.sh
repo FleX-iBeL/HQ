@@ -23,8 +23,9 @@ export HQ_PORT=7872 HQ_STATUS_PORT=4759 HQ_WORKSPACE="$WS" HQ_SUPPORT="$SUP" HQ_
   HQ_NO_OUTSIDE=1 HQ_STATUS_TRIAL=1 HQ_UPDATE_LOOK=0 HQ_PID_FILE="$PIDS/call.pid" HQ_LOG="$PIDS/call.log" \
   HQ_STATUS_PID_FILE="$PIDS/status.pid" HQ_STATUS_LOG="$PIDS/status.log" \
   HQ_TODO_UNDO="$PIDS/todo-undo.json" HQ_LISTS_UNDO="$PIDS/lists-undo.json" HQ_GAMES_UNDO="$PIDS/games-undo.json" \
-  HQ_MAPS_KEY_FILE="$PIDS/maps-key" HQ_FIX_DRY=1
-unset HQ_PHONE
+  HQ_MAPS_KEY_FILE="$PIDS/maps-key" HQ_FIX_DRY=1 HQ_NO_PHONE=1 HQ_BESIDE=0 HQ_AGENT_PREFIX=com.hq-test \
+  HQ_TS_CALL_PORT=0 HQ_TS_STATUS_PORT=0
+unset HQ_PHONE HQ_HEALTH_ROOT
 
 copy() {
   [[ "$WS" == "$LIVE" || -z "$LIVE" ]] && { echo "Refused: the copy would be the live workspace."; exit 2; }

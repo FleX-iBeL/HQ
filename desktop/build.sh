@@ -42,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>HQ</string>
   <key>CFBundleDisplayName</key><string>HQ</string>
-  <key>CFBundleIdentifier</key><string>com.hq2.desktop</string>
+  <key>CFBundleIdentifier</key><string>com.hq.desktop</string>
   <key>CFBundleExecutable</key><string>HQ</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>

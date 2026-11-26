@@ -65,7 +65,10 @@ def read():
     """(text, routine_on). Sets MAIL and MAIL_FAST from the Mail check line."""
     global MAIL, MAIL_FAST
     MAIL, MAIL_FAST, on = True, None, True
-    text = open(ROADMAP, encoding="utf8").read()
+    try:
+        text = open(ROADMAP, encoding="utf8").read()
+    except FileNotFoundError:  # no planning here (yet): the mail check is on, as it starts
+        return "", on
     sec = section(text)
     if sec:
         for l in text[sec[0]:sec[1]].splitlines():

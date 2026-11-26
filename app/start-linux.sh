@@ -2,7 +2,7 @@
 # H56.1: start the call server on a Linux server, and put it on the phone line. app/start.sh is the Mac's.
 #   app/start-linux.sh   starts it in the background (does nothing if it already runs)
 #   app/stop-linux.sh    stops it
-# Phone: https://<this-server>.<tailnet>.ts.net:8453 (Tailscale on, tailnet only, never Funnel).
+# Phone: https://<this-server>.<tailnet>.ts.net:8443 (Tailscale on, tailnet only, never Funnel).
 # The same options as start.sh (HQ_MODEL, HQ_PLAIN, HQ_WRAP_UP, HQ_NO_PHONE, HQ_PORT, HQ_LOG, HQ_PID_FILE);
 # every HQ_* setting in the environment is passed on to the call. Off a Mac it listens with faster-whisper
 # (HQ_STT=faster, HQ_WHISPER=small unless set; small was the pick in H55). The math libraries get one
@@ -11,11 +11,11 @@
 # (HQ_TS_SUDO=0 leaves sudo out).
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
-PORT="${HQ_PORT:-7870}"
+PORT="${HQ_PORT:-7860}"
 P="$PATH:$HOME/.npm-global/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 TS="${HQ_TAILSCALE:-$(PATH="$P" command -v tailscale)}"
 CLAUDE="${HQ_CLAUDE_CLI:-$(PATH="$P" command -v claude)}"
-TS_HTTPS_PORT="${HQ_TS_CALL_PORT:-8453}"
+TS_HTTPS_PORT="${HQ_TS_CALL_PORT:-8443}"
 LOG="${HQ_LOG:-$ROOT/scratch/server.log}"
 PIDFILE="${HQ_PID_FILE:-$ROOT/scratch/server.pid}"
 mkdir -p "$ROOT/scratch"

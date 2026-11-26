@@ -7,7 +7,7 @@ it is expected to write, in seconds}. The status server serves it with the watch
 and the page turns a line red when it is overdue: that routine has stopped.
 
 The helper also leaves a heartbeat outside the Documents folder, which the watchdog (H20) can read
-without any macOS permission: ~/Library/Application Support/HQ2/heartbeat (on Linux ~/.local/state/hq2; H56.1).
+without any macOS permission: ~/Library/Application Support/HQ/heartbeat (on Linux ~/.local/state/hq; H56.1).
 """
 import json, os, sys, tempfile, time
 

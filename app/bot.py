@@ -1,6 +1,6 @@
 """HQ: a live voice call with Claude, at the desk.
 
-Start it with app/start.sh and open http://127.0.0.1:7870 (HQ_PORT). It serves the app's page (the folder web/) at /,
+Start it with app/start.sh and open http://127.0.0.1:7860 (HQ_PORT). It serves the app's page (the folder web/) at /,
 the app's API under /api/, and passes /status/... and the texts' paths on to the status server on this computer, so the
 page talks to one address only.
 Each browser connection is one call (call.py) with its own Claude session: since A3 the
@@ -475,8 +475,22 @@ if __name__ == "__main__":
               ".ico": "image/x-icon", ".woff2": "font/woff2", ".woff": "font/woff", ".txt": "text/plain; charset=utf-8",
               ".mp3": "audio/mpeg", ".wav": "audio/wav"}
 
+    # The name on the home screen and the tab: "HQ"; a server's HQ (HQ_LABEL, e.g. VPS) says its label after it, and a copy
+    # run next to another HQ on the same computer (HQ_BESIDE=1) is "HQ2", so the two never look alike.
+    _NAME = "HQ2" if os.environ.get("HQ_BESIDE") == "1" else (f"HQ {LABEL}" if LABEL else "HQ")
+
+    def _named(text: str, kind: str) -> str:
+        if _NAME == "HQ":
+            return text
+        if kind == "manifest":
+            m = json.loads(text)
+            m["name"] = m["short_name"] = _NAME
+            return json.dumps(m, indent=2)
+        return (text.replace("<title>HQ</title>", f"<title>{_NAME}</title>")
+                .replace('content="HQ">', f'content="{_NAME}">'))
+
     class WebFiles:
-        """The app's page: GET / (and /call, and /direct, where a tapped text opens the page) is web/index.html, and any other
+        """The app's page: GET / (and /call, /hq, and /direct, where a tapped text opens the page) is web/index.html, and any other
         GET whose path is a file inside web/ is that file, all with no-cache. Everything else (the API, the call's offer,
         Pipecat's own routes) goes on as before."""
 
@@ -486,11 +500,15 @@ if __name__ == "__main__":
         async def __call__(self, scope, receive, send):
             if scope.get("type") == "http" and scope.get("method") in ("GET", "HEAD"):
                 path = scope.get("path") or "/"
-                if path in ("/", "/call", "/direct"):
+                if path in ("/", "/call", "/direct", "/hq", "/hq/"):
                     page = WEB / "index.html"
-                    resp = (FileResponse(page, media_type="text/html", headers=_NO_CACHE) if page.is_file()
+                    resp = (Response(_named(page.read_text(encoding="utf8"), "html"), media_type="text/html; charset=utf-8",
+                                     headers=_NO_CACHE) if page.is_file()
                             else Response(PLACEHOLDER, media_type="text/html; charset=utf-8", headers=_NO_CACHE))
                     return await resp(scope, receive, send)
+                if path == "/manifest.webmanifest" and (WEB / "manifest.webmanifest").is_file():
+                    return await Response(_named((WEB / "manifest.webmanifest").read_text(encoding="utf8"), "manifest"),
+                                          media_type="application/manifest+json", headers=_NO_CACHE)(scope, receive, send)
                 if not path.startswith(("/api/", "/status/", "/direct", "/client", "/agents/")):
                     try:
                         f = (WEB / path.lstrip("/")).resolve()
@@ -1249,7 +1267,7 @@ if __name__ == "__main__":
     # server's /routines.json, and so on.
     import httpx as _httpx
 
-    _STATUS = f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT', '4758')}"
+    _STATUS = f"http://127.0.0.1:{os.environ.get('HQ_STATUS_PORT', '4748')}"
     _DIRECT = ("/direct.json", "/direct/key", "/direct/send", "/direct/subscribe", "/direct-sw.js", "/direct/report",
                "/hq-icon-180.png", "/hq-icon-192.png")
 

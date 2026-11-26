@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.hq2.routine</string>
-  <!-- H2 and phase L: open the HQ2 Routine helper app when the user logs in. The helper starts the
+  <string>com.hq.routine</string>
+  <!-- H2 and phase L: open the HQ Routine helper app when the user logs in. The helper starts the
        call line (start.sh) and looks at the queue every minute. A plain script can't: macOS blocks a
        LaunchAgent from reading the Documents folder, and the helper is an app the user allowed once.
        The paths are written for /Users/you/HQ; the installer puts this HQ's path in.
@@ -14,7 +14,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>sleep 20; exec /usr/bin/open -a "$HOME/Applications/HQ2 Routine.app"</string>
+    <string>sleep 20; exec /usr/bin/open -a "$HOME/Applications/HQ Routine.app"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """H20: the watchdog. Runs every 5 minutes, on the five-minute marks (H22), started by macOS itself (a LaunchAgent), apart from the
-HQ2 Routine helper, so it keeps going when the helper stops. 10 October 2026: "and maybe a
+HQ Routine helper, so it keeps going when the helper stops. 10 October 2026: "and maybe a
 watchdog that pings every 5 minutes".
 
 - The helper isn't running: start it (it then also starts the call line if that's down).
@@ -14,13 +14,13 @@ watchdog that pings every 5 minutes".
   up on it (its retries used) and the internet is there, it asks the helper for one more try (retry-<key>).
   When it works again, that's noted too.
 
-It runs from ~/Library/Application Support/HQ2 (installed there by install-watchdog.sh) and never
+It runs from ~/Library/Application Support/HQ (installed there by install-watchdog.sh) and never
 touches the Documents folder, so macOS asks no permission. Its log: watchdog.log next to it.
 
 H56.1 (12 October 2026), on a Linux server: the helper is the systemd user timer hq-routine.timer, which
 runs routine/tick.py every minute (hq-routine.service), and this watchdog is its own timer, every 5 minutes
 and after a restart (install-linux.sh puts both in). It runs from HQ's routine folder there (no permission
-to work around), and HQ's own memory is ~/.local/state/hq2. The helper isn't running: the timer is started
+to work around), and HQ's own memory is ~/.local/state/hq. The helper isn't running: the timer is started
 again. Stuck: the minute's run that hangs is ended and the timer restarted. HQ_UNIT and HQ_SUPPORT, set in
 the units, give a second HQ on one server its own units and memory.
 """
@@ -31,12 +31,12 @@ IS_MAC = sys.platform == "darwin"
 if os.environ.get("HQ_SUPPORT"):
     SUPPORT = os.path.expanduser(os.environ["HQ_SUPPORT"])
 elif IS_MAC:
-    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ2")
+    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 else:
-    SUPPORT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq2")
-UNIT = os.environ.get("HQ_UNIT") or "hq2"  # Linux: the units are <UNIT>-routine.timer, <UNIT>-routine.service
+    SUPPORT = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq")
+UNIT = os.environ.get("HQ_UNIT") or "hq"  # Linux: the units are <UNIT>-routine.timer, <UNIT>-routine.service
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
-APPS = [os.path.expanduser("~/Applications/HQ2 Routine.app")]
+APPS = [os.path.expanduser("~/Applications/HQ Routine.app")]
 APP = next((a for a in APPS if os.path.isdir(a)), APPS[0])
 EVERY = 300
 STUCK = 360

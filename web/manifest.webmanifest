@@ -1,6 +1,6 @@
 {
-  "name": "HQ2",
-  "short_name": "HQ2",
+  "name": "HQ",
+  "short_name": "HQ",
   "description": "Your three agents: call or text them, and see what they keep for you.",
   "start_url": "./",
   "scope": "./",

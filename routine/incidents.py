@@ -5,7 +5,7 @@ went disconnected and what it did to fix it."
 Kept in .status/incidents.json (local only, like the routine lines), the newest 100. One entry:
 {"id", "key" (the routine), "down" (epoch), "why", "fixes": [{"at", "what"}], "back" (epoch, or None while
 still down)}. Written by the HQ Routine helper (tick.py). The watchdog can't write in the Documents
-folder, so it leaves what it did in ~/Library/Application Support/HQ2/events.jsonl, and the helper
+folder, so it leaves what it did in ~/Library/Application Support/HQ/events.jsonl, and the helper
 picks that up here. The status server serves the log at /incidents.json for the Routines section.
 """
 import json, os, sys, tempfile, time

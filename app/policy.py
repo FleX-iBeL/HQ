@@ -117,7 +117,7 @@ def is_backup() -> bool:
         return False
 # H65: the status page's server, on this computer only. A call may read its pages (GET), nothing else.
 STATUS_HOSTS = ("localhost", "127.0.0.1")
-STATUS_PORT = os.environ.get("HQ_STATUS_PORT", "4758")
+STATUS_PORT = os.environ.get("HQ_STATUS_PORT", "4748")
 CURL_SAFE_FLAGS = {"-s", "-S", "-sS", "-Ss", "-f", "-fs", "-sf", "-fsS", "-sSf", "-L", "-m", "--max-time",
                    "--silent", "--show-error", "--fail", "--compressed", "-g", "--globoff"}
 

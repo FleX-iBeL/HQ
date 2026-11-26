@@ -1,4 +1,4 @@
-// HQ's status server, on this computer only (127.0.0.1, HQ_STATUS_PORT, 4758 by default). It answers what the app's page
+// HQ's status server, on this computer only (127.0.0.1, HQ_STATUS_PORT, 4748 by default). It answers what the app's page
 // reads about HQ itself: the roadmap's status block (what's being worked on), the planning board and the hand-overs (read
 // only), the work sessions as they were recorded, the routines and incidents, the laptop's readings, the usage, updates,
 // the texts with the agents (the direct line), and the two HQs talking to each other (main and backup). The app's page
@@ -30,10 +30,9 @@ function parseRoadmap(text) {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Beside the current HQ (HQ_BESIDE=1) this HQ's own routine doesn't run: health is read, never written, from the HQ whose routine does.
 const healthRoot = (process.env.HQ_BESIDE === '1' && process.env.HQ_HEALTH_ROOT) || root;
-const port = Number(process.env.HQ_STATUS_PORT ?? 4758);
+const port = Number(process.env.HQ_STATUS_PORT ?? 4748);
 const PY = existsSync(join(root, '.venv/bin/python')) ? join(root, '.venv/bin/python') : (process.env.HQ_PYTHON || '/usr/bin/python3');
 const FILES = {
-  '/manifest.webmanifest': ['status/manifest.webmanifest', 'application/manifest+json'],
   '/apple-touch-icon.png': ['status/icons/hq-180.png', 'image/png'],
   '/apple-touch-icon-precomposed.png': ['status/icons/hq-180.png', 'image/png'],
   '/apple-touch-icon-180x180.png': ['status/icons/hq-180.png', 'image/png'],
@@ -44,18 +43,12 @@ const FILES = {
   // the installer's live checklist, also after the installer has ended
   '/install': ['install/checklist.html', 'text/html; charset=utf-8'],
   '/install.json': ['scratch/install/checklist.json', 'application/json; charset=utf-8'],
-  // the phone version of the Mac app, at /hq (see hqPage below)
-  '/hq/phone.js': ['desktop/phone.js', 'text/javascript; charset=utf-8'],
-  '/hq/phone.css': ['desktop/phone.css', 'text/css; charset=utf-8'],
-  '/hq.webmanifest': ['desktop/hq.webmanifest', 'application/manifest+json'],
   '/hq-icon-180.png': ['status/icons/hq-180.png', 'image/png'],
   '/hq-icon-192.png': ['status/icons/hq-192.png', 'image/png'],
   '/hq-icon-512.png': ['status/icons/hq-512.png', 'image/png'],
   // the service worker for the agents' texts on the lock screen (scope /)
   '/direct-sw.js': ['status/direct-sw.js', 'text/javascript; charset=utf-8'],
 };
-const PLACEHOLDER = "<!doctype html><meta charset=utf-8><title>HQ status</title><body style='font:16px system-ui;padding:24px'>"
-  + "<p>HQ's status server is running. The app shows its data; its endpoints are listed in API.md.</p>";
 
 // A second HQ (a server, HQ_LABEL set) gives its pages its own name and the night icon, so both sit on the phone's home
 // screen side by side.
@@ -77,40 +70,9 @@ const OS_NAME = { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[process.pl
 const WHERE = LABEL || `Local · ${OS_NAME}`;
 // A Mac is the laptop; on a server (Linux) there's no lid or battery. HQ_LAPTOP=1 or 0 overrides (tests).
 const LAPTOP = process.env.HQ_LAPTOP ? process.env.HQ_LAPTOP === '1' : process.platform === 'darwin';
-function labelled(path, body) {
-  if (!LABEL) return body;
-  if (path === '/manifest.webmanifest' || path === '/hq.webmanifest') {
-    const m = JSON.parse(String(body));
-    m.name = `${m.name} (${LABEL})`;
-    m.short_name = `${m.short_name} ${LABEL}`;
-    return JSON.stringify(m, null, 2);
-  }
-  return body;
-}
 
-// The phone version of the Mac app: the Mac app's own strip (desktop/shell.html), with the phone's script and look added.
-const PHONE_HEAD = `
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="HQ">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="manifest" href="/hq.webmanifest">
-<link rel="apple-touch-icon" href="/hq-icon-180.png">
-<link rel="stylesheet" href="/hq/phone.css">
-<script src="/hq/phone.js"></script>
-`;
-async function hqPage() {
-  const shell = await readFile(join(root, 'desktop/shell.html'), 'utf8');
-  const head = LABEL ? PHONE_HEAD.replace('content="HQ"', `content="HQ ${LABEL}"`) : PHONE_HEAD;
-  return shell
-    .replace(/<meta name="viewport"[^>]*>\n?/, '')
-    .replace('<title>HQ</title>', LABEL ? `<title>HQ ${LABEL}</title>` : '<title>HQ</title>')
-    .replace('</head>', head + '</head>')
-    .replace('<body>', '<body class="phone">');
-}
-// H28: the same judgement the Mac app shows (desktop/hq_control.py), and its Turn everything on, which only
-// starts what's off and never stops anything. The button needs the x-hq header, so a page from elsewhere
-// can't press it (a plain form can't send that header).
+// The Mac app's judgement of how HQ is doing (desktop/hq_control.py), and its Turn everything on, which only starts what's
+// off and never stops anything. The button needs the x-hq header, so a page from elsewhere can't press it.
 function hqControl(args) {
   return new Promise((resolve) => {
     execFile('/usr/bin/python3', [join(root, 'desktop/hq_control.py'), ...args], { timeout: 60000 }, (err, out) => {
@@ -222,10 +184,10 @@ function updateTool(args, cacheMs = 0) {
 }
 
 // H56.1: HQ's own memory, the same folder as routine/hqpaths.py's support_dir(): HQ_SUPPORT, else on a Mac
-// ~/Library/Application Support/HQ2, else $XDG_STATE_HOME/hq2 (~/.local/state/hq2).
+// ~/Library/Application Support/HQ, else $XDG_STATE_HOME/hq (~/.local/state/hq).
 const SUPPORT = process.env.HQ_SUPPORT
-  || (process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/HQ2')
-    : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'hq2'));
+  || (process.platform === 'darwin' ? join(homedir(), 'Library/Application Support/HQ')
+    : join(process.env.XDG_STATE_HOME || join(homedir(), '.local/state'), 'hq'));
 
 
 // F106: one line on the page: the helpers beside a call, from their own records. A record past its box and a minute is left out.
@@ -546,18 +508,29 @@ async function directRoute(path0, req, res) {
 }
 
 
+// The pages this server used to show (the status page at /, the phone strip at /hq, the texts at /direct) are the app
+// now, and so is anything else this server doesn't know: it's passed on to the call line on this computer, unchanged, so
+// an old bookmark, the Mac app's tabs, the phone's old home-screen app and a tapped notification all get the app.
+const CALL_PORT = Number(process.env.HQ_PORT ?? 7860);
+function toCallLine(req, res) {
+  const head = { ...req.headers };
+  delete head.host;
+  const up = httpRequest({ host: '127.0.0.1', port: CALL_PORT, method: req.method, path: req.url, headers: head }, (r) => {
+    res.writeHead(r.statusCode ?? 502, r.headers);
+    r.pipe(res);
+  });
+  up.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' }).end("HQ's call line can't be reached right now"); });
+  req.pipe(up);
+}
+
 const server = createServer(async (req, res) => {
   const path0 = (req.url ?? '/').split('?')[0];
   if (path0 === '/direct.json' || path0 === '/direct/key' || path0 === '/direct/send' || path0 === '/direct/subscribe' || path0 === '/direct/report') {
     try { await directRoute(path0, req, res); } catch { if (!res.headersSent) res.writeHead(500).end('The direct line had a problem'); }
     return;
   }
-  if (path0 === '/hq' || path0 === '/hq/') {
-    try {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(await hqPage());
-    } catch {
-      res.writeHead(500).end('Cannot read desktop/shell.html');
-    }
+  if (['/', '/index.html', '/hq', '/hq/', '/direct', '/direct/'].includes(path0)) {
+    toCallLine(req, res);  // the app's page (see toCallLine)
     return;
   }
   if (path0 === '/api/update' || path0 === '/api/changelog') {
@@ -739,19 +712,15 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }).end(u ? `${JSON.stringify(u, null, 2)}\n` : 'null');
     return;
   }
-  if (path0 === '/' || path0 === '/index.html') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(PLACEHOLDER);
-    return;
-  }
   const entry = FILES[(req.url ?? '/').split('?')[0]];
   if (!entry) {
-    res.writeHead(404).end('Not found');
+    toCallLine(req, res);  // the app's own files and API, for a page opened on this address
     return;
   }
   try {
     const path = (req.url ?? '/').split('?')[0];
     const file = (LABEL && LABELLED[path]) || entry[0];
-    const body = labelled(path, await readFile(file.startsWith('/') ? file : join(root, file)));
+    const body = await readFile(file.startsWith('/') ? file : join(root, file));
     res.writeHead(200, { 'content-type': entry[1], 'cache-control': 'no-store' }).end(body);
   } catch {
     // No checklist yet is not an error: the page says so.

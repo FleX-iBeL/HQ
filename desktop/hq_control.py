@@ -29,18 +29,18 @@ try:
 except Exception:  # the app must still show something
     hqpaths = incidents = None
 
-# This HQ's own two ports (app/start.sh: HQ_STATUS_PORT 4758, HQ_PORT 7870), never another HQ's on this computer.
-STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT") or 4758)
-CALL_PORT = int(os.environ.get("HQ_PORT") or 7870)
+# This HQ's own two ports (app/start.sh: HQ_STATUS_PORT 4748, HQ_PORT 7860), never another HQ's on this computer.
+STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT") or 4748)
+CALL_PORT = int(os.environ.get("HQ_PORT") or 7860)
 STATUS = f"http://127.0.0.1:{STATUS_PORT}"
 # HQ_BESIDE=1: this HQ runs next to another HQ on the same computer, which keeps the routine, the watchdog and the
 # texts; here Turn everything on only starts this HQ's own call line and status server.
 BESIDE = os.environ.get("HQ_BESIDE") == "1"
 START = os.path.join(HQ, "app", "start.sh")
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
-HELPER_APPS = [os.path.expanduser("~/Applications/HQ2 Routine.app")]
+HELPER_APPS = [os.path.expanduser("~/Applications/HQ Routine.app")]
 HELPER_APP = next((a for a in HELPER_APPS if os.path.isdir(a)), HELPER_APPS[0])
-SUPPORT = os.path.expanduser("~/Library/Application Support/HQ2")
+SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # The same names and order as the status page's Routines section.
@@ -158,7 +158,7 @@ def helper_pids():
 
 
 def watchdog_label():
-    return hqpaths.agent_label("watchdog") if hqpaths else "com.hq2.watchdog"
+    return hqpaths.agent_label("watchdog") if hqpaths else "com.hq.watchdog"
 
 
 def watchdog_loaded(label):

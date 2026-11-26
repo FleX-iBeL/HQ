@@ -563,7 +563,7 @@ MAIL_TIDY_RULE = MAIL_TIDY_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USE
 import workflows as _workflows  # H202: the workflows the user turned on
 import features as _features  # H205: what they turned off
 WORKFLOWS_RULE = _workflows.rule(FOLDER)
-VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{games}", GAMES_RULE).replace("{travel}", TRAVEL_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{STATUS_PORT}", os.environ.get("HQ_STATUS_PORT") or "4758").replace("{format}", FORMAT_RULE)
+VOICE_RULES = (VOICE_RULES.replace("{pings}", PINGS_RULE).replace("{workflows}\n", WORKFLOWS_RULE + "\n" if WORKFLOWS_RULE else "").replace("{mailfast}", MAIL_FAST_RULE + "\n" + MAIL_TIDY_RULE).replace("{apptnotes}", APPT_NOTES_RULE).replace("{todo}", TODO_RULE).replace("{games}", GAMES_RULE).replace("{travel}", TRAVEL_RULE).replace("{onewriter}", ONE_WRITER_RULE).replace("{team}", TEAM_RULE).replace("{HQ}", str(ROOT)).replace("{STATUS_PORT}", os.environ.get("HQ_STATUS_PORT") or "4748").replace("{format}", FORMAT_RULE)
                .replace("{times}", TIMES_RULE))
 # M5: the user's own additions for calls (me.md, "On calls"), and their name.
 if ME["on_calls"]:
@@ -966,4 +966,4 @@ KOKORO_VOICES = MODELS / "voices-v1.0.bin"
 
 # Serving. Only this MacBook for now; A4 opens it to the phone over Tailscale.
 HOST = os.environ.get("HQ_HOST", "127.0.0.1")
-PORT = int(os.environ.get("HQ_PORT", "7870"))
+PORT = int(os.environ.get("HQ_PORT", "7860"))

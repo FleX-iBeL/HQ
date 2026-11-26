@@ -2,8 +2,8 @@
 # H20: installs the watchdog (watchdog.py) outside the Documents folder and lets macOS run it every
 # 5 minutes on the five-minute marks (H22) and at login, as a LaunchAgent. Run again after changing watchdog.py.
 set -e
-SUPPORT="$HOME/Library/Application Support/HQ2"
-PLIST="$HOME/Library/LaunchAgents/com.hq2.watchdog.plist"
+SUPPORT="$HOME/Library/Application Support/HQ"
+PLIST="$HOME/Library/LaunchAgents/com.hq.watchdog.plist"
 mkdir -p "$SUPPORT"
 cp "$(dirname "$0")/watchdog.py" "$SUPPORT/watchdog.py"
 cat > "$PLIST" <<PL
@@ -11,7 +11,7 @@ cat > "$PLIST" <<PL
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.hq2.watchdog</string>
+  <key>Label</key><string>com.hq.watchdog</string>
   <key>ProgramArguments</key>
   <array><string>/usr/bin/python3</string><string>$SUPPORT/watchdog.py</string></array>
   <key>StartCalendarInterval</key>
@@ -31,6 +31,6 @@ for old in "$HOME"/Library/LaunchAgents/*.watchdog.plist(N) "$HOME"/Library/Laun
   launchctl bootout "gui/$(id -u)/$(basename "$old" .plist)" 2>/dev/null || true
   rm -f "$old"
 done
-launchctl bootout "gui/$(id -u)/com.hq2.watchdog" 2>/dev/null || true
+launchctl bootout "gui/$(id -u)/com.hq.watchdog" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Watchdog installed: every 5 minutes and at login."

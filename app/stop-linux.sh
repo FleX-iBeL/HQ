@@ -1,9 +1,9 @@
 #!/bin/bash
-# H56.1: stop the call server on a Linux server and close the phone line (Tailscale serve on 8453).
+# H56.1: stop the call server on a Linux server and close the phone line (Tailscale serve on 8443).
 # app/stop.sh is the Mac's. If a call is still running, hang up first: the after-call work gets up to a
 # minute to finish before the server is stopped. HQ_NO_PHONE=1 leaves the phone line alone.
 cd "$(dirname "$0")/.." || exit 1
-PORT="${HQ_PORT:-7870}"
+PORT="${HQ_PORT:-7860}"
 P="$PATH:$HOME/.npm-global/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 TS="${HQ_TAILSCALE:-$(PATH="$P" command -v tailscale)}"
 PIDFILE="${HQ_PID_FILE:-$PWD/scratch/server.pid}"
@@ -11,7 +11,7 @@ ts() {
   if [ "$(id -u)" != 0 ] && [ "${HQ_TS_SUDO:-1}" != 0 ]; then sudo -n "$TS" "$@"; else "$TS" "$@"; fi
 }
 
-[ -z "$HQ_NO_PHONE" ] && ts serve --https="${HQ_TS_CALL_PORT:-8453}" off >/dev/null 2>&1 && echo "Phone line off."
+[ -z "$HQ_NO_PHONE" ] && ts serve --https="${HQ_TS_CALL_PORT:-8443}" off >/dev/null 2>&1 && echo "Phone line off."
 # Only this HQ's own bot counts: the pid file's process, if it really is app/bot.py, else whoever listens on
 # the port as this user and runs app/bot.py (never a loose name match).
 PIDS=""

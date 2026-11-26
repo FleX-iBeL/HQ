@@ -1,13 +1,13 @@
 #!/bin/sh
 # H56.1 (12 October 2026): HQ's helper and watchdog on a Linux server, as systemd user units. What the Mac
-# does with the HQ2 Routine helper app, its LaunchAgent and the watchdog's LaunchAgent:
+# does with the HQ Routine helper app, its LaunchAgent and the watchdog's LaunchAgent:
 #   <U>-routine.timer    every minute on the minute: <U>-routine.service runs routine/tick.py once (no Claude)
 #   <U>-start.service    at the start of the server: app/start-linux.sh, the call line (the helper's "on run")
 #   <U>-watchdog.timer   every 5 minutes on the five-minute marks, and a minute after the start:
 #                        <U>-watchdog.service runs routine/watchdog.py, which starts or restarts the helper
 # Both timers keep their times in UTC (F52, 25 October 2026): in local time, when the clocks went back an hour,
 # systemd waited for the repeated hour to come round again, an hour with no routine and no watchdog. Same marks.
-# <U> is "hq2", or HQ_UNIT. Every HQ_* setting in the environment when this runs goes into the units
+# <U> is "hq", or HQ_UNIT. Every HQ_* setting in the environment when this runs goes into the units
 # (e.g. HQ_SUPPORT, HQ_WORKSPACE, HQ_PORT, HQ_STATUS_PORT, HQ_NO_PHONE, HQ_CALL_FIX), so a second HQ on one
 # server gets its own units, memory and ports. Lingering is switched on for the user (through sudo -n when
 # needed), so the units run without anyone logged in and start by themselves after a restart.
@@ -16,10 +16,10 @@
 #   routine/install-linux.sh --dry       print the units, change nothing
 #   routine/install-linux.sh --remove    stop and remove this HQ's units
 # Run again after moving HQ. Logs: scratch/routine/routine.log, scratch/launchagent.log, and the
-# watchdog's own log in HQ's memory folder (~/.local/state/hq2/watchdog.log, or HQ_SUPPORT).
+# watchdog's own log in HQ's memory folder (~/.local/state/hq/watchdog.log, or HQ_SUPPORT).
 set -e
 HQ="$(cd "$(dirname "$0")/.." && pwd)"
-U="${HQ_UNIT:-hq2}"
+U="${HQ_UNIT:-hq}"
 DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 PY="$(command -v python3)"
 MODE="${1:-}"
@@ -69,7 +69,7 @@ EOF
 
 write "$U-routine.timer" <<EOF
 [Unit]
-Description=HQ routine every minute (the Mac's HQ2 Routine helper)
+Description=HQ routine every minute (the Mac's HQ Routine helper)
 
 [Timer]
 OnCalendar=*-*-* *:*:00 UTC

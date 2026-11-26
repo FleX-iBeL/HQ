@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HQ's every-minute routine: one look, no Claude, so it costs no usage. Run every minute by the HQ2 Routine helper app on
+"""HQ's every-minute routine: one look, no Claude, so it costs no usage. Run every minute by the HQ Routine helper app on
 a Mac (or its systemd timer on Linux). Nothing here starts, queues or runs work for a team: HQ only does what he asks.
 
 What it does, every minute:
@@ -67,8 +67,8 @@ STREAM = os.path.join(HERE, "stream-usage.py")  # the mail check's own run bring
 NODE = hqpaths.tool("node", "/opt/homebrew/bin/node")
 CLAUDE = hqpaths.tool("claude", "/opt/homebrew/bin/claude")
 PY = sys.executable or "/usr/bin/python3"
-TS_CALL = os.environ.get("HQ_TS_CALL_PORT") or "8453"  # the call line's phone address
-TS_STATUS = os.environ.get("HQ_TS_STATUS_PORT") or "8454"  # the status server's phone address
+TS_CALL = os.environ.get("HQ_TS_CALL_PORT") or "8443"  # the call line's phone address
+TS_STATUS = os.environ.get("HQ_TS_STATUS_PORT") or "8444"  # the status server's phone address
 
 
 def log(msg):
@@ -1030,6 +1030,25 @@ def release_minute():
     return bool(said)
 
 
+# Lines and incidents of parts HQ no longer has (the team, its queue, the planned items, the nights, the reviews, QA,
+# releases by the team, the agents' own cycles, news, feedback): taken off the status page, and an incident of theirs
+# that's still open is closed, so nothing waits on a part that's gone.
+GONE = ("jobs", "schedule", "cycles", "line", "mistakes", "news", "nightly", "qa", "review", "feedback", "about",
+        "side-by-side", "whole-build", "estimates", "night-road", "mac-half", "github")
+
+
+def gone_lines():
+    have = routines.read()
+    for key in GONE:
+        if key in have:
+            routines.drop(key, keep=tuple(k for k in have if k != key))
+        try:
+            if incidents.is_down(key):
+                incidents.up(key, what="That part is no longer in HQ")
+        except Exception as e:
+            log(f"gone lines: {key}: {e!r}")
+
+
 def tick():
     if release_minute():
         return
@@ -1106,6 +1125,7 @@ if __name__ == "__main__":
             log(f"helper gap: {e!r}")
         routines.heartbeat()
         routines.beat("helper", state="ok", text="Looks every minute", last=time.time(), next=time.time() + 60, every=60)
+        gone_lines()
         try:
             status_page()
         except Exception as e:

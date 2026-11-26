@@ -64,9 +64,9 @@ try:
     SUPPORT = hqpaths.SUPPORT
 except Exception:
     hqpaths = None
-    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ2")
+    SUPPORT = os.path.expanduser("~/Library/Application Support/HQ")
 HEARTBEAT = os.path.join(SUPPORT, "heartbeat")
-HELPER_APP = os.path.expanduser("~/Applications/HQ2 Routine.app")
+HELPER_APP = os.path.expanduser("~/Applications/HQ Routine.app")
 AGENTS = os.path.expanduser("~/Library/LaunchAgents")
 
 
@@ -99,9 +99,9 @@ WATCHDOG_AGENT = _label(os.path.join(HQ, "routine", "install-watchdog.sh"), r"<k
 SHIPPED_HQ = re.compile(r'/Users/[^/"<\s]+(?:/[^/"<\s]+)*?/HQ(?=[/"<]|$)')
 BREW_PATHS = (["/opt/homebrew/bin", "/usr/local/bin"] if IS_MAC
               else [os.path.expanduser("~/.local/bin"), os.path.expanduser("~/.npm-global/bin"), "/usr/local/bin"])
-STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT", "4758"))
-CALL_PORT = int(os.environ.get("HQ_PORT", "7870"))
-UNIT = os.environ.get("HQ_UNIT", "hq2")
+STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT", "4748"))
+CALL_PORT = int(os.environ.get("HQ_PORT", "7860"))
+UNIT = os.environ.get("HQ_UNIT", "hq")
 # H56.5: on Linux the call listens with faster-whisper; MLX and what only mlx-whisper needs are left out.
 MAC_ONLY_PACKAGES = {"mlx", "mlx-metal", "mlx-whisper", "more-itertools", "networkx", "regex", "scipy",
                      "setuptools", "tiktoken", "torch"}
@@ -481,11 +481,11 @@ class Installer:
         sh(["launchctl", "bootstrap", f"gui/{os.getuid()}", dest])
         before = os.path.getmtime(HEARTBEAT) if os.path.exists(HEARTBEAT) else 0
         sh(["/usr/bin/open", "-a", HELPER_APP])
-        say("macOS asks whether HQ2 Routine may reach your files (Documents): click Allow. Waiting up to 3 minutes.")
+        say("macOS asks whether HQ Routine may reach your files (Documents): click Allow. Waiting up to 3 minutes.")
         if not wait_for(lambda: os.path.exists(HEARTBEAT) and os.path.getmtime(HEARTBEAT) > before, 180, 2):
             raise Fail("the helper started but didn't run its routine within 3 minutes",
                        "Most likely the Documents question wasn't answered: System Settings → Privacy & Security → "
-                       "Files and Folders → HQ2 Routine → Documents on. Log: scratch/routine/routine.log")
+                       "Files and Folders → HQ Routine → Documents on. Log: scratch/routine/routine.log")
         return "built, starts at login, runs every minute (Documents allowed)"
 
     def terminal(self):
@@ -560,7 +560,7 @@ class Installer:
             return self._linux_timer("watchdog", "every 5 minutes, and a minute after the start")
         sh(["/bin/zsh", os.path.join(HQ, "routine", "install-watchdog.sh")])
         if not agent_loaded(WATCHDOG_AGENT):
-            raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/HQ2/watchdog.out")
+            raise Fail("the watchdog didn't load", "Log: ~/Library/Application Support/HQ/watchdog.out")
         return "every 5 minutes and at login"
 
     def _linux_timer(self, what, says):
@@ -723,7 +723,7 @@ class Installer:
             raise Fail("the start at login isn't loaded", "Run the installer without --test-only.")
         if not wait_for(lambda: (heartbeat_age() or 999) < 150, 130, 5):
             raise Fail("the helper hasn't run its routine in the last few minutes",
-                       "Privacy & Security → Files and Folders → HQ2 Routine → Documents on; log: scratch/routine/routine.log")
+                       "Privacy & Security → Files and Folders → HQ Routine → Documents on; log: scratch/routine/routine.log")
         return ("loaded at login" if IS_MAC else f"{UNIT}-routine.timer on") + \
             ", ran its routine %d seconds ago" % (heartbeat_age() or 0)
 
