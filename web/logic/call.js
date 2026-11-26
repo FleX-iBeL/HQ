@@ -259,7 +259,7 @@ function soundSheet(app, st) {
         b: !k ? 'Music and videos turn down while you’re on a call. Tap for normal'
           : onSpeakers() ? 'Stays normal with headphones on; through the MacBook’s speakers it still turns down. Tap to lower'
             : 'Music and videos stay at their normal volume. Tap to lower',
-        pick: () => { ls.set('hq-keep-sound', k ? 'off' : 'on'); app.setState((x) => ({ cDev: (x.cDev || 0) + 1 })); switchMic(app); } });
+        pick: () => { ls.set('hq-keep-sound', k ? 'off' : 'on'); app.setState((x) => ({ keepSound: !k, cDev: (x.cDev || 0) + 1 })); switchMic(app); } });
     }
     if (!ins.some((d) => d.label) && navigator.mediaDevices.getUserMedia) {
       rows.push({ a: 'Show device names', b: 'HQ asks once, so each one shows its name', pick: async () => {
@@ -777,6 +777,20 @@ function demoVals(st, ctx, D) {
   };
 }
 
+// The last call on home: the newest saved call with any agent (the texts area reads /api/calls), opening
+// its record with Continue this call. Only when there is one and no call is on.
+function lastCall(app, st, AG) {
+  const calls = ((st.data || {}).texts || {}).calls;
+  const c = calls && calls[0];
+  if (!c || st.onCall || st.cs !== 'idle') return { on: false, line: '', go: () => {}, color: '#64748b' };
+  const k = ORDER.find((x) => AG[x] && AG[x].name === c.agent) || 'donna';
+  const today = new Date(), yday = new Date(today); yday.setDate(today.getDate() - 1);
+  const iso = (d) => d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
+  const day = c.date === iso(today) ? 'today' : c.date === iso(yday) ? 'yesterday' : String(c.started || c.date).split(',')[0];
+  return { on: true, line: 'Last call with ' + AG[k].name + ' · ' + day + (c.time ? ' ' + c.time : ''), color: AG[k].accent,
+    go: () => app.go('callLog', { txLog: c.name, space: k }) };
+}
+
 // The real call.
 function realVals(st, ctx, D) {
   const { app, AG, sc } = ctx;
@@ -857,9 +871,8 @@ function realVals(st, ctx, D) {
     sheets,
     submit: { callTyped: (t) => { if (!typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: t }) })); } },
     values: {
-      call, chat: { call: () => app.go('transcript') }, ca, ring,
-      // the mini bar says how many lines came in while the call isn't in view
-      phase: showMini && newN ? phase + ' · ' + newN + ' new' : phase,
+      call, chat: { call: () => app.go('transcript') }, ca, ring, callLast: lastCall(app, st, AG),
+      phase,
       showMini, padCls: showMini ? 'pt' : '', chatTop: showMini ? '12px' : '52px',
       // The circle: a tap lets her voice through when the browser held it back; else nothing.
       cyclePhase: () => { startAudio(); if (rt.audio && st.cUntapped) rt.audio.play().then(() => app.setState({ cUntapped: false })).catch(() => {}); },
@@ -914,6 +927,8 @@ function realVals(st, ctx, D) {
         grow: fitRef, enterHint: coarse() ? 'enter' : 'send',
         // lines said while what was said wasn't in view
         newOn: newN > 0, newN: newN > 9 ? '9+' : String(newN),
+        // the same count on the mini bar while the call isn't in view
+        unread: showMini && newN ? (newN > 9 ? '9+' : String(newN)) : '',
         // Take that back when she's well into answering: asked first
         cxAsk: st.cCxAsk && live, cxKeep: () => app.setState({ cCxAsk: false }), cxYes: () => { app.setState({ cCxAsk: false }); sendCancel(app); },
         // the microphone and where her voice plays, during the call

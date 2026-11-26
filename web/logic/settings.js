@@ -381,7 +381,8 @@ export function vals(st, ctx, D) {
       try { const a = await app.api.post('api/weather/alert', { on }, 'weather'); app.setData(NAME, (o) => Object.assign({}, o, { weather: Object.assign({}, o.weather, { alert: a && a.on !== undefined ? a : Object.assign({}, o.weather.alert, { on }) }) })); }
       catch (e) { say('Couldn’t switch it. Try again.'); loadWeather(app, false); }
     };
-    const sound = sw(st.sound), rainSw = sw(W.ready && W.alertOn);
+    const keepNow = store.get('hq-keep-sound') === 'on', soundNow = store.get('hq-sound') !== 'off';
+    const sound = sw(soundNow), rainSw = sw(W.ready && W.alertOn);
     setv = {
       features: rowsOf, featWait: !R.features, featWord: err.features ? 'This couldn’t be read just now.' : 'Looking…', featFailed: !R.features && !!err.features,
       featCount: R.features ? items.filter((f) => f.on).length + ' of ' + items.length + ' on' : '', retryFeatures: () => read(app, 'features', 'api/features'),
@@ -400,10 +401,11 @@ export function vals(st, ctx, D) {
         listDevices(app);
       },
       // on a Mac: whether music and videos turn down during a call (hq-keep-sound, read when a call opens the mic)
-      isMac: IS_MAC && !IS_PHONE, keepWord: st.keepSound ? 'Normal' : 'Lower',
-      keepLine: st.keepSound ? 'Music and videos stay at their normal volume during a call' : 'Music and videos turn down while you’re on a call',
-      toggleKeep: () => { store.set('hq-keep-sound', st.keepSound ? 'off' : 'on'); app.setState({ keepSound: !st.keepSound }); },
-      soundWord: st.sound ? 'On' : 'Off', toggleSound: () => { store.set('hq-sound', st.sound ? 'off' : 'on'); app.setState({ sound: !st.sound }); }, soundBg: sound.bg, soundJust: sound.just,
+      // (read from the device each time, so a pick in the call's own sheet shows here too)
+      isMac: IS_MAC && !IS_PHONE, keepWord: keepNow ? 'Normal' : 'Lower',
+      keepLine: keepNow ? 'Music and videos stay at their normal volume during a call' : 'Music and videos turn down while you’re on a call',
+      toggleKeep: () => { store.set('hq-keep-sound', keepNow ? 'off' : 'on'); app.setState({ keepSound: !keepNow }); },
+      soundWord: soundNow ? 'On' : 'Off', toggleSound: () => { store.set('hq-sound', soundNow ? 'off' : 'on'); app.setState({ sound: !soundNow }); }, soundBg: sound.bg, soundJust: sound.just,
       weather: W, wxReady: W.ready, wxWait: !W.ready, wxRetry: () => loadWeather(app, true),
       places: [['here', 'Where you are', true], ['home', 'Home' + (W.home ? ' · ' + W.home : ''), false]].map(([id, name, here]) => {
         const on = W.ready && (here ? W.gps : !W.gps);
