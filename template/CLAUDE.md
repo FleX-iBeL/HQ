@@ -59,6 +59,8 @@ Act as their life coach and sparring partner, with the `life-coach` skill. Ask t
 
 ## The six-week game
 
+`HQ/lists.json` holds their bucketlist and their wishlist, empty until the first item; the HQ app shows both in To-do. `python3 ../HQ/app/lists.py` shows them; `add`, `set`, `link`, `done`, `drop`, `move`, `under` and `undo` keep them, the same as the app and the calls (`--help` for the details). An item has a price (once, a month or a year), links, a time goal, hours, a score, notes, and sub-items as deep as wanted, each with all of the same. A wish goes there, not on the to-do list.
+
 `HQ/games.json` holds their six-week games, empty until the first one; the HQ app shows them behind the Game button, which appears once there is one, past games kept to look back at. `python3 ../HQ/app/games.py` shows them; `tick`, `count`, `note`, `diary`, `week`, `debrief` and `undo` keep a day, the same as the app and the calls (`--help` for the details). A game is never set up in passing: it's designed in its own Life coaching session (the map's six-week game layer, its In HQ part), written in `map.md`, and handed to the team, who set it up with `games.py new` from that design and build any kind of tracking HQ doesn't have yet (a kind in `app/games.py` and its drawer in `app/web/games.js`).
 
 ## Workflows

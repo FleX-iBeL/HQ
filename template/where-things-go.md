@@ -19,6 +19,7 @@ A file with an @ in front of its name in CLAUDE.md is loaded in full at the star
 | The north star | `vision.md` | @ |
 | Where you stand now: work, health, money, home, people, appointments and their context | `current-situation.md` | @ |
 | Everything to do: tasks, priorities, deadlines, status, done, let go, shopping wishlist, groceries | `challenges.md` | @ |
+| Your bucketlist and your wishlist: every item with its price, links, time goal, notes and sub-items | `HQ/lists.json` (shown in the app, in To-do) | on demand |
 | Your six-week games: every day ticked or counted, the notes, the diary, each week's look back, the debrief (designed in your map, set up by the team) | `HQ/games.json` (shown in the app) | on demand |
 | What you build on top of HQ yourself (extensions: a connector, a routine, your own kind of text, extra call rules); updates never touch it, and HQ checks it after every update | `HQ/extensions/`, one folder each (how: HQ's `EXTENSIONS.md`) | on demand |
 | The agents running themselves (when "The agents run themselves" is on): the handbook every agent reads (the shared core and her own section), each one's cycle settings, and each agent's ledger (her plans, her steps, her tripwires, her weekly score) | `HQ/agents/handbook.md`, `HQ/agents/cycles.json`, `HQ/ledger/<agent>.md` | read by the agents; on demand here |
