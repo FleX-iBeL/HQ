@@ -12,7 +12,9 @@ async def _f242_flow542(self) -> str:
     """F242, no Claude: flow 5 itself on a call that goes as told, the adds decided by the real call system on a test call.
     The night's call (an add with nobody invited, no question) fails on the invite not arriving, never on her, after the
     sentence was said three times; the same with the guest in her add still fails on her; the invite arriving the second time
-    passes and says so; a question for an event of his own is no pass; what she heard is in the log."""
+    passes and says so; a question for an event of his own is no pass; what she heard is in the log. The fix round (job 9643):
+    her reply naming the guest that isn't there ("Nobody is invited to it") doesn't make the invite arrive, and only the words
+    heard for this sentence count, not the 30 seconds before it."""
     import tempfile
     import policy
     tool = "mcp__claude_ai_Google_Calendar__create_event"
@@ -40,7 +42,8 @@ async def _f242_flow542(self) -> str:
                 add, reply, heard = script[min(len(says), len(script)) - 1]
                 if add:
                     pol.decide(tool, dict(add))
-                return {"reply": reply, "heard": heard, "turn": {"sent": text}}
+                words = heard if isinstance(heard, dict) else {"heard": heard}
+                return {"reply": reply, "turn": {"sent": text}, **words}
 
         r = object.__new__(Run)
 
@@ -71,11 +74,28 @@ async def _f242_flow542(self) -> str:
     need(first.startswith("passed") and "time the sentence" not in first and n == 1, f"the invite arriving at once: {first}")
     own_q, n = await run5([(own, "It's a test call, so I couldn't add Call us. Shall I try again?", F242_HEARD)])
     need(own_q.startswith("FAILED: the invite never reached her") and n == FLOW5_SAYS, f"a question for an event of his own: {own_q}")
-    need(flow5_invite_arrived("", "Shall I put it in?", []) is None and flow5_invite_arrived("in white test", "Okay?", []) is False
-         and flow5_invite_arrived("and invite test", "", []) is True, "the rule itself")
+    # The whole-build review (job 9643): the night's call, her reply naming the guest that isn't there. One word in her reply
+    # doesn't make the invite arrive: the words she heard and her add say it was lost, so the sentence is said again.
+    for more in (" Nobody is invited to it.", None):
+        said = F242_REPLY + more if more else F242_REPLY.replace("as the location.", "as the location and no guests.")
+        need(said != F242_REPLY, "the reply with the guest named isn't another reply")
+        for words in (F242_HEARD, ""):
+            named, n = await run5([(own, said, words)])
+            need(named.startswith("FAILED: the invite never reached her") and "she did not ask" not in named and n == FLOW5_SAYS,
+                 f"a lost invite, her reply naming the guest (heard {words!r}, said {n} times): {named}")
+    say(f"   a lost invite, her reply naming the guest: {named[:120]}")
+    named2, n = await run5([(own, F242_REPLY + " Nobody is invited to it.", F242_HEARD), (invited, F242_ASKS, "")])
+    need(named2.startswith("passed") and "the second time" in named2 and n == 2, f"her reply naming the guest, then the invite arriving (said {n} times): {named2}")
+    # Only this sentence's words count: a call that also gives the last 30 seconds (the flow or the try before) is read by its own turn.
+    late, n = await run5([(own, F242_REPLY, {"heard": "and invite test at example dot com. " + F242_HEARD, "heard_turn": F242_HEARD})])
+    need(late.startswith("FAILED: the invite never reached her") and n == FLOW5_SAYS and "example dot com" not in late.split("her adds")[0],
+         f"the words of an earlier sentence counted as heard for this one: {late}")
+    need(flow5_invite_arrived("", []) is None and flow5_invite_arrived("in white test", []) is False
+         and flow5_invite_arrived("and invite test", []) is True, "the rule itself")
     return ("the night's call fails on the invite not arriving, after three times the sentence, not on her; with the guest in her "
             "add and no question it still fails on her; the invite arriving the second time passes and says so; a question "
-            "for an event of his own is no pass")
+            "for an event of his own is no pass; her reply naming the guest that isn't there doesn't make the invite arrive; "
+            "only the words heard for this sentence count")
 
 
 setattr(Run, "flow542", _f242_flow542)
