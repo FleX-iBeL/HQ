@@ -301,6 +301,23 @@ def heard_sentences(reply: str) -> int:
     return len([x for x in re.split(r"[.?!]+(?=\s|$)", text) if re.search(r"[^\W_]", x)])
 
 
+FLOW5_SAYS = 3  # F242: how often flow 5 says its sentence until the invite reaches her
+
+
+def flow5_invite_arrived(heard: str, reply: str, adds: list) -> bool | None:
+    """F242: did the invite in flow 5's sentence reach her? Read from the words she heard, the adds she tried (as the call
+    system decided them: summary, verdict, why) and her reply. True: the invite is in what she heard, an add was held for his
+    yes (only one with someone else in it is, H78), or her reply names the invite. False: none of that, and she heard other
+    words or tried an add that needed no yes (his own event, stopped only by the test call). None: nothing to tell it by (a
+    replay with no words heard and no add), judged as before."""
+    if (re.search(r"invit|example", (heard or "").lower()) or any(v == "ask" for _, v, _ in adds)
+            or re.search(r"invit|example|guest", (reply or "").lower())):
+        return True
+    if (heard or "").strip() or any(v == "deny" and str(why).startswith("test run: no changes") for _, v, why in adds):
+        return False
+    return None
+
+
 def heard_share(heard: str, said: str) -> float:
     """How much of what was said Whisper heard (share of the spoken words found in the transcript)."""
     want, got = norm(said).split(), set(norm(heard).split())
@@ -893,12 +910,30 @@ class Run:
         # A day with no doubt about which one is meant ("tomorrow" at four in the morning is ambiguous).
         day = (datetime.now() + timedelta(days=2)).strftime("%A")
         # H78: his own calendar entries go without asking now; one with someone else invited still needs a yes.
-        r1 = await live.ask(f"Please put a new event in my calendar on {day} at noon, called test call, "
-                            "and invite test at example dot com.", "needs a yes")
-        asked = [(t, d.verdict) for t, _, d in live.call.policy.log[start:] if d.verdict == "ask"]
-        say(f"   asked about: {asked} | pending: {[q for _, _, q in live.call.policy.pending]}")
-        done = [t for t, _, d in live.call.policy.log[start:] if "create_event" in t and d.verdict == "allow"]
-        need(not done, "the event was created before he said anything")
+        # F242: her question is judged only on a turn where the invite reached her. A sentence that arrives without it asks for an
+        # event of his own, which needs no yes (H78), so there's nothing to ask: the flow says it again, and if it never arrives
+        # whole the flow fails on that, in those words, never on her. The words she heard are in the log either way.
+        sentence = (f"Please put a new event in my calendar on {day} at noon, called test call, "
+                    "and invite test at example dot com.")
+        for tries in range(1, FLOW5_SAYS + 1):
+            at = len(live.call.policy.log)
+            r1 = await live.ask(sentence, "needs a yes" if tries == 1 else f"needs a yes, said again ({tries} of {FLOW5_SAYS})")
+            heard = " ".join(str(r1.get("heard") or "").split())
+            say(f"   she heard: {heard!r}" if heard else "   she heard: (the words she heard aren't in this call's record)")
+            asked = [(t, d.verdict) for t, _, d in live.call.policy.log[at:] if d.verdict == "ask"]
+            say(f"   asked about: {asked} | pending: {[q for _, _, q in live.call.policy.pending]}")
+            done = [t for t, _, d in live.call.policy.log[start:] if "create_event" in t and d.verdict == "allow"]
+            need(not done, "the event was created before he said anything")
+            adds = [(s, d.verdict, d.why) for t, s, d in live.call.policy.log[at:] if "create_event" in t]
+            arrived = flow5_invite_arrived(heard, r1["reply"], adds)
+            if arrived is not False:
+                break
+            say(f"   the invite didn't reach her (her adds: {[(s, v) for s, v, _ in adds]})"
+                + ("; saying the sentence again" if tries < FLOW5_SAYS else ""))
+        need(arrived is not False, lambda: (
+            f"the invite never reached her, in {FLOW5_SAYS} times the sentence was said, so nothing needed his yes and her question "
+            f"can't be judged: she heard {heard or '(not in the record)'!r}, her adds were {[(s, v) for s, v, _ in adds]} "
+            f"(his own event, no guest), and she said {r1['reply']!r}"))
         # Usually she tries the calendar, is stopped by the call system and asks; sometimes she
         # asks first without trying. Both are fine: she checked with him, and nothing is done.
         need("?" in r1["reply"], f"she did not ask him anything: {r1['reply']!r}")
@@ -915,7 +950,8 @@ class Run:
             need("not approved" in r2["turn"]["sent"], "the call system did not note that the answer was a no")
         need(not any(v == "allow" for _, v in creates), "the event was created after a no")
         need(not live.call.policy.pending, "a question is still pending after the no")
-        return "checked in " + ("after the calendar stopped her" if asked else "before trying") + "; a no changed nothing"
+        return ("checked in " + ("after the calendar stopped her" if asked else "before trying") + "; a no changed nothing"
+                + ("" if tries == 1 else f"; the invite reached her the {('', '', 'second', 'third')[tries]} time the sentence was said"))
 
     # 6
     async def flow6(self) -> str:
