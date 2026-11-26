@@ -46,7 +46,10 @@ const IGNORE = [
   /^(todoX|listX)(\.|$)/,
   // Moneypenny's and the settings screens: status timeline, usage, health, sessions, hand-over text,
   // features, voices, sound, weather; and the weather chip's degrees for home
-  /^(mpv|setv)(\.|$)/, /^wxChip$/
+  /^(mpv|setv)(\.|$)/, /^wxChip$/,
+  // settings: the tutorial card's own values (its demo walk keeps the prototype's), its dot, the Moneypenny demo call,
+  // and the weather icon on home
+  /^(tourv|tourDot|wxIcon)(\.|$)/, /^demoCall\.mp$/
 ];
 const ignored = (k) => IGNORE.some((re) => re.test(k));
 function flat(v, p, out, fns) {

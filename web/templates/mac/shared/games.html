@@ -1,4 +1,5 @@
 <sc-if value="{{ s.games }}">
+<sc-if value="{{ pp.gs.hasWait }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">{{ pp.gs.waitLine }}</span></sc-if>
 <sc-if value="{{ pp.gs.note }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">{{ pp.gs.note }}</span></sc-if>
 <sc-if value="{{ pp.gs.retryOn }}"><button class="pill" onClick="{{ pp.retry }}" style="align-self: flex-start; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Try again</button></sc-if>
 <sc-for list="{{ pp.gs.live }}" as="g"><button key="{{ g.key }}" class="card" onClick="{{ g.open }}" style="border: none; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #c2410c">{{ g.kicker }}</span><span class="h" style="font-size: 20px">{{ g.name }}</span><span class="muted" style="font-size: 14px; line-height: 20px">{{ g.sentence }}</span><span style="font-size: 13px; font-weight: 600; color: {{ g.standC }}">{{ g.stand }}</span></button></sc-for>

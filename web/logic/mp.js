@@ -11,7 +11,14 @@ export const NAME = 'mp';
 export const WIRED = true;
 export { demo };
 
-export const start = { updating: 0, mpHandover: null, mpSession: null, mpUpdBusy: false, mpUpdSaid: '' };
+export const start = { updating: 0, mpHandover: null, mpSession: null, mpUpdBusy: false, mpUpdSaid: '',
+  mpSpan: 6, mpLidBusy: false, mpLidSaid: '', mpHandBusy: false, mpHandSaid: '', mpFind: '', mpPlanFold: {}, mpUpdAway: '', mpClashBusy: false };
+
+// The device's own memory, for "Not now" on the update bar (as the old bar kept it: hq-update-away).
+const store = {
+  get(k) { try { return typeof localStorage === 'undefined' ? null : localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { if (typeof localStorage !== 'undefined') localStorage.setItem(k, v); } catch (e) { /* private mode */ } }
+};
 
 // ---- the real data -------------------------------------------------------------------
 
@@ -19,8 +26,11 @@ export const start = { updating: 0, mpHandover: null, mpSession: null, mpUpdBusy
 const PIECES = {
   status: 'status/status.json', usage: 'status/usage.json', routines: 'status/routines.json',
   handovers: 'status/handovers.json', planning: 'status/planning.json', sessions: 'status/sessions.json',
-  update: 'api/update', changelog: 'api/changelog', calls: 'api/calls', team: 'direct.json?line=team'
+  update: 'api/update', changelog: 'api/changelog', calls: 'api/calls', team: 'direct.json?line=team', role: 'status/api/role'
 };
+// The graphs under Health: the routines' states, the temperature and the battery, over 1, 6 or 24 hours.
+const HISTORY = { hRoutines: 'status/routines-history.json', hTemp: 'status/temperature-history.json', hBattery: 'status/battery-history.json' };
+const readHistory = (app, h) => Promise.all(Object.keys(HISTORY).map((k) => read(app, k, HISTORY[k] + '?h=' + h)));
 function put(app, patch) {
   app.setData(NAME, (o) => {
     const x = Object.assign({ err: {} }, o || {});
@@ -48,9 +58,13 @@ export async function load(app) {
   // The status page reads its numbers again every few seconds; here every 30 seconds is
   // enough, and only while the page is shown.
   if (!timer && typeof setInterval !== 'undefined') {
+    let n = 0;
     timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       readAll(app, ['status', 'usage', 'routines']);
+      // whether a newer version is out, for the bar on home: every ten minutes (the server looks a few times a day)
+      if (++n % 20 === 0) read(app, 'update');
+      if (app.state.screen === 'health' && n % 4 === 0) readHistory(app, app.state.mpSpan || 6);
     }, 30000);
   }
   pollUpdate(app);
@@ -79,7 +93,7 @@ async function openHandover(app, name) {
 
 export const enter = {
   status: (app) => readAll(app, ['status', 'usage', 'routines', 'update']),
-  health: (app) => read(app, 'routines'),
+  health: (app) => Promise.all([read(app, 'routines'), read(app, 'role'), readHistory(app, app.state.mpSpan || 6)]),
   planning: (app) => read(app, 'planning'),
   handovers: (app) => read(app, 'handovers'),
   updates: (app) => readAll(app, ['update', 'changelog']),
@@ -149,7 +163,8 @@ function health(r) {
   const helperLate = !helper || now - helper.at > 180;
   const rows = [];
   let bad = 0, busy = 0, waiting = 0;
-  for (const b of r.broken || []) { bad++; rows.push({ n: b.what, l: b.say || ('Can’t read it: ' + b.why), dot: DOT.down, key: 'broken:' + b.store }); }
+  // What HQ can't read: in red, above the routines.
+  const broken = (r.broken || []).map((b) => { bad++; return { n: b.what, l: b.say || ('Can’t read it: ' + b.why), key: 'broken:' + b.store }; });
   const beats = Object.keys(all).filter((k) => k.startsWith('beat-')).sort().map((k) => [k, (all[k] && all[k].name) || k.slice(5)]);
   const i = ROUTINES.findIndex(([k]) => k === 'helper');
   const order = ROUTINES.slice(0, i).concat(beats, ROUTINES.slice(i)).filter(([k]) => r.laptop || (k !== 'temp' && k !== 'battery'));
@@ -186,10 +201,20 @@ function health(r) {
   const laptop = [];
   if (t) laptop.push((t.lvl === 'normal' ? 'Cool' : cap(t.lvl)) + (t.cpu != null ? ', ' + Math.round(t.cpu) + '°C' : '') + (t.heat ? ' · ' + t.heat : ''));
   if (b) laptop.push((b.pct != null ? 'Battery ' + b.pct + '%' : 'Battery') + (b.words ? ' · ' + b.words : ''));
-  if (lid && lid.words) laptop.push(lid.words);
   const word = bad ? bad + ' not working' : busy || waiting ? 'All working' + (busy ? ' · ' + busy + ' running now' : '') + (waiting ? ' · ' + waiting + ' waiting' : '') : 'All working';
-  return { rows, ok: !bad, word, incidents, laptop: laptop.join(' · ') || (r.laptop ? 'No reading yet' : ''), stats: s && s.words ? s.words : '',
-    hasLaptop: !!(r.laptop || t || b || lid), hasStats: !!(s && s.words), noLog: !!r.noLog,
+  // The lid-closed switch: only on a Mac laptop (the status server's own reading); the setup line when it isn't set up.
+  const lidOn = !!(lid && lid.on);
+  const lidRow = r.laptop && lid ? { on: lidOn, word: lidOn ? 'Keeps working with the lid closed' : 'Sleeps when the lid closes, as normal',
+    setup: lid.setup === false ? 'The switch needs a one-time setup: type this once in Terminal, with your laptop password: ' + (lid.setup_line || '') : '',
+    age: now - (lid.t || now) > 300 ? 'Read ' + ago((now - lid.t) * 1000) : '', want: lidOn ? 'off' : 'on' } : null;
+  // The backup's hand-over to the main, on the sync line (shown only while that line is fresh, as the old page did).
+  const sync = all.sync;
+  const syncLate = !sync || now - sync.at > (sync.every || 60) * 2 + 60;
+  const hand = sync && sync.handover && !syncLate ? { on: !!sync.handover.on, want: sync.handover.on ? 'off' : 'on',
+    word: sync.handover.on ? 'Every minute this computer hands what it holds to the main' : 'This computer keeps what it holds until the hand-over is turned on' } : null;
+  const badge = all.role && all.role.badge;
+  return { rows, broken, hasBroken: broken.length > 0, ok: !bad, word, incidents, laptop: laptop.join(' · ') || (r.laptop ? 'No reading yet' : ''), stats: s && s.words ? s.words : '',
+    hasLaptop: !!(r.laptop || t || b || lid), hasStats: !!(s && s.words), noLog: !!r.noLog, lid: lidRow, hand, badge: badge ? badge.text || '' : '', where: r.where || '',
     forYou: (r.forYou || []).map((h, k) => ({ key: k, t: (h.who ? cap(h.who) : 'An agent') + '’s helper: ' + h.question })) };
 }
 
@@ -201,8 +226,11 @@ function usage(u) {
   const limits = Array.isArray(u.limits) ? u.limits : [];
   const five = limits.find((l) => /5-hour/i.test(l.label) && (!l.kept || !u.readable));
   const week = limits.find((l) => /^weekly.*all/i.test(l.label)) || limits.find((l) => /^weekly/i.test(l.label) && !/fable/i.test(l.label));
+  // the biggest model's own weekly limit, when the reading carries one
+  const big = limits.find((l) => /^weekly/i.test(l.label) && l !== week);
+  const bigName = big ? 'Weekly · ' + (String(big.label).replace(/^weekly\s*[·:-]?\s*/i, '') || 'the biggest model') : '';
   const bars = [];
-  for (const [l, name] of [[five, '5-hour'], [week, 'Weekly']]) {
+  for (const [l, name] of [[five, '5-hour'], [week, 'Weekly'], [big, bigName]]) {
     if (!l) continue;
     const reset = l.resetsAt && new Date(l.resetsAt).getTime() <= Date.now();
     const kept = l.kept || !u.readable;
@@ -257,13 +285,42 @@ function blocks(md) {
 }
 
 const MOSCOW = { must: '#c0392b', should: '#d9730d', could: '#2f7fd1', wont: '#7a5aa8' };
-function planning(P) {
+// A row fits the search when every word of it is in its number or its words.
+const fits = (words) => (r) => { const hay = (r.label + ' ' + r.title).toLowerCase(); return words.every((w) => hay.indexOf(w) >= 0); };
+function planning(P, find) {
   if (!P || !Array.isArray(P.groups)) return null;
+  const words = String(find || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const ok = words.length ? fits(words) : () => true;
   const by = Object.fromEntries((P.rows || []).map((r) => [r.label, r]));
-  return P.groups.filter((g) => g.labels.length).map((g) => ({
-    key: g.tag || 'none', phase: g.name + ' · ' + g.labels.length,
-    items: g.labels.map((l) => by[l]).filter(Boolean).map((r) => ({ key: r.label, t: r.title, s: r.label + (r.bug ? ' · bug' : ''), c: MOSCOW[r.moscow] || '#8a94a0', bug: !!r.bug }))
-  }));
+  return P.groups.filter((g) => g.labels.length).map((g) => {
+    const items = g.labels.map((l) => by[l]).filter(Boolean).filter(ok);
+    return { key: g.tag || 'none', phase: g.name + ' · ' + items.length,
+      items: items.map((r) => ({ key: r.label, t: r.title, s: r.label + (r.bug ? ' · bug' : ''), c: MOSCOW[r.moscow] || '#8a94a0', bug: !!r.bug })) };
+  }).filter((g) => g.items.length);
+}
+// The rows that repeat and the finished ones, each a fold under the board (open while searching).
+function planningMore(P, find, folds) {
+  if (!P || !Array.isArray(P.groups)) return null;
+  const words = String(find || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const ok = words.length ? fits(words) : () => true;
+  const rep = (P.repeating || []).filter(ok);
+  let left = 80; // at most this many finished rows on screen at once
+  const done = (P.finished || []).map((g) => {
+    const rows = g.rows.filter(ok);
+    const shown = rows.slice(0, Math.max(0, left)); left -= shown.length;
+    return { key: g.phase_title, phase: g.phase_title + ' · ' + rows.length, n: rows.length,
+      rows: shown.map((r) => ({ key: r.label, t: r.title, s: r.label })) };
+  }).filter((g) => g.n);
+  const doneN = done.reduce((a, g) => a + g.n, 0);
+  const shownN = done.reduce((a, g) => a + g.rows.length, 0);
+  const openRep = words.length > 0 || !!folds.repeat, openDone = words.length > 0 || !!folds.done;
+  return {
+    repeat: { has: rep.length > 0, open: openRep, word: 'Repeating · ' + rep.length, rows: rep.map((r) => ({ key: r.label, t: r.title, s: r.label })), arrow: openRep ? '−' : '+' },
+    done: { has: doneN > 0, open: openDone, word: 'Finished · ' + doneN, groups: openDone ? done.filter((g) => g.rows.length) : [], arrow: openDone ? '−' : '+',
+      more: shownN < doneN ? 'Showing ' + shownN + ' of ' + doneN + '. Search to find the others.' : '' },
+    searching: words.length > 0,
+    none: words.length > 0 && !rep.length && !doneN
+  };
 }
 
 const KIND = { done: ['#16a34a', 'none', 'done'], broken: ['#dc2626', 'none', 'found broken'], running: ['#ca8a04', 'none', 'running now'],
@@ -286,6 +343,57 @@ function session(n) {
     axis: rows.length ? [hm(new Date(from)), hm(new Date(from + span / 2)), hm(new Date(to))] : ['', '', ''],
     log: (n.log || []).map((l, i) => ({ key: i, t: hm(new Date(l.at)), text: l.text })), hasLog: (n.log || []).length > 0,
     has: rows.length > 0
+  };
+}
+
+// The graphs: each span cut into columns, a column showing the worst state (or the hottest degree, the lowest
+// battery) of the minutes in it. Empty columns stay pale.
+const COLS = 48;
+const WORST = ['none', 'off', 'ok', 'running', 'waiting', 'warm', 'low', 'down'];
+const STATE_C = { ok: '#16a34a', running: '#2563eb', waiting: '#ca8a04', warm: '#d97706', low: '#d97706', down: '#dc2626', off: '#cbd5e1', none: '#e2e8f0' };
+function buckets(samples, now, hours) {
+  const from = now - hours * 3600, w = (hours * 3600) / COLS;
+  const out = Array.from({ length: COLS }, () => []);
+  for (const x of samples || []) { const i = Math.floor((x.t - from) / w); if (i >= 0 && i < COLS) out[i].push(x); }
+  return out;
+}
+const hh = (t) => hm(new Date(t * 1000));
+function graphs(D, st) {
+  const hours = st.mpSpan || 6;
+  const R = D.hRoutines, T = D.hTemp, B = D.hBattery;
+  const now = (R && R.now) || (T && T.now) || Date.now() / 1000;
+  const axis = [hh(now - hours * 3600), hh(now - hours * 1800), 'now'];
+  let routines = [];
+  if (R && Array.isArray(R.samples) && R.samples.length) {
+    const cols = buckets(R.samples, now, hours);
+    const keys = [];
+    for (const x of R.samples) for (const k of Object.keys(x.s || {})) if (!keys.includes(k)) keys.push(k);
+    const names = Object.fromEntries(ROUTINES);
+    routines = keys.map((k) => ({ key: k, n: names[k] || (k.startsWith('beat-') ? 'Heartbeat ' + k.slice(5) : k),
+      cols: cols.map((c, i) => {
+        const s = c.reduce((a, x) => { const v = (x.s || {})[k] || 'none'; return WORST.indexOf(v) > WORST.indexOf(a) ? v : a; }, 'none');
+        return { key: i, c: STATE_C[s] || STATE_C.none };
+      }) }));
+  }
+  const bars = (src, pick, colour) => {
+    if (!src || !Array.isArray(src.samples) || !src.samples.length) return [];
+    return buckets(src.samples, now, hours).map((c, i) => {
+      const v = pick(c);
+      return v == null ? { key: i, h: 3, c: '#e2e8f0' } : { key: i, h: Math.max(3, Math.min(100, Math.round(v.h))), c: colour(v) };
+    });
+  };
+  const temp = bars(T, (c) => { const x = c.filter((s) => s.cpu != null).sort((a, b) => b.cpu - a.cpu)[0]; return x ? { h: x.cpu, x } : null; },
+    (v) => (v.x.cpu >= 90 ? '#dc2626' : v.x.cpu >= 70 ? '#d97706' : '#2563eb'));
+  const bat = bars(B, (c) => { const x = c.filter((s) => s.pct != null).sort((a, b) => a.pct - b.pct)[0]; return x ? { h: x.pct, x } : null; },
+    (v) => (v.x.plugged ? '#16a34a' : v.x.pct < 20 ? '#dc2626' : v.x.pct < 40 ? '#d97706' : '#16a34a'));
+  const hot = T && T.samples && T.samples.length ? Math.max(...T.samples.filter((s) => s.cpu != null).map((s) => s.cpu)) : null;
+  const low = B && B.samples && B.samples.length ? Math.min(...B.samples.filter((s) => s.pct != null).map((s) => s.pct)) : null;
+  return {
+    spans: [1, 6, 24].map((h) => ({ key: h, name: h + ' h', bg: h === hours ? '#0f172a' : '#ffffff', fg: h === hours ? '#ffffff' : '#475569', shadow: h === hours ? 'none' : '0 0 0 1px #e2e8f0 inset' })),
+    routines, hasRoutines: routines.length > 0, noRoutines: !!R && !routines.length,
+    temp, hasTemp: temp.length > 0, tempWord: hot != null && isFinite(hot) ? 'Hottest ' + Math.round(hot) + '°C' : '',
+    bat, hasBat: bat.length > 0, batWord: low != null && isFinite(low) ? 'Lowest ' + Math.round(low) + '%' : '',
+    noLaptop: !!(T || B) && !temp.length && !bat.length, axis, wait: !R && !T && !B
   };
 }
 
@@ -324,7 +432,7 @@ function demoModel(st, D) {
   return {
     working: { word: D.working[0].state, c: '#ca8a04', headline: D.working[0].name, updated: '', phase: D.working[1].name + ' · ' + D.working[1].state, pct: D.working[0].pct, hasSteps: true,
       notes: [], log: [], hasLog: false, problems: [] },
-    health: { rows: D.routines.map((r) => ({ n: r.n, l: r.l, dot: '#16a34a', key: r.n })), ok: true, word: 'All working', laptop: 'Cool · battery 82% · keeps working with the lid closed', stats: '', hasLaptop: true, hasStats: false, noLog: false, forYou: [],
+    health: { rows: D.routines.map((r) => ({ n: r.n, l: r.l, dot: '#16a34a', key: r.n })), broken: [], hasBroken: false, ok: true, word: 'All working', laptop: 'Cool · battery 82% · keeps working with the lid closed', stats: '', hasLaptop: true, hasStats: false, noLog: false, forYou: [],
       incidents: [{ key: 'a', name: 'Mail check stopped', when: 'Monday · 12 min', why: 'The mail server timed out. It restarted itself and caught up.', c: '#0f172a' },
         { key: 'b', name: 'Calendar sync was slow', when: 'Last week · 40 min', why: 'Google answered slowly. Nothing was lost.', c: '#0f172a' }] },
     usage: { bars: [{ key: '5', name: '5-hour', pct: 34, w: 34, line: '34% · resets 18:10', c: '#0f172a', op: 1 }, { key: 'w', name: 'Weekly', pct: 61, w: 61, line: '61% · resets Monday', c: '#0f172a', op: 1 }], read: '', stale: false, has: true, op: 1 },
@@ -378,7 +486,8 @@ export function vals(st, ctx, D) {
     const day = pick && D.days && D.days[pick];
     const newCount = hs.filter((h) => dayWords(h.date) === 'today').length;
     m = {
-      working: working(D.status), health: hl, usage: us, planning: planning(D.planning),
+      working: working(D.status), health: hl, usage: us, planning: planning(D.planning, st.mpFind), planMore: planningMore(D.planning, st.mpFind, st.mpPlanFold || {}),
+      graphs: graphs(D, st),
       handovers: hs.map((h, i) => ({ key: h.name, name: h.title, meta: dayWords(h.date) === 'today' ? 'New · today' : 'Prepared ' + dayWords(h.date), mc: dayWords(h.date) === 'today' ? '#854d0e' : '#475569', i })),
       session: session(day),
       days: sess.map((s) => ({ key: s.key, name: s.title + ', ' + dayWords(s.key), meta: (s.rows ? s.rows + ' recorded' : 'nothing recorded') + (s.key === pick ? ' · shown above' : ''), pick: () => openSession(app, s.key) })),
@@ -401,8 +510,62 @@ export function vals(st, ctx, D) {
   }
 
   const U = m.updates;
+  const raw = isDemo ? null : D.update;
+  const begin = async () => {
+    app.setState({ mpUpdBusy: true, mpUpdSaid: '', sheet: null });
+    try {
+      const u = await app.api.post('api/update/start', {}, 'update');
+      put(app, { update: u, err: { update: '' } });
+      app.setState({ mpUpdBusy: false });
+      pollUpdate(app);
+    } catch (e) { app.setState({ mpUpdBusy: false, mpUpdSaid: 'That didn’t go through. Try again in a minute.' }); }
+  };
+  // On a computer that isn't a Mac, updating asks first (as the old bar did): its own parts are kept, Claude gets
+  // instructions afterwards.
+  const askUpdate = () => {
+    if (!raw || !raw.available) { app.go('updates'); return; }
+    if (raw.mac) { begin(); return; }
+    app.setState({ sheet: 'mpUpdAsk' });
+  };
+  const askSheet = raw ? { title: 'Update to v' + raw.latest + '?', rows: [
+    { a: 'Update now', b: 'This computer isn’t a Mac, so some parts of HQ were built by your own Claude. The update never touches them, and anything else you changed is saved first, on this computer. Afterwards your Claude gets instructions on what to check.', pick: begin },
+    { a: 'Not now', b: '', pick: () => app.setState({ sheet: null }) }] } : { title: '', rows: [] };
+  // After an update: something they added might not fit. Talk it through (a text to Donna) or it's fine.
+  const settle = (how) => async () => {
+    if (st.mpClashBusy) return;
+    app.setState({ mpClashBusy: true });
+    try {
+      const out = await app.api.post('api/update/clash-' + how, {}, 'update');
+      if (out && out.version) put(app, { update: out, err: { update: '' } });
+      app.say((out && out.said) || 'Done.');
+      app.setState({ mpClashBusy: false });
+      if (out && out.open === 'texts') app.go('chat', { chatAgent: 'donna' });
+    } catch (e) { app.setState({ mpClashBusy: false }); app.say('That didn’t go through just now. Try again in a minute.'); }
+  };
+  // The bar on home: an update running, just done or failed, a clash to look at, or a newer version (until Not now).
+  let updBar = { on: false, t: '', line: '', a: '', b: '', x: false, aDo: () => {}, bDo: () => {}, xDo: () => {}, tone: '#ffffff', fg: '#0f172a' };
+  if (raw && raw.version) {
+    const run = (raw.run && raw.run.state) || 'idle';
+    const recent = (run === 'done' || run === 'failed') && Date.now() / 1000 - ((raw.run && raw.run.at) || 0) < 1800;
+    const away = (st.mpUpdAway || store.get('hq-update-away')) === raw.latest;
+    const items = (raw.new || []).flatMap((s) => (s.groups || []).flatMap((g) => g.items || []));
+    if (run === 'waiting' || run === 'updating') updBar = Object.assign(updBar, { on: true, t: 'Updating to v' + ((raw.run && raw.run.to) || raw.latest), line: [raw.run.step, raw.run.message].filter(Boolean).join(' · ') });
+    else if (raw.clash && raw.clash.state === 'new') {
+      const c = raw.clash, first = (c.items || [])[0] || { name: '', why: [] };
+      updBar = Object.assign(updBar, { on: true, t: 'Something you added might not fit this update', tone: '#fef3c7', fg: '#78350f',
+        line: (c.items || []).map((x) => x.name).join(', ') + (first.why && first.why[0] ? ': ' + first.why[0] : ''),
+        a: st.mpClashBusy ? '…' : 'Talk it through', aDo: settle('chat'), b: 'It’s fine', bDo: settle('ok') });
+    } else if (recent) updBar = Object.assign(updBar, { on: true, t: run === 'done' ? 'Update done' : 'The update didn’t go through', line: (raw.run && raw.run.message) || '',
+      tone: run === 'done' ? '#f0fdf4' : '#fef2f2', fg: run === 'done' ? '#14532d' : '#7f1d1d',
+      a: run === 'done' ? 'Reload' : 'Details', aDo: run === 'done' ? () => { if (typeof location !== 'undefined') location.reload(); } : () => app.go('updates') });
+    else if (raw.available && !away) updBar = Object.assign(updBar, { on: true, t: 'HQ v' + raw.latest + ' is out', line: items.slice(0, 2).join(' · ') || 'A new version',
+      a: 'Update', aDo: askUpdate, b: 'What’s new', bDo: () => app.go('updates'), x: true,
+      xDo: () => { store.set('hq-update-away', raw.latest); app.setState({ mpUpdAway: raw.latest }); } });
+  }
+  updBar.hasLine = !!updBar.line; updBar.hasA = !!updBar.a; updBar.hasB = !!updBar.b;
   const startUpdate = isDemo ? proto.startUpdate : async () => {
     // Update only when the server says a newer version is out; otherwise the button is Check now.
+    if (U && U.available) { askUpdate(); return; }
     app.setState({ mpUpdBusy: true, mpUpdSaid: '' });
     try {
       const u = await app.api.post(U && U.available ? 'api/update/start' : 'api/update/check', {}, 'update');
@@ -449,10 +612,49 @@ export function vals(st, ctx, D) {
   }
 
   const H = m.health;
+  // Which HQ this is, and main or backup: the status server's place and the role line's badge, else this HQ's role.
+  const role = !isDemo && D.role;
+  const label = (role && role.label) || '';
+  const roleWord = H && H.badge ? H.badge : role && role.paired ? (role.acting === 'backup' ? 'Backup · ' + (role.main || 'the other') + ' is main' : 'Main') : role ? 'On its own' : '';
+  const who = isDemo ? 'This Mac · Main' : [label ? 'This ' + label.toLowerCase() : (H && H.where) || '', roleWord].filter(Boolean).join(' · ');
+  // The lid's switch and the backup's hand-over switch: one tap, through the status server.
+  const flip = (path, tag, busyKey, saidKey) => (want) => async () => {
+    if (st[busyKey]) return;
+    app.setState({ [busyKey]: true, [saidKey]: '' });
+    let said = '';
+    try { const out = await app.api.post(path, { want }, tag); said = String((out && out.said) || 'Done.').split('\n').join(' '); }
+    catch (e) { said = (e.body && e.body.said) || (e.status === 409 ? 'Only on the laptop: this computer has no lid to switch.' : 'The status server is not answering.'); }
+    app.setState({ [busyKey]: false, [saidKey]: said });
+    setTimeout(() => read(app, 'routines'), 1200);
+    setTimeout(() => app.setState({ [saidKey]: '' }), 15000);
+  };
+  const lidFlip = flip('status/api/lidsleep', 'lidsleep', 'mpLidBusy', 'mpLidSaid');
+  const handFlip = flip('status/api/handover', 'handover', 'mpHandBusy', 'mpHandSaid');
+  const swOf = (on, busy) => ({ bg: busy ? '#e2e8f0' : on ? '#16a34a' : '#cbd5e1', just: on ? 'flex-end' : 'flex-start', on: on ? 'true' : 'false' });
+  const lid = H && H.lid ? Object.assign({}, H.lid, swOf(H.lid.on, st.mpLidBusy), { flip: lidFlip(H.lid.want), said: st.mpLidSaid || '', hasSetup: !!H.lid.setup, hasAge: !!H.lid.age }) : null;
+  const hand = H && H.hand ? Object.assign({}, H.hand, swOf(H.hand.on, st.mpHandBusy), { flip: handFlip(H.hand.want), said: st.mpHandSaid || '' }) : null;
+  const G = m.graphs || { spans: [], routines: [], hasRoutines: false, noRoutines: false, temp: [], hasTemp: false, tempWord: '', bat: [], hasBat: false, batWord: '', noLaptop: false, axis: ['', '', ''], wait: false };
+  const pickSpan = (h) => () => { app.setState({ mpSpan: h }); readHistory(app, h); };
+  let findTimer = 0;
   const mpv = {
+    who, hasWho: !!who, lid, hasLid: !!lid, hand, hasHand: !!hand,
+    graphs: Object.assign({}, G, { spans: G.spans.map((s) => Object.assign({}, s, { pick: pickSpan(s.key) })) }), hasGraphs: !isDemo && (G.hasRoutines || G.hasTemp || G.hasBat),
+    updBar, updAsk: askSheet,
+    planMore: m.planMore || { repeat: { has: false, open: false, word: '', rows: [], arrow: '+' }, done: { has: false, open: false, word: '', groups: [], arrow: '+', more: '' }, searching: false, none: false },
+    hasPlanSearch: !isDemo && !!m.planning,
+    findTyped: (e) => {
+      app.keepDraft('mpFind', e.target);
+      const v = e.target.value;
+      clearTimeout(findTimer);
+      findTimer = setTimeout(() => app.setState({ mpFind: v }), 200);
+    },
+    findClear: () => app.setState((x) => ({ mpFind: '', drafts: Object.assign({}, x.drafts, { mpFind: '' }) })),
+    hasFind: !!st.mpFind,
+    foldRepeat: () => app.setState((x) => ({ mpPlanFold: Object.assign({}, x.mpPlanFold, { repeat: !(x.mpPlanFold || {}).repeat }) })),
+    foldDone: () => app.setState((x) => ({ mpPlanFold: Object.assign({}, x.mpPlanFold, { done: !(x.mpPlanFold || {}).done }) })),
     status: m.working || { word: '', c: '', headline: '', updated: '', phase: '', pct: 0, hasSteps: false, notes: [], log: [], hasLog: false, problems: [] },
     hasStatus: !!m.working, statusWait: !isDemo && !m.working, statusWord: err.status ? errLine : 'Looking…', statusFailed: !isDemo && !m.working && !!err.status,
-    health: H || { rows: [], ok: true, word: '', incidents: [], laptop: '', stats: '', hasLaptop: false, hasStats: false, forYou: [] },
+    health: H || { rows: [], broken: [], hasBroken: false, ok: true, word: '', incidents: [], laptop: '', stats: '', hasLaptop: false, hasStats: false, forYou: [] },
     hasHealth: !!H, healthWait: !isDemo && !H, healthWord: err.routines ? errLine : 'Looking…', healthFailed: !isDemo && !H && !!err.routines,
     banner: H ? (H.ok ? { t: 'Everything is running', bg: '#f0fdf4', dot: '#16a34a', fg: '#14532d' } : { t: H.word, bg: '#fef2f2', dot: '#dc2626', fg: '#7f1d1d' })
       : { t: err.routines ? 'Health couldn’t be read just now' : 'Looking…', bg: '#f8fafc', dot: '#94a3b8', fg: '#475569' },
@@ -480,7 +682,7 @@ export function vals(st, ctx, D) {
 
   return {
     agent: { mp: { homeLines, rows } },
-    sheets: {},
+    sheets: { mpUpdAsk: askSheet },
     titles: {},
     values: Object.assign(proto, { mpv })
   };

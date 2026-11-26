@@ -1,5 +1,6 @@
 <sc-if value="{{ s.status }}">
 <div style="padding: 16px 18px; border-radius: 20px; background: {{ mpv.banner.bg }}; display: flex; align-items: center; gap: 10px"><span style="width: 10px; height: 10px; flex-shrink: 0; border-radius: 5px; background: {{ mpv.banner.dot }}"></span><span style="font-size: 15px; font-weight: 600; color: {{ mpv.banner.fg }}">{{ mpv.banner.t }}</span></div>
+<sc-if value="{{ mpv.hasWho }}"><span class="muted" style="font-size: 14px; margin: -6px 4px 0">{{ mpv.who }}</span></sc-if>
 <h2 class="lab" style="margin: 0 4px">Being worked on</h2>
 <sc-if value="{{ mpv.statusWait }}"><span class="muted" style="font-size: 14px; margin: 0 4px">{{ mpv.statusWord }}</span><sc-if value="{{ mpv.statusFailed }}"><button class="small" onClick="{{ mpv.retry }}" style="align-self: flex-start">Try again</button></sc-if></sc-if>
 <sc-if value="{{ mpv.hasStatus }}"><div class="list">

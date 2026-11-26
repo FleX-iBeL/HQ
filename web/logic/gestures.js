@@ -2,6 +2,11 @@
 // on her home moves to the next or previous agent. Only motion: the screen changes at the start
 // of each move (as a tap does), and a move let go too early puts it back. Not in demo mode.
 //
+// On the phone in every design: a swipe from the left edge goes back one screen (the screen slides
+// away to the right and the one before shows under it), and a sheet pulls down to close. The same
+// motion and the same rule: let go early and it goes back where it was. A vertical move is left to
+// the scrolling, a move that starts in a box being typed in is left alone.
+//
 // The templates mark the parts: data-g="home" (her home), "stage" (her face, name and Call),
 // "pullup" (the panel at the bottom of home), "space" (her space), "space-head" (its top bar),
 // "pulldown" (its panel), and data-g-act="open" / "close" on what opens or closes it with a tap.
@@ -14,6 +19,10 @@ let app = null, on = false, busy = false;
 const q = (g) => document.querySelector('[data-g="' + g + '"]');
 const reduced = () => typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const active = () => on && app && !app.demoMode && app.device === 'phone' && app.state.design === 'spotlight' && !busy;
+// going back by the edge, and pulling a sheet down: every design on the phone
+const phone = () => on && app && !app.demoMode && app.device === 'phone' && !busy;
+const BACK_EDGE = 28;
+const canBack = () => phone() && app.state.screen !== 'home' && !app.state.sheet && !app.state.incoming && !(app.state.tour >= 0) && !app.state.confirmHang;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // What the engine wrote last is put back, so nothing of a move stays on a node.
@@ -144,12 +153,75 @@ function slideTo(dir, fromX) {
   }, reduced() ? 1 : 200);
 }
 
+// ---- back: the screen slides away to the right, the one before shows under it -------------
+function beginBack() {
+  const root = document.querySelector('#app > div');
+  if (!root) return null;
+  const w = root.getBoundingClientRect().width || window.innerWidth;
+  const was = { screen: app.state.screen, stack: app.state.stack, space: app.state.space };
+  const ghost = cloneOf(root);
+  const release = holdRenders();
+  app.back();
+  rerenderAll();
+  const under = document.querySelector('#app > div');
+  if (!under) { release(); return null; }
+  under.parentElement.appendChild(ghost);
+  Object.assign(ghost.style, { zIndex: '60', boxShadow: '-12px 0 32px rgba(15,23,42,0.18)', willChange: 'transform', background: getComputedStyle(under).backgroundColor });
+  const shade = document.createElement('div');
+  Object.assign(shade.style, { position: 'absolute', inset: '0', zIndex: '59', background: 'rgba(15,23,42,0.18)', pointerEvents: 'none' });
+  under.parentElement.appendChild(shade);
+  const set = (t) => {
+    ghost.style.transform = 'translateX(' + (w * t) + 'px)';
+    under.style.transform = 'translateX(' + (-0.25 * w * (1 - t)) + 'px)';
+    shade.style.opacity = String(1 - t);
+  };
+  set(0);
+  const clean = () => { ghost.remove(); shade.remove(); restore(under); release(); busy = false; };
+  return {
+    dist: w, set,
+    end(keep) {
+      busy = true;
+      const done = () => { if (!keep) { app.setState(was); rerenderAll(); } clean(); };
+      if (reduced()) { set(keep ? 1 : 0); done(); return; }
+      tween(cur, keep ? 1 : 0, set, done, 240);
+    }
+  };
+}
+
+// ---- a sheet pulled down: it follows the finger and closes past a third of its height -----
+function beginSheet() {
+  const panel = q('sheet');
+  if (!panel) return null;
+  const shadeEl = panel.parentElement;
+  const h = panel.getBoundingClientRect().height || 1;
+  const release = holdRenders();
+  panel.style.willChange = 'transform';
+  const set = (t) => { panel.style.transform = 'translateY(' + (h * t) + 'px)'; if (shadeEl) shadeEl.style.opacity = String(1 - 0.6 * t); };
+  set(0);
+  const clean = () => { restore(panel); restore(shadeEl); release(); busy = false; };
+  return {
+    dist: h, set,
+    end(keep) {
+      busy = true;
+      const done = () => { if (keep) { app.setState({ sheet: null }); } clean(); if (keep) rerenderAll(); };
+      if (reduced()) { set(keep ? 1 : 0); done(); return; }
+      tween(cur, keep ? 1 : 0, set, done, 220);
+    }
+  };
+}
+
 // ---- the pointer ---------------------------------------------------------------------------
 let g = null, cur = 0, eatClick = false;
 function down(e) {
-  if (!active() || g || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (g || (e.pointerType === 'mouse' && e.button !== 0)) return;
   const t = e.target;
   if (t.closest('input, textarea, select, [contenteditable]')) return;
+  // the left edge goes back, on every screen but home, in every design
+  if (e.clientX <= BACK_EDGE && canBack()) { g = { kind: 'back', id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, run: null, pts: [[e.timeStamp, e.clientX, e.clientY]], el: t }; return; }
+  // a sheet: pulled down from its top, or from anywhere in it while it's scrolled to the top
+  const sheet = phone() && app.state.sheet && t.closest('[data-g="sheet"]');
+  if (sheet && (t.closest('[data-g="sheet-head"]') || sheet.scrollTop <= 0)) { g = { kind: 'sheet', id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, run: null, pts: [[e.timeStamp, e.clientX, e.clientY]], el: t }; return; }
+  if (!active()) return;
   const inPanel = t.closest('[data-g="pullup"]'), inHome = t.closest('[data-g="home"]');
   const inHead = t.closest('[data-g="space-head"], [data-g="handle"]');
   const inBody = t.closest('[data-g="pulldown"]');
@@ -168,13 +240,16 @@ function move(e) {
   if (!g.axis) {
     if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
     g.axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
-    const fits = (g.kind === 'side' && g.axis === 'x') || (g.kind === 'up' && g.axis === 'y' && dy < 0) || (g.kind === 'down' && g.axis === 'y' && dy > 0);
+    const fits = (g.kind === 'side' && g.axis === 'x') || (g.kind === 'up' && g.axis === 'y' && dy < 0) || (g.kind === 'down' && g.axis === 'y' && dy > 0)
+      || (g.kind === 'back' && g.axis === 'x' && dx > 0) || (g.kind === 'sheet' && g.axis === 'y' && dy > 0);
     // her home: a vertical pull anywhere on it lifts the panel too
     if (!fits && g.kind === 'side' && g.axis === 'y' && dy < 0) g.kind = 'up';
     else if (!fits) { g = null; return; }
     try { g.el.setPointerCapture && document.documentElement.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
     if (g.kind === 'up') g.run = beginUp();
     else if (g.kind === 'down') g.run = beginDown();
+    else if (g.kind === 'back') g.run = beginBack();
+    else if (g.kind === 'sheet') g.run = beginSheet();
     if (g.kind !== 'side' && !g.run) { g = null; return; }
     eatClick = true;
   }
@@ -183,7 +258,7 @@ function move(e) {
     const st = q('stage'); if (st) { st.style.transform = 'translateX(' + dx + 'px)'; st.style.opacity = String(1 - Math.min(0.6, Math.abs(dx) / 600)); }
     return;
   }
-  cur = clamp(g.kind === 'up' ? -dy / g.run.dist : dy / g.run.dist, 0, 1);
+  cur = clamp(g.kind === 'up' ? -dy / g.run.dist : g.kind === 'back' ? dx / g.run.dist : dy / g.run.dist, 0, 1);
   g.run.set(cur);
 }
 function speed(was) {
@@ -201,7 +276,7 @@ function up(e) {
     if (Math.abs(dx) > w * 0.22 || Math.abs(vx) > FLICK) slideTo(dx < 0 ? 1 : -1, dx);
     else if (st) { busy = true; tween(dx, 0, (x) => { st.style.transform = 'translateX(' + x + 'px)'; }, () => { restore(st); busy = false; }, 180); }
   } else {
-    const flick = was.kind === 'up' ? -vy : vy;
+    const flick = was.kind === 'up' ? -vy : was.kind === 'back' ? vx : vy;
     was.run.end(flick > FLICK || (flick > -FLICK / 2 && cur > PULL_AT));
   }
   setTimeout(() => { eatClick = false; }, 0);

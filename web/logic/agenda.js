@@ -15,7 +15,7 @@ export const LOADING_OK = true;
 export { demo };
 
 export const start = { apptMark: null, bell: true, appt: null, travel: 'bike', apptNotes: demo.apptNotes.slice(), cal: { personal: true, work: true, birthdays: true },
-  apptId: null, calOff: null, kindOff: null, kindDraft: {} };
+  apptId: null, calOff: null, kindOff: null, kindDraft: {}, agEarlier: false };
 
 // ---- loading ----------------------------------------------------------------------------
 
@@ -114,6 +114,13 @@ function lookedText(cal, now) {
   return 'Read from your calendar ' + (m < 1 ? 'just now' : m < 60 ? m + (m === 1 ? ' minute' : ' minutes') + ' ago' : Math.round(m / 60) + ' h ago');
 }
 const short = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t);
+// A note's time ("2026-11-26 10:38" or ISO): Today, 10:38 / Yesterday, 10:38 / Tuesday 24, 10:38.
+function noteWhen(s, now) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)(?:[ T](\d\d):(\d\d))?/.exec(String(s || ''));
+  if (!m) return '';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return dayName(d, now) + (m[4] ? ', ' + m[4] + ':' + m[5] : '');
+}
 
 // Google's eleven event colours, which a kind of time can take.
 const GOOGLE = [['lavender', '#7986cb'], ['sage', '#33b679'], ['grape', '#8e24aa'], ['flamingo', '#e67c73'], ['banana', '#f6bf26'], ['tangerine', '#f4511e'],
@@ -194,19 +201,46 @@ export function vals(st, ctx, D) {
   }
   if (ready && !nowPlaced) todayRow.push({ isNow: true, isItem: false });
 
-  // The agenda: from today, two weeks ahead, by day.
-  const byDay = [];
+  // The agenda: from today, two weeks ahead, by day; the days of this week before today fold away above it.
+  // Each row: its second line (the calendar, the place, his notes on it), the bell when she texts at its start,
+  // and once it has started, Done and Didn't happen right on the row (a second tap takes the mark off).
+  const markOn = (e, want) => (ev) => {
+    if (ev && ev.stopPropagation) ev.stopPropagation();
+    if (!e.mark_id) return;
+    const was = e.mark || '', to = was === want ? '' : want;
+    const put = (m) => change(app, 'api/calendar/mark', { id: e.mark_id, mark: m }, patchEvent(e.id, (x) => Object.assign({}, x, { mark: m })), 'Couldn’t mark that. Try again.');
+    put(to).then((r) => { if (r) app.say(to === 'done' ? 'Marked as done' : to === 'x' ? 'Marked: didn’t happen as planned' : 'Mark taken off', () => put(was)); });
+  };
+  const rowOf = (e) => {
+    const past = isPast(e, now), a = toDate(e.start), x = e.mark === 'x', done = e.mark === 'done';
+    const url = /^https?:\/\//i.test(e.where || '');
+    const notesList = (e.appt_notes || []).map((n) => n.text).filter(Boolean);
+    const grey = past || x, started = !!e.mark || (!!a && a <= now);
+    return { id: e.id, t: e.all_day ? 'Day' : hm(a), title: e.title, kind: dotColour(e.color),
+      tc: grey ? '#94a3b8' : '#475569', fc: grey ? '#94a3b8' : e.free ? '#475569' : '#0f172a', deco: grey ? 'line-through' : 'none', open: openAppt(e),
+      sub: [viewOf(e) !== 'Main' ? viewOf(e) : '', url ? 'Online' : (e.where || ''), e.free ? 'Shown as free' : ''].filter(Boolean).join(' · '),
+      notesLine: notesList.join(' · '), ping: !!e.ping,
+      marks: started, chev: started ? 'none' : 'block', padR: started ? '10px' : '18px', noMark: !e.mark_id, markOp: e.mark_id ? 1 : 0.4,
+      done: markOn(e, 'done'), doneOn: done ? 'true' : 'false', doneBg: done ? '#16a34a' : '#ffffff', doneFg: done ? '#ffffff' : '#94a3b8', doneRing: done ? '#16a34a' : '#cbd5e1',
+      miss: markOn(e, 'x'), missOn: x ? 'true' : 'false', missBg: x ? '#475569' : '#ffffff', missFg: x ? '#ffffff' : '#94a3b8', missRing: x ? '#475569' : '#cbd5e1',
+      doneAria: done ? 'Done. Tap to take the mark off' : 'Done', missAria: x ? 'Didn’t happen as planned. Tap to take the mark off' : 'Didn’t happen as planned' };
+  };
+  const byDay = [], before = [];
   for (const e of events) {
     const d = shownDay(e, now);
-    if (!d || d < tmid) continue;
+    if (!d) continue;
+    const into = d < tmid ? before : byDay;
     const k = dayKey(d);
-    let g = byDay[byDay.length - 1];
-    if (!g || g.k !== k) { g = { k, day: dayName(d, now), items: [] }; byDay.push(g); }
-    const past = isPast(e, now);
-    g.items.push({ t: e.all_day ? 'Day' : hm(toDate(e.start)), title: e.title, kind: dotColour(e.color),
-      tc: past ? '#94a3b8' : '#475569', fc: past ? '#94a3b8' : '#0f172a', deco: past ? 'line-through' : 'none', open: openAppt(e) });
+    let g = into[into.length - 1];
+    if (!g || g.k !== k) { g = { k, day: dayName(d, now), items: [] }; into.push(g); }
+    g.items.push(rowOf(e));
   }
   const agenda = byDay.map((g) => ({ day: g.day, items: g.items }));
+  const earlier = before.map((g) => ({ day: g.day, items: g.items }));
+  const nBefore = before.reduce((n, g) => n + g.items.length, 0);
+  const agX = { hasEarlier: nBefore > 0, earlierOpen: !!st.agEarlier && nBefore > 0, earlier, earlierAria: st.agEarlier ? 'true' : 'false',
+    earlierLabel: (st.agEarlier ? 'Hide earlier this week' : 'Earlier this week') + ' · ' + nBefore,
+    toggleEarlier: () => app.setState((x) => ({ agEarlier: !x.agEarlier })) };
   const hidden = ready ? (cal.events.length - events.length) : 0;
   const agendaEmpty = ready && !agenda.length;
   const agendaEmptyText = !ready ? '' : cal.on === false ? 'The calendar is off. Turn it on in Settings.' : hidden ? 'Everything is switched off in this view' : cal.looking ? 'Reading your calendar…' : cal.looked ? 'Nothing in the next two weeks' : 'Not read yet';
@@ -284,7 +318,7 @@ export function vals(st, ctx, D) {
     else travelText = car && tv.drive ? tv.drive : 'From ' + (tv.from === 'home' ? 'home' : tv.from) + (tv.after ? ' (after ' + tv.after + ')' : '') + ' to ' + tv.to;
     if (tv.on && tv.link) travelSub = [!car && tv.train ? 'Train: ' + tv.train : (!car && tv.stations && tv.stations.length === 2 ? 'Stations: ' + tv.stations.join(' to ') : '')].concat(tv.news || []).filter(Boolean).join(' · ');
   }
-  const apptNoteRows = ((e && e.appt_notes) || []).map((n) => ({ t: n.text, clear: () => {
+  const apptNoteRows = ((e && e.appt_notes) || []).map((n) => ({ id: n.id, t: n.text, when: noteWhen(n.when, now), clear: () => {
     change(app, 'api/calendar/note', { id: key, clear: n.id }, patchEvent(e.id, (x) => Object.assign({}, x, { appt_notes: (x.appt_notes || []).filter((y) => y.id !== n.id) })), 'Couldn’t clear the note. Try again.')
       .then((r) => { if (r) app.say('Note cleared', () => change(app, 'api/calendar/note', { id: key, add: n.text }, null, 'Couldn’t bring the note back. Try again.')); });
   } }));
@@ -292,6 +326,18 @@ export function vals(st, ctx, D) {
     if (!e) return;
     change(app, 'api/calendar/note', { id: key, add: text }, patchEvent(e.id, (x) => Object.assign({}, x, { appt_notes: (x.appt_notes || []).concat([{ id: 'new-' + Date.now(), text, when: '' }]) })), 'Couldn’t save the note. Try again.');
   };
+
+  // The to-do items planned in this block (by hand, on the item's page or on a call).
+  const tdLists = (st.data && st.data.todo && Array.isArray(st.data.todo.lists)) ? st.data.todo.lists : [];
+  const plannedHere = [];
+  if (e) for (const l of tdLists) {
+    if (['done', 'letgo', 'groceries', 'grocoff'].includes(l.kind)) continue;
+    for (const it of l.items || []) {
+      const pl = it.planned;
+      if (pl && (pl.id === e.id || (e.mark_id && pl.id === e.mark_id))) plannedHere.push({ id: it.id, t: it.title, list: l.name, open: () => app.go('todoItem', { tdItem: it.id, tdList: l.key }) });
+    }
+  }
+  agX.planned = plannedHere; agX.hasPlanned = plannedHere.length > 0;
 
   const todayCount = todayEvents.length;
   return {
@@ -308,7 +354,7 @@ export function vals(st, ctx, D) {
       apptGoogle: (e && e.notes) || '', hasGoogle: !!(e && e.notes),
       calRows, kindRows, filterKinds, swatches: GOOGLE.map(([, c]) => ({ c })), saveKinds, resetKinds,
       hasTravel: !!tv, travelChips, travelText, travelSub, hasTravelSub: !!travelSub, travelLink: (tv && tv.on && tv.link) || '', hasTravelLink: !!(tv && tv.on && tv.link),
-      travelLinkText: tv && tv.mode === 'car' ? 'Open in Google Maps' : 'Open the route', apptNoteRows
+      travelLinkText: tv && tv.mode === 'car' ? 'Open in Google Maps' : 'Open the route', apptNoteRows, agX
     }
   };
 }

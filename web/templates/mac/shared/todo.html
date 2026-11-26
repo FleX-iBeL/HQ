@@ -4,7 +4,10 @@
 <sc-if value="{{ todoX.hasCommit }}"><div class="card" onClick="{{ todoX.openCommit }}" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; cursor: pointer"><span class="lab">{{ todoX.commitName }}</span><span style="font-size: 15px">{{ todoX.commitLine }}</span></div></sc-if>
 <sc-if value="{{ todoX.empty }}"><div class="card" style="padding: 20px; font-size: 15px; line-height: 22px">Nothing on your list yet. Tell {{ hv.donnaName }} what’s on your mind, on a call or in a text, and it gets sorted in here.</div></sc-if>
 <sc-if value="{{ todoX.full }}">
-<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<sc-if value="{{ todoX.axes }}"><div aria-hidden="true" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-left: 20px; margin-bottom: -4px"><span style="text-align: center; font-size: 12px; font-weight: 600; color: #475569">Urgent</span><span style="text-align: center; font-size: 12px; font-weight: 600; color: #475569">Not urgent</span></div></sc-if>
+<div style="display: flex; gap: 6px">
+<sc-if value="{{ todoX.axes }}"><div aria-hidden="true" style="display: flex; flex-direction: column; gap: 10px; width: 14px; flex-shrink: 0"><span style="flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-size: 12px; font-weight: 600; color: #475569">Important</span><span style="flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; font-size: 12px; font-weight: 600; color: #475569">Not important</span></div></sc-if>
+<div style="flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: {{ todoX.mxRows }}; gap: 10px">
 <sc-for list="{{ boxes }}" as="b">
 <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 20px; background: #ffffff; box-shadow: {{ b.shadow }}; opacity: {{ b.op }}">
 <button onClick="{{ b.openAll }}" class="top" style="border: none; background: transparent; padding: 0 0 4px; font: inherit; cursor: pointer; text-align: left"><span class="grow" style="font-size: 12px; font-weight: 700; color: #475569">{{ b.name }}</span><span style="font-family: var(--hq-display); font-size: 18px; font-weight: 700; color: {{ b.cc }}">{{ b.count }}</span></button>
@@ -13,7 +16,9 @@
 </div>
 </sc-for>
 </div>
+</div>
 </sc-if>
 <div style="display: flex; flex-wrap: wrap; gap: 6px"><button class="chip" onClick="{{ lists.groceries }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Groceries {{ todoX.nGroceries }}</button><button class="chip" onClick="{{ lists.bucket }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Bucketlist {{ listX.nBucket }}</button><button class="chip" onClick="{{ lists.wish }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Wishlist {{ listX.nWish }}</button><button class="chip" onClick="{{ openDone }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Done {{ todoX.nDone }}</button><button class="chip" onClick="{{ openLetgo }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Let go {{ todoX.nLetGo }}</button></div>
 <div class="tbox"><label for="dk-todo-add" class="sr">Add to your list</label><input id="dk-todo-add" value="{{ drafts.todoOverview }}" onInput="{{ typed.todoOverview }}" onKeyDown="{{ enter.todoOverview }}" placeholder="Add something, one per line"></div>
+<sc-if value="{{ todoX.hint }}"><span class="muted" style="font-size: 12px; line-height: 17px; text-align: center; padding: 0 8px">{{ todoX.hint }}</span></sc-if>
 </sc-if>

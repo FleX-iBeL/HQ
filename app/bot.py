@@ -537,6 +537,23 @@ if __name__ == "__main__":
             return FileResponse(pic, media_type=_agents.PICTURE_TYPES[pic.suffix.lower()], headers=_NO_CACHE)
         return Response(_agents.picture_svg(every[agent_id]), media_type="image/svg+xml", headers=_NO_CACHE)
 
+    # What a ringing call is about, for the line under "<agent> is calling": read only (picking it up is marked
+    # by the call itself, with ring=N); nothing is changed here.
+    @app.get("/api/ring/{n}", include_in_schema=False)
+    async def ring_about(n: str):
+        c = None
+        if n.isdigit():
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+                import pings as _pings
+                c = _pings.call_get(int(n))
+            except Exception:
+                c = None
+        if not c:
+            return JSONResponse({"error": "No such call"}, status_code=404, headers=_NO_CACHE)
+        return JSONResponse({"agent": c.get("agent", ""), "what": c.get("what", ""), "title": c.get("title", ""),
+                             "at": c.get("at", "")}, headers=_NO_CACHE)
+
     @app.get("/api/last-call", include_in_schema=False)
     async def last_call():
         return JSONResponse(_transcript.last_call() or {"lines": []}, headers=_NO_CACHE)
@@ -619,6 +636,18 @@ if __name__ == "__main__":
         elif isinstance(ask.get("nudge_done"), int):  # H211: Done in the app stops her nudges
             import pings as _pings
             if not _pings.nudge_done(str(ask["nudge_done"])):
+                return JSONResponse({"error": "no such nudge"}, status_code=404)
+        elif isinstance(ask.get("nudge_later"), int):  # the bell: quiet until tomorrow morning
+            import pings as _pings
+            if len(_pings.nudge_later(str(ask["nudge_later"]))) != 1:
+                return JSONResponse({"error": "no such nudge"}, status_code=404)
+        elif isinstance(ask.get("nudge_wake"), int):  # the bell again: it goes on
+            import pings as _pings
+            if len(_pings.nudge_wake(str(ask["nudge_wake"]))) != 1:
+                return JSONResponse({"error": "no such nudge"}, status_code=404)
+        elif isinstance(ask.get("nudge_reopen"), int):  # Undo after Done
+            import pings as _pings
+            if not _pings.nudge_reopen(ask["nudge_reopen"]):
                 return JSONResponse({"error": "no such nudge"}, status_code=404)
         else:
             return JSONResponse({"error": "no change asked"}, status_code=400)

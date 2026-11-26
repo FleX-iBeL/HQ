@@ -25,6 +25,8 @@
  *   aria-* and data-* (booleans written as "true" / "false"), inline SVG in its namespace
  *   with its attribute names as written (viewBox, stroke-linecap, ...).
  * hint-* attributes are ignored.
+ * A hole that is the whole text of its node and holds rich(text) is drawn as formatted text
+ * (bold, italics, lists, line breaks, links), built as nodes; see rich() below.
  *
  * Rendering morphs the live DOM: a node is reused when the same place in the template
  * (and the same loop item) renders the same tag again, attributes and text are updated
@@ -131,6 +133,149 @@ function parts(text) {
   return out;
 }
 const show = (v) => (v == null || v === false || v === true ? '' : String(v));
+
+/* ---------------------------------------------------------------- rich text
+ * rich(text, opts) makes a value that a hole standing alone in a text node ({{ l.t }} as the
+ * whole text of its element) draws as formatted text, built as nodes (never as HTML):
+ *   **bold**, *italics*, lines starting with "- ", "* ", "• " or "1. " as a list (an indented item
+ *   is a list inside the item above, two levels deep at most; an indented plain line goes on with
+ *   that item), paragraphs and line breaks kept, a line like --- only a break, a heading shown as a
+ *   bold line, and web addresses (http, https, www.) and [words](https://…) as links that open
+ *   outside the app (a new tab or the browser), so a call goes on.
+ * opts.marks false: only links and line breaks (his own lines). opts.at: a small time at the end,
+ * in the corner of the bubble. Anywhere else (an attribute, a hole among other text) the value is
+ * its plain text, without the marks. */
+export class Rich {
+  constructor(text, opts) {
+    this.text = String(text == null ? '' : text);
+    this.marks = !(opts && opts.marks === false);
+    this.at = (opts && opts.at) || '';
+  }
+  toString() { return this.marks ? plainOf(this.text) : this.text.replace(LINK_RE, (m, w, u) => w || m); }
+}
+export const rich = (text, opts) => new Rich(text, opts);
+
+const LINK_RE = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|((?:https?:\/\/|\bwww\.)[^\s<>"]*[^\s<>".,;:!?)\]'*])/gi;
+const LINK_STYLE = 'color: inherit; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere';
+function plainOf(s) {
+  return String(s || '').replace(LINK_RE, (m, w, u) => w || m).replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/(^|[\s(])\*([^*\s](?:[^*]*[^*\s])?)\*(?=[\s).,!?:;]|$)/g, '$1$2').replace(/^#{1,6}\s+/gm, '');
+}
+// A tree of plain objects: a string is text, {tag, kids, href, start} an element.
+function linkParts(s, out) {
+  let at = 0;
+  LINK_RE.lastIndex = 0;
+  for (const m of s.matchAll(LINK_RE)) {
+    if (m.index > at) out.push(s.slice(at, m.index));
+    const url = m[2] || m[3];
+    const href = /^www\./i.test(url) ? 'https://' + url : url;
+    if (/^https?:\/\//i.test(href)) out.push({ tag: 'a', href, kids: [m[1] || url] });
+    else out.push(m[0]);
+    at = m.index + m[0].length;
+  }
+  if (at < s.length) out.push(s.slice(at));
+}
+function inlineParts(s, out) {
+  const ps = s.split(/\*\*(.+?)\*\*|\*([^*\s](?:[^*]*[^*\s])?)\*/g);
+  for (let i = 0; i < ps.length; i += 3) {
+    if (ps[i]) linkParts(ps[i].replace(/\*\*/g, ''), out);
+    const b = ps[i + 1], it = ps[i + 2];
+    if (b || it) { const e = { tag: b ? 'strong' : 'em', kids: [] }; linkParts(b || it, e.kids); out.push(e); }
+  }
+}
+function parseRich(text, marks) {
+  const src = String(text || '').replace(/\r/g, '');
+  if (!marks) {
+    const out = [];
+    src.split('\n').forEach((ln, i) => { if (i) out.push({ tag: 'br', kids: [] }); linkParts(ln, out); });
+    return out;
+  }
+  const root = [];
+  let lists = [], para = null; // lists: the open lists, outermost first, each {list, indent, li, into}
+  for (const raw of src.split('\n')) {
+    const indent = raw.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+    const line = raw.trim();
+    if (/^([-*_])(?:\s*\1){2,}$/.test(line)) { lists = []; para = null; continue; }
+    const m = line.match(/^(?:([-*+•])|(\d{1,3})[.)])\s+(.*)$/);
+    if (m) {
+      const tag = m[1] ? 'ul' : 'ol';
+      while (lists.length > 1 && indent < lists[lists.length - 1].indent) lists.pop();
+      let top = lists[lists.length - 1];
+      const make = () => ({ tag, kids: [], start: tag === 'ol' && +m[2] !== 1 ? +m[2] : null });
+      if (top && indent > top.indent && top.li && lists.length < 3) {
+        const list = make(); list.nested = true;
+        top.li.kids.push(list);
+        lists.push(top = { list, indent, li: null, into: top.li.kids });
+      } else if (!top || top.list.tag !== tag) {
+        const list = make();
+        const into = top ? top.into : root;
+        if (top && top.list.nested) list.nested = true;
+        into.push(list);
+        top = { list, indent: top ? top.indent : indent, li: null, into };
+        if (lists.length) lists[lists.length - 1] = top; else lists.push(top);
+      }
+      const li = { tag: 'li', kids: [] };
+      inlineParts(m[3], li.kids);
+      top.list.kids.push(li); top.li = li;
+      para = null; continue;
+    }
+    if (!line) { para = null; continue; }
+    const last = lists[lists.length - 1];
+    if (last && last.li && indent > 0) { last.li.kids.push({ tag: 'br', kids: [] }); inlineParts(line, last.li.kids); continue; }
+    lists = [];
+    const head = line.match(/^#{1,6}\s+(.*)$/);
+    if (head) {
+      const e = { tag: 'strong', kids: [] }; inlineParts(head[1], e.kids);
+      root.push({ tag: 'p', kids: [e] }); para = null; continue;
+    }
+    if (para) para.kids.push({ tag: 'br', kids: [] });
+    else { para = { tag: 'p', kids: [] }; root.push(para); }
+    inlineParts(line, para.kids);
+  }
+  // one paragraph: its words stand in the element itself, as plain text would
+  return root.length === 1 && root[0].tag === 'p' ? root[0].kids : root;
+}
+let richMemo = new Map();
+function richTree(r) {
+  const key = (r.marks ? '1' : '0') + r.text;
+  let t = richMemo.get(key);
+  if (!t) {
+    t = parseRich(r.text, r.marks);
+    if (richMemo.size > 2000) richMemo = new Map();
+    richMemo.set(key, t);
+  }
+  return t;
+}
+function styleOf(n, i, parentTag) {
+  if (n.tag === 'a') return LINK_STYLE;
+  if (n.tag === 'strong') return 'font-weight: 650';
+  if (n.tag === 'p') return i ? 'margin: 0.65em 0 0' : 'margin: 0';
+  if (n.tag === 'ul' || n.tag === 'ol') return 'margin: ' + (n.nested ? '0.35em' : i ? '0.65em' : '0') + ' 0 0; padding-left: 1.4em';
+  if (n.tag === 'li') return 'padding-left: 0.15em' + (i ? '; margin-top: 0.35em' : '');
+  return null;
+}
+function richVNodes(tree, base, out, parentTag) {
+  let block = 0, item = 0;
+  tree.forEach((n, j) => {
+    const k = base + '.' + j;
+    if (typeof n === 'string') { out.push({ k, text: n }); return; }
+    const isBlock = n.tag === 'p' || n.tag === 'ul' || n.tag === 'ol';
+    const i = n.tag === 'li' ? item++ : isBlock ? block++ : 0;
+    const attrs = {};
+    const st = styleOf(n, i, parentTag);
+    if (st) attrs.style = styleLens ? lensed(st) : st;
+    if (n.tag === 'a') { attrs.href = n.href; attrs.target = '_blank'; attrs.rel = 'noopener noreferrer'; }
+    if (n.start) attrs.start = String(n.start);
+    const v = { k: k + n.tag, name: n.tag, svg: false, attrs, on: {}, src: {}, kids: [] };
+    richVNodes(n.kids, k, v.kids, n.tag);
+    out.push(v);
+  });
+}
+const AT_STYLE = 'float: right; margin: 6px 0 -4px 10px; font-size: 11px; line-height: 14px; font-weight: 400; opacity: 0.6; white-space: nowrap; font-variant-numeric: tabular-nums';
+function richOut(r, base, out) {
+  richVNodes(richTree(r), base + '~', out, null);
+  if (r.at) out.push({ k: base + '~at', name: 'span', svg: false, attrs: { style: AT_STYLE, 'aria-label': 'at ' + r.at }, on: {}, src: {}, kids: [{ k: base + '~at.t', text: r.at }] });
+}
 const join = (ps, scope) => ps.map((p) => (typeof p === 'string' ? p : show(p(scope)))).join('');
 
 /* compile(html, {include}) -> a template that render() understands. */
@@ -206,7 +351,13 @@ function element(tag, attrs, svg) {
 /* The template and values into virtual nodes, each with k: its place in the template. */
 function build(kids, scope, sfx, out) {
   for (const n of kids) {
-    if (n.type === 'text') out.push({ k: n.id + sfx, text: join(n.parts, scope) });
+    if (n.type === 'text') {
+      if (n.parts.length === 1 && typeof n.parts[0] === 'function') {
+        const v = n.parts[0](scope);
+        if (v instanceof Rich) { richOut(v, n.id + sfx, out); continue; }
+        out.push({ k: n.id + sfx, text: show(v) });
+      } else out.push({ k: n.id + sfx, text: join(n.parts, scope) });
+    }
     else if (n.type === 'if') { if (n.test(scope)) build(n.kids, scope, sfx, out); }
     else if (n.type === 'for') {
       const list = n.list(scope);
@@ -221,7 +372,11 @@ function build(kids, scope, sfx, out) {
       }
     } else {
       const v = { k: n.id + sfx, name: n.name, svg: n.svg, attrs: {}, on: {}, src: {}, kids: [] };
-      for (const a of n.attrs) v.attrs[a.n] = a.n === 'style' && styleLens ? lensed(a.get(scope)) : a.get(scope);
+      for (const a of n.attrs) {
+        let x = a.get(scope);
+        if (x instanceof Rich) x = String(x);
+        v.attrs[a.n] = a.n === 'style' && styleLens ? lensed(x) : x;
+      }
       for (const e of n.on) { const f = e.get(scope); if (typeof f === 'function') { v.on[e.ev] = f; v.src[e.ev] = e.src; } }
       if (n.ref) v.ref = n.ref(scope);
       build(n.kids, scope, sfx, v.kids);

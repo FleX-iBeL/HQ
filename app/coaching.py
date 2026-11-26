@@ -20,7 +20,10 @@ their workspace.
                  next to its debrief but its own session; without a game, every eight weeks (or the `Check-ins:`
                  line's "every N weeks" or "every N months") from the last one, or from when HQ first kept them
       One that's due shows a red dot on the Coaching button, until it's done (a call does it at the end, or Done in the
-      app) or put off until tomorrow (Not now). No push notification.
+      app) or put off until tomorrow (Not now). No push notification. Each carries `last_done`: when one of its kind
+      was last done (empty when never).
+    - games_designed: the games designed in their map's six-week game layer (its "In HQ:" part) that HQ doesn't keep
+      yet. Each waits to be set up from that design in a chat with Claude Code; no agent sets a game up.
     - The coaching line: a thread with the agent the workflow is best with (Pepper by default), like the direct line,
       in the workspace's HQ/coaching-line/. A check-in that comes due lands there as a line from her, without Claude.
       His texts are answered by direct_line.py with this folder and her (no phone notifications: nothing subscribes).
@@ -342,9 +345,39 @@ def read(f: Path | None = None, now: datetime | None = None, games: list | None 
            "map": bool(text), "start": w.get("start", ""), "kept": bool(d.get("first"))}
     out["layers"] = layers(f, w, text) if text else []
     out["checkins"] = checkins(d, text, now, games) if (text and d.get("first")) else []
+    done_at = d.get("done") or {}
+    for c in out["checkins"]:  # when one of its kind was last done (a weekly one: any week's)
+        pre = {"week": "week:", "checkin": "checkin:"}.get(c["kind"])
+        ts = [v for k, v in done_at.items() if (k.startswith(pre) if pre else k == c["key"])]
+        c["last_done"] = max(ts) if ts else ""
     out["due"] = sum(1 for c in out["checkins"] if c["due"])
+    out["games_designed"] = designed_games(text, games) if text else []
     out["thread"] = thread(last=200)
     out["waiting"] = bool(out["thread"]) and out["thread"][-1]["from"] == "me"
+    return out
+
+
+_DESIGN_NAME = re.compile(r"^-\s*Name:\s*(.+?)(?:\s+Start:.*)?$")
+
+
+def designed_games(text: str, games: list | None = None) -> list[str]:
+    """The games designed in the six-week game layer (its "In HQ:" part, a "- Name: …" line) that HQ doesn't keep yet:
+    each waits to be set up in a chat with Claude Code."""
+    body = next((b for n, _name, b in workflows._layers(text) if n == 3), "")
+    have = {(g.get("name") or "").strip().lower() for g in (games if games is not None else _games())}
+    out, inside = [], False
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("In HQ:"):
+            inside = True
+            continue
+        if inside and not s.startswith("-"):
+            inside = False
+        m = _DESIGN_NAME.match(s) if inside else None
+        if m:
+            name = m.group(1).strip().strip('"“”').strip()
+            if name and name.strip(". …") and name.lower() not in have and name not in out:
+                out.append(name[:80])
     return out
 
 

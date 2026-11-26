@@ -8,6 +8,8 @@
 // The open chat is read every 3 seconds, the others every 15, and again when the service
 // worker says a text came in. A tapped text opens /direct (Donna) or /direct?line=team.
 import * as demo from './demo/texts.js';
+import { rich } from '../engine.js';
+import { fit, fitRef, fitBoxes, coarse } from './call.js';
 
 export const NAME = 'texts';
 export const WIRED = true;
@@ -104,7 +106,34 @@ async function fetchCalls(app) {
   }
 }
 
+// A call that just ended (the call area keeps its lines as cEnded and opens txLog '__live'): shown from
+// those lines at once; its saved name, once the after-call work has saved it, is what Continue goes on from.
+const LIVE = '__live';
+async function findSaved(app) {
+  const rec = app.state.cEnded;
+  if (!rec) return '';
+  const D = app.state.data[NAME];
+  if (D && D.live && D.live.at === rec.at && D.live.name) return D.live.name;
+  try {
+    const d = await app.api.get('api/last-call');
+    if (d && d.name && d.name !== rec.before) {
+      patch(app, (o) => Object.assign({}, o, { live: { at: rec.at, name: d.name } }));
+      return d.name;
+    }
+  } catch (e) { /* not yet */ }
+  return '';
+}
+function watchSaved(app) {
+  let n = 0;
+  const look = async () => {
+    if (app.state.txLog !== LIVE || !app.state.cEnded) return;
+    if (await findSaved(app)) { fetchCalls(app); return; }
+    if (++n < 20) setTimeout(look, 3000);
+  };
+  setTimeout(look, 1500);
+}
 async function fetchLog(app, name) {
+  if (name === LIVE) { scrollEnd(true); watchSaved(app); return; }
   if (!name) return;
   patch(app, (o) => Object.assign({}, o, { logName: name, logError: '', log: o.log && o.log.name === name ? o.log : null }));
   try {
@@ -451,7 +480,10 @@ function demoVals(st, ctx, D) {
       pastCalls, logBubbles: toLines(D.pastCallLog, sa),
       txFirstDay: 'Texts · today', txPushLine: SAY.default, txLine: '', txLineOn: false, txReload: nothing, txReloadOn: false,
       txFailed: showFailed ? [{ t: 'Can you book the car wash too?', retry }] : [], txSendChat: nothing,
-      txCallsLine: '', txCallsLineOn: false, txLogLength: '4 minutes', txLogLine: '', txLogLineOn: false, continueCall: () => app.startCall(st.space)
+      txCallsLine: '', txCallsLineOn: false, txLogLength: '4 minutes', txLogLine: '', txLogLineOn: false, continueCall: () => app.startCall(st.space),
+      txSwapOn: false, txSwap: nothing, txSwapName: '',
+      txBox: { grow: fitRef, hint: 'send', chat: { typed: (e) => { app.keepDraft('textsChat', e.target); fit(e.target); }, key: nothing },
+        space: { typed: (e) => { app.keepDraft('textsSpace', e.target); fit(e.target); }, key: nothing }, home: { typed: (e) => { app.keepDraft('textsHome', e.target); fit(e.target); }, key: nothing } }
     }
   };
 }
@@ -474,15 +506,40 @@ function bubblesFor(k, D, ag, withPills) {
     if (dk === firstDay && daysAgo(at) === 0) return; // Thread's list starts under its own Today
     out.push(withPills ? { txPill: dayWord(at) } : { t: dayWord(at), align: 'center', bg: '#f2f2f5', fg: '#55555c', radius: '10px' });
   };
-  const mine = (t) => ({ t, align: 'flex-end', bg: '#22c55e', fg: '#052e16', radius: '20px 20px 6px 20px', txText: true });
+  // his texts: links and line breaks; hers formatted (bold, lists, links); each with its time in the corner
+  const mine = (t, at) => ({ t: rich(t, { marks: false, at: at ? clock(at) : '' }), align: 'flex-end', bg: '#22c55e', fg: '#052e16', radius: '20px 20px 6px 20px', txText: true });
   for (const m of msgs) {
     pill(m.at);
-    out.push(m.from === 'me' ? mine(m.text)
-      : { t: m.text, align: 'flex-start', bg: m.quiet ? 'transparent' : ag.tint, fg: m.quiet ? '#64748b' : '#0f172a', radius: '20px 20px 20px 6px', txText: true });
+    out.push(m.from === 'me' ? mine(m.text, m.at)
+      : { t: rich(m.text, { at: clock(m.at) }), align: 'flex-start', bg: m.quiet ? 'transparent' : ag.tint, fg: m.quiet ? '#64748b' : '#0f172a', radius: '20px 20px 20px 6px', txText: true });
   }
-  for (const p of pend) { pill(p.at); out.push(mine(p.text)); }
+  for (const p of pend) { pill(p.at); out.push(mine(p.text, p.state === 'sent' ? p.at : 0)); }
+  // while her answer is on its way
+  const sending = pend.some((p) => p.state === 'sent');
+  if (line && !line.off && (line.waiting || sending)) out.push({ t: ag.name + ' is typing…', align: 'flex-start', bg: 'transparent', fg: '#64748b', radius: '20px 20px 20px 6px', txText: true, txTyping: true });
   return out;
 }
+
+// The typing boxes: what's typed kept as a draft (no render per keystroke), the box grown to fit it,
+// Enter sending on a computer only (Shift+Enter a new line), Send sending everywhere.
+const BOX = { chat: 'textsChat', space: 'textsSpace', home: 'textsHome' };
+function boxes(app, st) {
+  const out = { grow: fitRef, hint: coarse() ? 'enter' : 'send' };
+  const go = { chat: () => sendFrom(app, 'textsChat', st.chatAgent), space: () => sendFrom(app, 'textsSpace', st.space),
+    home: () => { sendFrom(app, 'textsHome', st.textTo); openChat(app, st.textTo); } };
+  for (const k of Object.keys(BOX)) {
+    out[k] = {
+      typed: (e) => { app.keepDraft(BOX[k], e.target); fit(e.target); },
+      key: (e) => { if (e.key !== 'Enter' || e.shiftKey || e.isComposing || coarse()) return; e.preventDefault(); go[k](); fitBoxes(); }
+    };
+  }
+  return out;
+}
+function sendFrom(app, box, k) {
+  const text = ((app.state.drafts || {})[box] || '').trim();
+  if (text) { app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { [box]: '' }) })); send(app, k, text); }
+}
+const openChat = (app, k) => (app.state.design === 'thread' ? app.go(k, { space: k }) : app.go('chat', { chatAgent: k, space: k }));
 
 function realVals(st, ctx, D0) {
   const { app, AG, sa } = ctx;
@@ -550,15 +607,19 @@ function realVals(st, ctx, D0) {
   if (D.calls == null) txCallsLine = D.callsError || 'Loading…';
   else if (!herCalls.length) txCallsLine = D.callsError || 'No calls yet';
 
-  // One past call, as the chat showed it: his lines, hers, her waiting lines, taken-back ones struck through
-  const log = D.log && D.log.name === st.txLog ? D.log : null;
+  // One past call, as the chat showed it: his lines, hers, her waiting lines, taken-back ones struck through.
+  // The call that just ended shows from its own lines until it's saved.
+  const rec = st.txLog === LIVE ? st.cEnded : null;
+  const liveName = rec && D.live && D.live.at === rec.at ? D.live.name : '';
+  const log = rec ? { name: liveName, agent: (AG[rec.agent] || AG.donna).name, lines: rec.lines.map((l) => ({ who: l.who === 'me' ? 'user' : l.who, text: l.text, agent: l.agent, cancelled: l.cancelled, at: l.at })) }
+    : (D.log && D.log.name === st.txLog ? D.log : null);
   const agentByName = (n) => ORDER.map((k) => AG[k]).find((a) => a.name === n);
   const logAg = (log && agentByName(log.agent)) || sa;
   const logBubbles = log ? (log.lines || []).filter((l) => l.text).map((l) => {
-    if (l.who !== 'hq' && l.who !== 'filler') return { who: 'You', t: l.text, nc: '#15803d', fc: l.cancelled ? '#94a3b8' : '#0f172a', fs: '16px', fw: '500', deco: l.cancelled ? 'line-through' : 'none' };
+    if (l.who !== 'hq' && l.who !== 'filler') return { who: 'You', t: rich(l.text, { marks: false }), nc: '#15803d', fc: l.cancelled ? '#94a3b8' : '#0f172a', fs: '16px', fw: '500', deco: l.cancelled ? 'line-through' : 'none' };
     const who = agentByName(l.agent) || logAg;
-    if (l.who === 'filler') return { who: who.name, t: l.text, nc: who.accent, fc: '#64748b', fs: '14px', fw: '400', deco: 'none' };
-    return { who: who.name, t: l.text, nc: who.accent, fc: '#0f172a', fs: '16px', fw: '400', deco: 'none' };
+    if (l.who === 'filler') return { who: who.name, t: rich(l.text, { marks: false }), nc: who.accent, fc: '#64748b', fs: '14px', fw: '400', deco: 'none' };
+    return { who: who.name, t: rich(l.text), nc: who.accent, fc: '#0f172a', fs: '16px', fw: '400', deco: 'none' };
   }) : [];
   let txLogLength = '…';
   if (log) {
@@ -571,13 +632,22 @@ function realVals(st, ctx, D0) {
   if (!log) txLogLine = D.logError || 'Loading…';
   else if (!logBubbles.length) txLogLine = 'Nothing said';
   // Continue: only off a call, never as Free (as the old page); the call area starts it
-  const continueCall = () => {
+  const continueCall = async () => {
     if (!log) return;
     if (st.onCall) { app.say('You’re on a call. Hang up first to continue this one.'); return; }
     if (st.free) { app.say('Free is on. Turn it off in Settings to continue a call.'); return; }
-    const k = ORDER.find((x) => AG[x].name === log.agent) || st.space;
-    app.startCall(k, { continue: log.name });
+    const k = (rec && rec.agent) || ORDER.find((x) => AG[x].name === log.agent) || st.space;
+    const name = rec ? (log.name || await findSaved(app)) : log.name;
+    if (!name) { app.say('The call is still being saved. Try again in a moment.'); return; }
+    app.startCall(k, { continue: name });
   };
+
+  // One tap between Donna's and Moneypenny's chats (when this HQ has Moneypenny's line)
+  const other = st.chatAgent === 'donna' ? 'mp' : st.chatAgent === 'mp' ? 'donna' : null;
+  const mpLine = lineOf('mp');
+  const txSwapOn = !!other && !!mpLine && mpLine.ok && !mpLine.off;
+  // the other chat takes this one's place (Back still goes where it went)
+  const txSwap = () => { if (!other) return; app.setState({ chatAgent: other, space: other }); if (app.entered) app.entered('chat'); };
 
   // The rows in each space: her texts and her past calls
   const textsValue = (k) => {
@@ -613,7 +683,10 @@ function realVals(st, ctx, D0) {
       showFailed: failed.length > 0, retry: () => { if (failed[0]) failed[0].retry(); },
       pastCalls, logBubbles,
       txFirstDay, txPushLine, txLine, txLineOn: !!txLine, txReload: () => fetchLine(app, st.chatAgent), txReloadOn: !!(line && line.error && !line.ok),
-      txFailed: failed, txSendChat: () => sendFrom('textsChat', st.chatAgent),
+      txFailed: failed, txSendChat: () => { sendFrom('textsChat', st.chatAgent); fitBoxes(); },
+      txSwapOn, txSwap, txSwapName: other ? AG[other].name : '',
+      // the typing boxes grow; Enter sends on a computer and is a new line on a phone (chat, a space, home)
+      txBox: boxes(app, st),
       txCallsLine, txCallsLineOn: !!txCallsLine, txLogLength, txLogLine, txLogLineOn: !!txLogLine, continueCall
     }
   };

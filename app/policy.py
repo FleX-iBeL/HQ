@@ -846,8 +846,8 @@ class Policy:
             return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick, order, "
                                   "rename, undo, blocks, plan, unplan or repeat")
         # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
-        # week's look back, the debrief, undo. Making a game or changing its design is the team's (new, spec), from
-        # the design written in their map.
+        # week's look back, the debrief, undo. Making a game or changing its design (new, spec) is done from the design
+        # written in their map, in a Claude Code chat, not on a call or in a text.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "games.py"):
             if len(args) == 1 or args[1] in ("summary", "json", "show", "kinds", "check", "tick", "count", "note",
                                              "diary", "week", "debrief", "undo"):

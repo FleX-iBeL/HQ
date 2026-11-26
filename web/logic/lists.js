@@ -127,7 +127,17 @@ function realVals(st, ctx, D) {
   const lt = { groceries: st.listTab === 'groceries', bucket: st.listTab === 'bucket', wish: st.listTab === 'wish' };
   const retry = () => { app.setState({ lErr: false }); load(app).catch(() => {}); };
   const openMain = (key, it) => go('bucketItem', { bucketList: key, bucketPath: [it.id], bucketId: it.id, bDel: false });
-  const rowOf = (key) => (it) => ({ id: it.id, name: it.name, meta: metaOf(it), open: openMain(key, it) });
+  // A row: tap to open; its tick circle marks it done, or open again (a let-go one ticked is done).
+  const tickRow = (key, it) => (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const to = it.state === 'done' ? 'open' : 'done';
+    send(app, { do: to, item: it.id }, (x) => patchItem(x, key, it.id, (y) => { y.state = to; }));
+  };
+  const rowOf = (key) => (it) => {
+    const open = openMain(key, it);
+    return Object.assign({ id: it.id, name: it.name, meta: metaOf(it), open, toggle: tickRow(key, it), tickAria: it.state === 'done' ? 'Open ' + it.name + ' again' : 'Tick off ' + it.name,
+      key: (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); open(); } } }, tick(it.state === 'done'));
+  };
   const B = listOf(d, 'bucket'), W = listOf(d, 'wish');
   const part = (l) => {
     const items = l ? l.items : [];

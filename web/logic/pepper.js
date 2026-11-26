@@ -61,6 +61,8 @@ const READ_KEY = 'hq-coach-read'; // the same key the old page kept, so what was
 function readAt() { try { return parseFloat(localStorage.getItem(READ_KEY) || '0') || 0; } catch (e) { return 0; } }
 const unreadOf = (c) => ((c && c.thread) || []).filter((m) => m.from === 'agent' && m.at > readAt()).length;
 
+// A layer's Status line from the map, cut at about 260 characters as the old place did
+const statusLine = (s) => { const t = (s || '').trim(); return t.length > 260 ? t.slice(0, 257) + '…' : t; };
 const why = (e) => (e && e.status === 0 ? 'Couldn’t reach HQ. Try again.' : ((e && e.message) || 'That didn’t work. Try again.'));
 
 // A text box of this area, kept in core's drafts: Enter or its button hands the text on.
@@ -293,7 +295,8 @@ async function postGames(app, body, patch) {
   }
 }
 
-async function postCoaching(app, body) {
+async function postCoaching(app, body, patch) {
+  if (patch) app.setData(NAME, (old) => (old && old.coaching ? Object.assign({}, old, { coaching: patch(old.coaching) }) : old));
   try {
     const d = await app.api.post('api/coaching', body, 'coaching');
     app.setData(NAME, (old) => Object.assign({}, old, { coaching: d }));
@@ -349,6 +352,9 @@ function shapeReal(st, ctx, D, isDemo) {
     const c = L.counts || {}, tot = L.total || 1, put = (c.parked || 0) + (c.later || 0);
     Object.assign(l, {
       on: true, title: L.n + '. ' + plainName(L.name), word: cap(L.word), headline: (c.answered || 0) + ' of ' + L.total + ' answered',
+      // the layer's own Status line from the map, as the old Coaching place showed it
+      status: cap(statusLine(L.status)), hasStatus: !!statusLine(L.status),
+      onCallLine: st.onCall ? 'You’re on a call: just say what you’d like to work on.' : '', hasOnCall: !!st.onCall,
       pct: Math.round(100 * (c.answered || 0) / tot), put: Math.round(100 * put / tot),
       items: (L.items || []).map((it) => ({ key: it.key, q: it.q, mark: (MARK[it.mark] || MARK.open)[0], mc: (MARK[it.mark] || MARK.open)[1], note: it.note || '', hasNote: !!it.note })),
       empty: !(L.items || []).length,
@@ -358,16 +364,28 @@ function shapeReal(st, ctx, D, isDemo) {
   }
 
   // Check-ins
+  const lastDone = (c) => (c.last_done ? 'Last done ' + fmtDay(String(c.last_done).slice(0, 10)) : '');
+  const markDone = (c) => {
+    if (isDemo) return app.say('Done');
+    postCoaching(app, { done: c.key }, (old) => Object.assign({}, old, {
+      checkins: (old.checkins || []).map((x) => (x.key === c.key ? Object.assign({}, x, { due: false, done: new Date().toISOString().slice(0, 16), last_done: new Date().toISOString().slice(0, 16) }) : x)),
+      due: Math.max(0, (old.due || 0) - 1)
+    }));
+  };
   const ck = { note: m.note && !m.startOn ? m.note : '', retryOn: m.retryOn, due: [], rest: [], noneDue: false, hasRest: false, keptLine: '' };
   if (C && C.on && !cOff) {
     const SUB = { week: who + ' looks back at the week with you and sets up the next one.', game: who + ' looks back at the game with you: was it fun, was it useful, what did you learn.', checkin: who + ' looks at how it’s going with you, and what comes next.' };
     const cs = C.checkins || [];
     ck.due = cs.filter((c) => c.due).map((c) => ({
       key: c.key, kicker: 'Due · ' + low(c.line || ''), title: c.title, sub: SUB[c.kind] || '', score: (c.score || []).map((t, i) => ({ k: i, t })), hasScore: !!(c.score || []).length,
-      start: () => startAbout(c.key), later: () => (isDemo ? app.say('Not now') : postCoaching(app, { later: c.key }))
+      last: lastDone(c), hasLast: !!lastDone(c),
+      start: () => startAbout(c.key), done: () => markDone(c), later: () => (isDemo ? app.say('Not now') : postCoaching(app, { later: c.key }))
     }));
-    ck.rest = cs.filter((c) => !c.due).map((c) => ({ key: c.key, title: c.title, when: c.done ? 'Done ' + fmtDay(String(c.done).slice(0, 10)) : (c.line || '').replace(/^Next: /, '') }));
-    if (C.map && !cs.some((c) => c.kind === 'week')) ck.rest.unshift({ key: 'noweek', title: 'The weekly look back', when: 'Not set yet' });
+    ck.rest = cs.filter((c) => !c.due).map((c) => {
+      const sub = [c.when, lastDone(c)].filter(Boolean).join(' · ');
+      return { key: c.key, title: c.title, when: c.done ? 'Done ' + fmtDay(String(c.done).slice(0, 10)) : (c.line || '').replace(/^Next: /, ''), sub, hasSub: !!sub };
+    });
+    if (C.map && !cs.some((c) => c.kind === 'week')) ck.rest.unshift({ key: 'noweek', title: 'The weekly look back', when: 'Not set yet', sub: 'Its moment comes from your ideal week, in a session.', hasSub: true });
     ck.noneDue = !ck.due.length;
     ck.hasRest = ck.rest.length > 0;
     if (C.map && !C.kept) ck.keptLine = 'HQ starts keeping your check-ins in a moment.';
@@ -378,11 +396,14 @@ function shapeReal(st, ctx, D, isDemo) {
   // The games
   const gOff = offLine(C, 'games') || (G && G.off === 'Free' ? offLine(G, 'games') : '');
   const list = (G && G.games) || [];
-  const gs = { note: '', retryOn: false, live: [], past: [], hasPast: false };
+  const designed = (C && C.on && !cOff && C.games_designed) || [];
+  const waitLine = designed.length ? (designed.length === 1 ? designed[0] + ' is designed and waiting: it gets set up in your next chat with Claude Code.'
+    : designed.join(' and ') + ' are designed and waiting: they get set up in your next chat with Claude Code.') : '';
+  const gs = { note: '', retryOn: false, live: [], past: [], hasPast: false, waitLine, hasWait: !!waitLine };
   if (!G) { gs.note = errs.games ? 'Couldn’t load the games. ' + why(errs.games) : 'Loading…'; gs.retryOn = !!errs.games; }
   else if (gOff) gs.note = gOff;
   else if (G.error) gs.note = G.error;
-  else if (!list.length) gs.note = 'No six-week game yet. Design one with ' + who + ' on a call, and it shows up here.';
+  else if (!list.length) gs.note = waitLine ? '' : 'No six-week game yet. Design one with ' + who + ' on a call, and it shows up here.';
   else {
     const row = (g) => { const [s, c] = standing(g); return { key: g.id, kicker: g.phase === 'playing' ? 'Playing · day ' + g.day + ' of ' + g.length : where(g), name: g.name, sentence: g.game || '', stand: s, standC: c, open: () => app.go('game', { gameId: g.id }) }; };
     gs.live = list.filter((g) => g.phase !== 'past').map(row);
@@ -440,7 +461,7 @@ function shapeReal(st, ctx, D, isDemo) {
   const off = !!cOff;
   const rows = [
     ['The map', !C ? '' : off ? 'Off' : !C.map ? 'Not started' : openLayer ? plainName(openLayer.name) + ' ' + ((openLayer.counts || {}).answered || 0) + ' of ' + openLayer.total : 'Done', 'map'],
-    ['The six-week game', !G ? '' : off ? 'Off' : playingG ? gameShort(playingG) : list.length ? 'None playing' : 'None yet', 'games'],
+    ['The six-week game', !G ? '' : off ? 'Off' : playingG ? gameShort(playingG) : designed.length ? 'Waiting to be set up' : list.length ? 'None playing' : 'None yet', 'games'],
     ['Check-ins', !C ? '' : off ? 'Off' : dueC.length ? NUM[Math.min(dueC.length, 6)] + ' due' : 'None due', 'checkin', dueC.length ? '#b42318' : null, dueC.length ? '600' : null],
     ['Coaching line', unread ? unread + ' new' : '', ['chat', { chatAgent: 'pepper' }], unread ? '#c2410c' : null, unread ? '600' : null],
     ['Her notes', '', 'notes'],

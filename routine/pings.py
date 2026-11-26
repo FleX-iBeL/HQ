@@ -869,6 +869,35 @@ def nudge_later(words: str, until: dt.datetime | None = None, now: float | None 
     return _change_nudge(words, lambda x: x.update(next=time.strftime(FMT, time.localtime(at)), paused=True))
 
 
+def nudge_wake(words: str, now: float | None = None) -> list[dict]:
+    """A paused nudge goes on: no longer quiet, the next one at its usual gap from now, never later than the quiet
+    time it had. Only a paused one."""
+    t = now or time.time()
+    with _Lock():
+        s = read()
+        hit = [x for x in find_nudges(words, s) if x.get("paused")]
+        if len(hit) == 1:
+            x = hit[0]
+            at = _next_ok(t + nudge_gap(x, t))
+            quiet = _local_ts(x.get("next") or "")
+            x.pop("paused", None)
+            x["next"] = time.strftime(FMT, time.localtime(min(at, quiet) if quiet > t else at))
+            _write(s)
+    return hit
+
+
+def nudge_reopen(n: int) -> dict | None:
+    """Undo of Done: nudge N, still kept among the done ones, is open again as it was (its next time unchanged)."""
+    with _Lock():
+        s = read()
+        x = next((y for y in s.get("nudges") or [] if int(y.get("n") or 0) == int(n) and y.get("done")), None)
+        if x is None:
+            return None
+        x.pop("done", None)
+        _write(s)
+    return x
+
+
 def _nudge_due(s: dict, t: float) -> list[tuple[str, str]]:
     """Marks in S the nudges to text now and returns [(why, facts)]. One at night is moved to the morning, quietly."""
     out = []

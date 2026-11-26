@@ -128,11 +128,28 @@ export class Component extends DCLogic {
         let k = null; try { k = { donna: 'donna', pepper: 'pepper', moneypenny: 'mp' }[localStorage.getItem('hq-agent')]; } catch (e) { /* none */ }
         if (k && k !== this.state.space && this.state.screen === 'home') this.setState({ space: k });
       }
-      // Escape closes what's open on top: a sheet, then the "End the call?" question
+      // Keys: while a tutorial piece runs, the arrows step through it and Escape stops it. Otherwise Escape closes
+      // what's open on top (a sheet, then the call's questions: "Are you sure you want to cancel?", "End the call?") and else goes back one screen, as the
+      // back button does; never while a box is being typed in (there Escape only leaves the box).
       document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape' || e.defaultPrevented) return;
-        if (this.state.sheet) { e.preventDefault(); this.setState({ sheet: null }); }
-        else if (this.state.confirmHang) { e.preventDefault(); this.setState({ confirmHang: false }); }
+        if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+        const st = this.state;
+        if (st.tour >= 0 && (e.key === 'Escape' || e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+          const v = this.renderVals();
+          if (v.tourOn || (v.tourv && v.tourv.on)) {
+            e.preventDefault();
+            (e.key === 'Escape' ? v.tourClose : e.key === 'ArrowRight' ? v.tourNext : v.tourBack)();
+            return;
+          }
+        }
+        if (e.key !== 'Escape') return;
+        const t = e.target;
+        if (t && t.closest && t.closest('input, textarea, select, [contenteditable]')) { if (t.blur) t.blur(); return; }
+        if (st.sheet) { e.preventDefault(); this.setState({ sheet: null }); }
+        else if (st.cCxAsk) { e.preventDefault(); this.setState({ cCxAsk: false }); }
+        else if (st.confirmHang) { e.preventDefault(); this.setState({ confirmHang: false }); }
+        else if (st.incoming) return;
+        else if (st.screen !== 'home') { e.preventDefault(); this.back(); }
       });
       document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.setState({ clockNow: Date.now() }); this.loadAll(false); } });
       // Outside demo mode the offline state is the real one; the review switch is demo only.
@@ -156,6 +173,12 @@ export class Component extends DCLogic {
   }
   renderVals() {
     const st = this.state;
+    // A ringing call: ask the server once what it is about (the line under "… is calling").
+    if (st.cRing && st.cRing.n != null && !this.demoMode && this._ringAsked !== st.cRing.n && this.api) {
+      this._ringAsked = st.cRing.n;
+      const n = st.cRing.n;
+      Promise.resolve().then(() => this.api.get('api/ring/' + encodeURIComponent(n))).then((r) => { if (r && !r.error) this.setData('ring', Object.assign({ n }, r)); }).catch(() => { /* the line stays general */ });
+    }
     if (this._mountedOnce && !this.demoMode && st.space !== this._keptSpace && typeof localStorage !== 'undefined') {
       this._keptSpace = st.space;
       try { localStorage.setItem('hq-agent', { donna: 'donna', pepper: 'pepper', mp: 'moneypenny' }[st.space] || 'donna'); } catch (e) { /* private mode */ }

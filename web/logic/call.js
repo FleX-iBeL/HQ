@@ -17,6 +17,7 @@
 // joins), her voice on an <audio> outside the templates, so it keeps playing on every screen and
 // through a design or device switch.
 import * as demo from './demo/call.js';
+import { rich } from '../engine.js';
 
 export const NAME = 'call';
 export const WIRED = true;
@@ -28,7 +29,8 @@ export const start = {
   yes: null, voiceOn: true, second: null, takenBack: false, incoming: false, demo: false,
   // the real call (not used in demo mode)
   cs: 'idle', orb: 'listening', cLines: [], cPanel: [], cStarted: 0, cNow: 0, cMsg: '', cAgain: false, cLineDown: false,
-  cCancel: false, cHold: false, cTrans: false, cUntapped: false, cAnswered: -1, cRing: null, cFree: false, cLabel: ''
+  cCancel: false, cHold: false, cTrans: false, cUntapped: false, cAnswered: -1, cRing: null, cFree: false, cLabel: '',
+  cSeen: 0, cCxAsk: false, cEnded: null, cDev: 0
 };
 
 const PHASES = ['Calling…', 'Your turn', 'Listening…', 'Thinking…', 'Speaking'];
@@ -54,7 +56,8 @@ const clock = (ms) => { const d = new Date(ms); return two(d.getHours()) + ':' +
 // Everything of the live call that isn't render state. One call at a time.
 const rt = { pc: null, dc: null, stream: null, audio: null, ping: null, tickT: null, audioCtx: null, wake: null,
   secT: null, holdT: null, pressId: null, holding: false, wasMuted: false, tapUsed: false, linger: null, cancellable: false,
-  retryT: null, talkGate: null, turn: 0, hooked: false, opts: null, startedOnce: false };
+  retryT: null, talkGate: null, turn: 0, hooked: false, opts: null, startedOnce: false,
+  devList: [], micKey: '', outKey: '', micSwap: 0, btFixing: false, cancelSince: 0, endHow: '' };
 
 function audioEl() {
   if (!rt.audio) {
@@ -89,11 +92,183 @@ function applyVoice(on) {
   const s = a.srcObject;
   if (s && s.getAudioTracks) s.getAudioTracks().forEach((t) => { t.enabled = on; });
 }
-// Where her voice plays, as chosen in Settings (hq-out), where the browser can.
+// ---------------------------------------------------------------- microphone and sound
+// Which mic the call listens with and, where the browser can (setSinkId), where her voice plays: chosen
+// in Settings or during the call (the call's Microphone and sound sheet), kept on this device by id and
+// name (hq-mic, hq-out); a choice that isn't here falls back to Default. The iPhone (any browser there)
+// decides the mic and sound itself; WebKit keeps one mic open at a time, so the old one is let go first.
+// On the Mac, other sound can stay at its normal volume during a call (hq-keep-sound): the mic is then
+// opened without echo cancelling, unless her voice plays through the MacBook's own speakers. With the mic
+// on Default and Bluetooth headphones on, the call listens with the MacBook's own mic, so the headphones
+// keep their full sound; in the HQ app the sound is bounced once to the speakers and back when their mic
+// was opened anyway.
+const UA = typeof navigator === 'undefined' ? '' : (navigator.userAgent || '');
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1);
+const ONE_MIC = IS_IOS || (/AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg/.test(UA));
+const IS_PHONE = IS_IOS || /Android.*Mobile|Mobile.*Android/.test(UA)
+  || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches);
+const IS_MAC = /Macintosh/.test(UA) && !IS_IOS;
+const CAN_SINK = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+const BT = /AirPods|Bluetooth|Buds|Beats|Headphones|Headset|Hands-?Free|Bose|Sony WH|Sony WF|WH-1000|WF-1000|Jabra|Jaybird|Powerbeats|Sennheiser|Shokz|AfterShokz/i;
+const OWN_MIC = /MacBook.*Microphone|Built-in Microphone|Internal Microphone|iMac Microphone/i;
+const OWN_SPK = /MacBook.*Speakers|Built-in Output|Internal Speakers|iMac Speakers/i;
+const devOf = (kind) => (rt.devList || []).filter((d) => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+const devFind = (list, p) => ((p && p.id) ? (list.find((d) => d.deviceId === p.id) || (p.label && list.find((d) => d.label === p.label)) || null) : null);
+const defDev = (kind) => (rt.devList || []).find((d) => d.kind === kind && d.deviceId === 'default') || (rt.devList || []).find((d) => d.kind === kind) || null;
+const ownMic = () => devOf('audioinput').find((d) => OWN_MIC.test(d.label || '') && !BT.test(d.label || '')) || null;
+const baseName = (l) => String(l || '').replace(/^(Default|Communications) - /, '').replace(/\s*\(.*\)\s*$/, '').trim();
+const keepSound = () => ls.get('hq-keep-sound') === 'on';
+function btOn() {
+  const o = defDev('audiooutput'), i = defDev('audioinput');
+  return !!((o && BT.test(o.label || '')) || (i && BT.test(i.label || '')));
+}
+// Where her voice goes: the output the computer already plays on stays on the default path (a named
+// output plays a call's voice much quieter in Chrome on the Mac). On a phone it follows the mic.
+function sinkFor() {
+  const d = IS_PHONE ? null : devFind(devOf('audiooutput'), pick('hq-out'));
+  if (!d) return { id: '', d: null };
+  const def = (rt.devList || []).find((x) => x.kind === 'audiooutput' && x.deviceId === 'default');
+  const isDef = def && ((d.groupId && d.groupId === def.groupId) || (!!d.label && baseName(def.label) === baseName(d.label)));
+  return { id: isDef ? '' : d.deviceId, d };
+}
+function onSpeakers() { const { d } = sinkFor(), o = d || defDev('audiooutput'); return !!(o && OWN_SPK.test(o.label || '')); }
+async function listDevices(app) {
+  try { rt.devList = navigator.mediaDevices && navigator.mediaDevices.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : []; } catch (e) { rt.devList = []; }
+  if (app) app.setState((x) => ({ cDev: (x.cDev || 0) + 1 }));
+}
 function applySink() {
-  const p = pick('hq-out'); const a = rt.audio;
-  if (!a || !p || !p.id || !a.setSinkId) return;
-  a.setSinkId(p.id).catch(() => {});
+  rt.outKey = (pick('hq-out') || {}).id || '';
+  const a = rt.audio; if (!CAN_SINK || !a) return;
+  const { id } = sinkFor();
+  const moved = a.sinkId !== id;
+  try {
+    a.setSinkId(id).then(() => {
+      // a new output gets a fresh start of her voice on it, at full volume
+      a.volume = 1;
+      if (moved && a.srcObject) { const s = a.srcObject; a.srcObject = null; a.srcObject = s; a.play().catch(() => {}); }
+    }).catch(() => {});
+  } catch (e) { /* this browser can't */ }
+  try { if (rt.audioCtx && rt.audioCtx.setSinkId) rt.audioCtx.setSinkId(id).catch(() => {}); } catch (e) { /* nor here */ }
+}
+// What the call's mic asks for: the chosen mic exactly, else the default (see above for the Mac).
+function micAudio(chosen) {
+  const raw = IS_MAC && !IS_PHONE && keepSound() && !onSpeakers();
+  const a = raw ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    : { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  const p = chosen && pick('hq-mic');
+  if (!p || !p.id) {
+    const own = chosen && IS_MAC && !IS_PHONE && btOn() ? ownMic() : null;
+    return own ? Object.assign({}, a, { deviceId: { exact: own.deviceId } }) : a;
+  }
+  const d = devFind(devOf('audioinput'), p);
+  return Object.assign({}, a, { deviceId: { exact: d ? d.deviceId : p.id } });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const trackDev = (t) => { let id = ''; try { id = (t.getSettings && t.getSettings().deviceId) || ''; } catch (e) { /* none */ } return { id, label: (t && t.label) || '' }; };
+// A new mic chosen on a call takes over at once: opened, sent in place of the old one (no new connection,
+// the call goes on), the old one stopped. Muted stays muted, a hold stays a hold. Afterwards the page checks
+// which mic it really got and whether it sends any sound, and says so when not.
+async function switchMic(app) {
+  rt.micKey = ((pick('hq-mic') || {}).id || '') + '|' + keepSound();
+  const pc = rt.pc, old = rt.stream;
+  if (!pc || !old || app.state.cs !== 'live') return;
+  const n = ++rt.micSwap, oldT = old.getAudioTracks()[0];
+  const sender = pc.getSenders().find((x) => !x.track || x.track.kind === 'audio');
+  if (!sender) return;
+  const was = old.getAudioTracks().some((x) => x.enabled), before = oldT ? trackDev(oldT) : { id: '', label: '' };
+  const say = (m) => app.setState({ cMsg: m, cAgain: false });
+  if (app.state.cMsg) app.setState({ cMsg: '' });
+  let fresh = null, back = false;
+  if (ONE_MIC) old.getTracks().forEach((x) => x.stop());
+  try { fresh = await navigator.mediaDevices.getUserMedia({ audio: micAudio(true) }); }
+  catch (e) {
+    if (!ONE_MIC) { say('That microphone couldn’t be opened, so the call keeps the one it had.'); return; }
+    const a = micAudio(false);
+    try { fresh = await navigator.mediaDevices.getUserMedia({ audio: before.id ? Object.assign({}, a, { deviceId: { exact: before.id } }) : a }); }
+    catch (e2) { try { fresh = await navigator.mediaDevices.getUserMedia({ audio: a }); } catch (e3) { fresh = null; } }
+    if (!fresh) { say('No microphone could be opened. Hang up and call again.'); return; }
+    back = true;
+  }
+  const t = fresh.getAudioTracks()[0];
+  if (n !== rt.micSwap || !t || rt.stream !== old || !rt.pc) { fresh.getTracks().forEach((x) => x.stop()); return; }
+  t.enabled = was;
+  try { await sender.replaceTrack(t); }
+  catch (e) { fresh.getTracks().forEach((x) => x.stop()); say('The call couldn’t switch microphones, so it keeps the one it had.'); return; }
+  if (rt.stream !== old) { fresh.getTracks().forEach((x) => x.stop()); return; }
+  rt.stream = fresh; if (!ONE_MIC) old.getTracks().forEach((x) => x.stop());
+  await listDevices(app);
+  if (back) { say('That microphone couldn’t be opened, so the call went back to the one it had.'); return; }
+  const want = devFind(devOf('audioinput'), pick('hq-mic')), got = trackDev(t);
+  const same = (x, y) => (x.label && y.label ? baseName(x.label) === baseName(y.label) : !x.id || x.id === y.deviceId);
+  if (want && (got.id || got.label) && !same(got, want)) {
+    const kept = got.label ? baseName(got.label) : 'the microphone it had';
+    say(IS_IOS ? 'The iPhone kept ' + kept + ': during a call iOS picks the microphone itself. Change it in Control Center.'
+      : 'The browser kept ' + kept + '. Hang up, pick the microphone, and call again.');
+    return;
+  }
+  // a mic that opens but sends nothing at all (no sound energy in three seconds, while not muted)
+  const energy = async () => { let e = null; try { (await pc.getStats(sender.track)).forEach((r) => { if (r.type === 'media-source' && typeof r.totalAudioEnergy === 'number') e = r.totalAudioEnergy; }); } catch (x) { /* none */ } return e; };
+  const e0 = pc.getStats ? await energy() : null;
+  if (e0 === null) return;
+  await sleep(3000);
+  if (n !== rt.micSwap || rt.stream !== fresh || !rt.pc || !t.enabled) return;
+  const e1 = await energy();
+  if (t.readyState === 'ended' || t.muted || (e1 !== null && e1 === e0)) say('That microphone sends no sound, so she can’t hear you. Pick another one, or Default.');
+}
+// The call ended up on the Bluetooth headphones' own mic (before the browser named the devices, or
+// headphones put on during a call): move it to the MacBook's own mic, and bounce the sound in the HQ app.
+async function keepHeadphones(app) {
+  if (rt.btFixing || !IS_MAC || IS_PHONE || !rt.stream || app.state.cs === 'idle' || (pick('hq-mic') || {}).id) return;
+  const t = rt.stream.getAudioTracks()[0], own = ownMic();
+  if (!t || !own || !BT.test(t.label || '') || OWN_MIC.test(t.label || '')) return;
+  rt.btFixing = true;
+  try {
+    for (let i = 0; i < 60 && app.state.cs === 'connecting'; i++) await sleep(250);
+    if (!rt.pc || app.state.cs !== 'live') return;
+    await switchMic(app);
+    const now = rt.stream && rt.stream.getAudioTracks()[0];
+    if (now && !BT.test(now.label || '')) { try { window.webkit.messageHandlers.hqAudio.postMessage({ do: 'bounce' }); } catch (e) { /* not the HQ app */ } }
+  } catch (e) { /* stays as it is */ } finally { rt.btFixing = false; }
+}
+// The call's Microphone and sound sheet: pick the mic and (on a computer) the speaker, other sound on the
+// Mac, and once, the device names (a browser names them only after a mic was allowed).
+function soundSheet(app, st) {
+  const rows = [];
+  const save = (key, d) => {
+    if (d) ls.set(key, JSON.stringify({ id: d.deviceId, label: d.label || '' })); else { try { localStorage.removeItem(key); } catch (e) { /* none */ } }
+    app.setState({ [key === 'hq-mic' ? 'mic' : 'out']: d ? d.deviceId : '' });
+  };
+  const add = (list, key, word, kind) => {
+    const p = pick(key), hit = devFind(list, p);
+    const use = (on) => word + (on ? ' · in use' : '');
+    rows.push({ a: 'Default', b: use(!hit && !(p && p.id)), pick: () => { save(key, null); if (kind === 'mic') switchMic(app); else applySink(); } });
+    list.forEach((d, i) => rows.push({ a: d.label || word + ' ' + (i + 1), b: use(!!hit && hit.deviceId === d.deviceId),
+      pick: () => { save(key, d); if (kind === 'mic') switchMic(app); else applySink(); } }));
+  };
+  const ins = devOf('audioinput'), outs = devOf('audiooutput');
+  const can = typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices;
+  if (!can) rows.push({ a: 'This browser can’t choose one', b: 'The call uses the default microphone', pick: () => {} });
+  else {
+    add(ins, 'hq-mic', 'Microphone', 'mic');
+    if (!IS_PHONE && CAN_SINK && outs.length) add(outs, 'hq-out', 'Her voice', 'out');
+    else rows.push({ a: IS_IOS ? 'Where her voice plays' : 'Her voice', b: IS_PHONE ? (IS_IOS ? 'The iPhone decides: change it in Control Center' : 'It follows the microphone')
+      : 'This browser can’t choose: it plays where the computer’s own sound goes', pick: () => {} });
+    if (IS_MAC && !IS_PHONE) {
+      const k = keepSound();
+      rows.push({ a: 'Other sound: ' + (k ? 'Normal' : 'Lower'),
+        b: !k ? 'Music and videos turn down while you’re on a call. Tap for normal'
+          : onSpeakers() ? 'Stays normal with headphones on; through the MacBook’s speakers it still turns down. Tap to lower'
+            : 'Music and videos stay at their normal volume. Tap to lower',
+        pick: () => { ls.set('hq-keep-sound', k ? 'off' : 'on'); app.setState((x) => ({ cDev: (x.cDev || 0) + 1 })); switchMic(app); } });
+    }
+    if (!ins.some((d) => d.label) && navigator.mediaDevices.getUserMedia) {
+      rows.push({ a: 'Show device names', b: 'HQ asks once, so each one shows its name', pick: async () => {
+        try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch (e) { /* not allowed */ }
+        listDevices(app);
+      } });
+    }
+  }
+  return { title: IS_PHONE ? 'Microphone and sound' : 'Microphone and sound on this call', rows };
 }
 function micOpen(on) { if (rt.stream) rt.stream.getAudioTracks().forEach((t) => { t.enabled = on; }); }
 // The moment a hold turns into talking: a short buzz (Android's vibrate; on an iPhone from iOS 18 a hidden
@@ -147,15 +322,15 @@ function send(obj) {
   try { if (rt.dc && rt.dc.readyState === 'open') { rt.dc.send(JSON.stringify(obj)); return true; } } catch (e) { /* closed */ }
   return false;
 }
-// The microphone chosen in Settings (hq-mic), else the default one.
+// The microphone chosen (hq-mic), else the default one; see micAudio.
 async function openMic(app) {
-  const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-  const p = pick('hq-mic');
-  const want = p && p.id ? Object.assign({}, base, { deviceId: { exact: p.id } }) : base;
+  await listDevices(null);
+  rt.micKey = ((pick('hq-mic') || {}).id || '') + '|' + keepSound();
+  const want = micAudio(true);
   try { return await navigator.mediaDevices.getUserMedia({ audio: want }); } catch (e) {
     if (!want.deviceId || !/Overconstrained|NotFound|NotReadable/.test((e && e.name) || '')) throw e;
     app.say('The chosen microphone isn’t here, so the default one is used.');
-    return navigator.mediaDevices.getUserMedia({ audio: base });
+    return navigator.mediaDevices.getUserMedia({ audio: micAudio(false) });
   }
 }
 function gathered(pc) {
@@ -172,12 +347,32 @@ function scrollLogs() {
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
   })));
 }
+// The typing box grows line by line up to about six lines, then scrolls inside. A phone (a touch
+// screen) gets a new line on Enter and sends with Send; a computer sends on Enter, Shift+Enter is a new line.
+const BOX_MAX = 150;
+export const coarse = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+export function fit(el) {
+  if (!el || !el.style) return;
+  el.style.height = 'auto';
+  const h = Math.min(el.scrollHeight, BOX_MAX);
+  el.style.height = h + 'px';
+  el.style.overflowY = el.scrollHeight > BOX_MAX ? 'auto' : 'hidden';
+}
+export function fitRef(el) { if (el) requestAnimationFrame(() => fit(el)); }
+export function fitBoxes() {
+  if (typeof document === 'undefined') return;
+  // after the render that cleared the box (a render comes on the next frame, or within 100 ms when hidden)
+  const all = () => document.querySelectorAll('textarea[data-hq-grow]').forEach(fit);
+  requestAnimationFrame(() => requestAnimationFrame(all));
+  setTimeout(all, 150);
+}
 // Her voice: the one picked on this device (hq-voice-<id>), else hers from the server.
 function voiceFor(id, agents) {
   return ls.get('hq-voice-' + id) || ls.get('hq-voice') || ((agents || {})[APP[id]] || {}).voice || '';
 }
 
-// Her lines come with **bold** and *italics* marks; the transcript shows them as plain text.
+// Her lines come with **bold** and *italics* marks: the transcript draws them (rich); the ask card's
+// one line shows them plain.
 function plainText(s) {
   return String(s || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[\s(])\*([^*\s](?:[^*]*[^*\s])?)\*(?=[\s).,!?:;]|$)/g, '$1$2').replace(/^#{1,6}\s+/gm, '');
 }
@@ -203,17 +398,31 @@ const leaveCall = (x) => {
   if (x.screen !== 'call' && x.screen !== 'transcript') return { stack };
   return { screen: stack.length ? stack.pop() : 'home', stack };
 };
+// When the call ends while he reads it (the transcript, the Mac's call screen with its lines, or the call
+// screen when she or the line ended it), what was said stays readable: the call's record opens with
+// Continue this call (it calls back and goes on). His own Hang up on the phone's call screen goes back.
 function ended(app, words) {
   rt.turn++;
+  const how = rt.endHow; rt.endHow = '';
   closeRtc();
-  app.setState((x) => Object.assign({ onCall: false, confirmHang: false, cs: 'idle', cHold: false, cTrans: false, cCancel: false, cUntapped: false,
-    cMsg: '', cAgain: false, cLineDown: false, cRing: null, demo: false, second: null, sheet: x.sheet === 'add' ? null : x.sheet }, leaveCall(x)));
+  const st0 = app.state;
+  const inline = app.device === 'mac' && st0.design !== 'thread';
+  const reading = st0.screen === 'transcript' || (st0.screen === 'call' && (inline || how !== 'button' || rt.fromT));
+  rt.fromT = false;
+  const said = st0.cLines.some((l) => !l.old && (l.who === 'me' || l.who === 'hq'));
+  const keep = !app.demoMode && st0.onCall && reading && said && how !== 'switch' && how !== 'callback';
+  const record = keep ? { agent: st0.callAgent, lines: st0.cLines.filter((l) => l.who !== 'divider'), started: st0.cStarted, at: Date.now(), before: rt.lastSaved || '' } : null;
+  app.setState((x) => Object.assign({ onCall: false, confirmHang: false, cs: 'idle', cHold: false, cTrans: false, cCancel: false, cCxAsk: false, cUntapped: false,
+    cMsg: '', cAgain: false, cLineDown: false, cRing: null, demo: false, second: null, sheet: x.sheet === 'add' || x.sheet === 'callSound' ? null : x.sheet },
+  record ? { cEnded: record, screen: 'callLog', txLog: '__live', space: record.agent, stack: x.stack.filter((k) => k !== 'call' && k !== 'transcript') } : leaveCall(x)));
+  if (record && app.entered) app.entered('callLog');
   if (words) app.say(words);
   // the call is saved after its end (the after-call work): past calls read again, as the old page showed the last call
   if (!app.demoMode && app.entered) for (const ms of [3000, 20000]) setTimeout(() => app.entered('pastCalls'), ms);
 }
 // Hang up: the server first (so the after-call work starts at once), then close.
-function hangup(app, words) {
+function hangup(app, words, how) {
+  rt.endHow = how || 'agent';
   send({ type: 'hangup' });
   const mine = rt.turn;
   setTimeout(() => { if (rt.turn === mine) ended(app, words); }, 250);
@@ -242,7 +451,18 @@ function setOrb(app, js) {
 }
 function hideCancel(app) {
   rt.cancellable = false; clearTimeout(rt.linger); rt.linger = null;
-  if (app.state.cCancel) app.setState({ cCancel: false });
+  if (app.state.cCancel || app.state.cCxAsk) app.setState({ cCancel: false, cCxAsk: false });
+}
+// Take that back: at once while she hasn't started answering (or within three seconds of his turn going
+// out); later the call asks first, and the server makes it his turn again.
+const CANCEL_ASK_MS = 3000;
+function sendCancel(app) {
+  if (!app.state.cCancel) return;
+  const early = rt.cancellable;
+  if (!send({ type: 'cancel' })) return;
+  hideCancel(app);
+  if (early) setOrb(app, 'listening');
+  app.say('Taken back. She won’t act on your last line');
 }
 function onMessage(app, ev) {
   let m;
@@ -252,12 +472,11 @@ function onMessage(app, ev) {
   if (m.type === 'hq-state') setOrb(app, m.state);
   else if (m.type === 'hq-chat' && m.text) {
     const who = m.who === 'hq' || m.who === 'filler' ? m.who : 'me';
-    const text = who === 'me' ? String(m.text) : plainText(m.text);
-    app.setState((x) => ({ cLines: x.cLines.concat([{ who, text, agent: m.agent || '', cancelled: false }]) }));
+    app.setState((x) => ({ cLines: x.cLines.concat([{ who, text: String(m.text), agent: m.agent || '', cancelled: false, at: clock(Date.now()) }]) }));
     scrollLogs();
   } else if (m.type === 'hq-cancellable') {
     rt.cancellable = m.on === true && app.state.cs === 'live';
-    if (rt.cancellable) { clearTimeout(rt.linger); rt.linger = null; app.setState({ cCancel: true }); }
+    if (rt.cancellable) { rt.cancelSince = Date.now(); clearTimeout(rt.linger); rt.linger = null; app.setState({ cCancel: true }); }
   } else if (m.type === 'hq-cancelled') {
     app.setState((x) => {
       const lines = x.cLines.slice();
@@ -271,14 +490,14 @@ function onMessage(app, ev) {
 }
 // She put another agent on: this call ends as a hang-up does and the other one is called, continuing it.
 function switchTo(app, id, name) {
-  hangup(app);
+  hangup(app, '', 'switch');
   if (!id) return;
   setTimeout(() => { if (app.state.cs === 'idle') app.startCall(id, name ? { continue: name, handover: true } : null); }, 700);
 }
 // "Hang up and call me back": as on the old page, the page loads itself again (fresh page code) and
 // calls the same agent at once, continuing this call. Kept for the reload in this tab only.
 function callMeBack(app, id, name) {
-  hangup(app);
+  hangup(app, '', 'callback');
   try { sessionStorage.setItem('hq-callback', JSON.stringify({ agent: id || app.state.callAgent, call: name || '', at: Date.now() })); } catch (e) { /* no storage */ }
   setTimeout(() => location.reload(), 900);
 }
@@ -322,6 +541,7 @@ async function connect(app) {
       if (pc.connectionState === 'connected' && app.state.cs !== 'live') {
         app.setState((x) => ({ cs: 'live', orb: x.orb === 'connecting' ? 'listening' : x.orb, cStarted: x.cStarted || Date.now(), cNow: Date.now() }));
         clearInterval(rt.secT); rt.secT = setInterval(() => app.setState({ cNow: Date.now() }), 1000);
+        keepHeadphones(app);
       }
       if ((pc.connectionState === 'failed' || pc.connectionState === 'closed') && app.state.cs !== 'idle') ended(app, 'The call ended');
     };
@@ -406,6 +626,8 @@ function hook(app) {
     ev.preventDefault(); ev.stopPropagation();
     letGo(app, 'space');
   }, true);
+  // A mic or headphones plugged in or out: the list again, and the headphones kept in full sound.
+  try { if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => listDevices(app).then(() => keepHeadphones(app))); } catch (e) { /* none */ }
   // Closing the page counts as hanging up.
   window.addEventListener('pagehide', (ev) => { if (!ev.persisted) send({ type: 'hangup' }); });
   document.addEventListener('visibilitychange', async () => {
@@ -445,17 +667,20 @@ export const methods = {
     this.setState((x) => ({
       onCall: true, callAgent: id, confirmHang: false, muted: false, incoming: false, demo: isDemo, second: null,
       cs: 'connecting', orb: 'connecting', cLines: [], cPanel: [], cStarted: 0, cNow: Date.now(), cMsg: '', cAgain: false, cLineDown: false,
-      cCancel: false, cHold: false, cTrans: false, cUntapped: false, cAnswered: -1, cRing: null, cFree: plain, cLabel: '',
+      cCancel: false, cHold: false, cTrans: false, cUntapped: false, cAnswered: -1, cRing: null, cFree: plain, cLabel: '', cSeen: 0, cCxAsk: false,
       tour: isDemo ? -1 : x.tour,
       screen: 'call', stack: x.screen === 'call' ? x.stack : x.stack.concat([x.screen])
     }));
     const go = () => connect(this);
     if (!plain) sendHere(this, true);
+    // the newest saved call before this one, so the record of this call is known once it's saved
+    rt.lastSaved = null;
+    this.api.get('api/last-call').then((d) => { if (rt.lastSaved === null) rt.lastSaved = (d && d.name) || ''; }).catch(() => {});
     if (o.continue && !plain) {
       // a continued call starts with the earlier call's lines, then a line where this one begins
       this.api.get('api/calls/' + encodeURIComponent(o.continue)).then((data) => {
         const lines = ((data && data.lines) || []).filter((l) => l.text && l.who !== 'filler')
-          .map((l) => ({ who: l.who === 'hq' ? 'hq' : 'me', text: l.who === 'hq' ? plainText(l.text) : l.text, agent: l.agent || (data && data.agent) || '', cancelled: !!l.cancelled, old: true }));
+          .map((l) => ({ who: l.who === 'hq' ? 'hq' : 'me', text: l.text, agent: l.agent || (data && data.agent) || '', cancelled: !!l.cancelled, old: true, at: l.at || l.time || '' }));
         const div = o.handover ? named(id) + ' picked up' : (o.callback ? 'Called you back' : 'Continued now');
         this.setState({ cLines: lines.concat([{ who: 'divider', text: div, agent: '', cancelled: false }]) });
       }).catch(() => {}).then(go);
@@ -544,6 +769,8 @@ function demoVals(st, ctx, D) {
       // what the templates gained for the real call, with the design's own words here
       cl: { elapsed: '00:42', started: '14:19', ask: 'shall I move the gym to 20:00?', retry: () => app.setState({ offline: false }), aboutAppt: () => app.startCall('donna'), aboutTodo: () => app.startCall('donna'),
         msgOn: false, msg: '', againOn: false, again: () => {}, press: () => {}, noMenu: () => {}, send: () => {},
+        typed: (e) => { app.keepDraft('callTyped', e.target); fit(e.target); }, key: () => {}, grow: fitRef, enterHint: 'send',
+        newOn: false, newN: '', cxAsk: false, cxKeep: () => {}, cxYes: () => {}, sound: () => say('Pick the microphone in Settings, Microphone and sound'),
         orbHint: mac ? '. Click to see the next state' : '. Tap to see the next state',
         hint: mac ? 'Space bar: tap to mute, hold to talk' : 'Hold Mute to talk · tap the circle to see her states' }
     }
@@ -564,18 +791,31 @@ function realVals(st, ctx, D) {
     donna: start('donna'), pepper: start('pepper'), mp: start('mp'),
     space: () => app.startCall(st.space), chat: () => app.startCall(st.chatAgent), textTo: () => app.startCall(st.textTo)
   };
-  // Who's on it: a three-way call has two (the server says who).
+  // Who's on it: a three-way call has two, a four-way three (the server says who).
   const panel = st.cPanel.length > 1 ? st.cPanel : [];
-  const secKey = panel.find((k) => k !== st.callAgent) || null;
+  const others = panel.filter((k) => k !== st.callAgent && AG[k]);
+  const secKey = others[0] || null;
   const sec = secKey ? AG[secKey] : null;
+  const ter = others[1] ? AG[others[1]] : null;
+  const tint = (a) => (a && a.tint) || '#ffffff';
   const byName = (n) => ORDER.map((k) => AG[k]).find((a) => a.name === n);
   // What was said on the call
   const tLines = st.cLines.map((l) => {
     if (l.who === 'divider') return { who: '', t: l.text, nc: '#94a3b8', fc: '#94a3b8', fs: '13px', fw: '600', deco: 'none' };
-    if (l.who === 'me') return { who: 'You', t: l.text, nc: '#15803d', fc: l.cancelled ? '#94a3b8' : '#0f172a', fs: '16px', fw: '500', deco: l.cancelled ? 'line-through' : 'none' };
+    if (l.who === 'me') return { who: 'You', t: rich(l.text, { marks: false }), nc: '#15803d', fc: l.cancelled ? '#94a3b8' : '#0f172a', fs: '16px', fw: '500', deco: l.cancelled ? 'line-through' : 'none' };
     const her = byName(l.agent) || ca;
-    return { who: her.name, t: l.text, nc: her.accent, fc: l.who === 'filler' ? '#64748b' : '#0f172a', fs: l.who === 'filler' ? '14px' : '16px', fw: '400', deco: 'none' };
+    return { who: her.name, t: rich(l.text, { marks: l.who !== 'filler' }), nc: her.accent, fc: l.who === 'filler' ? '#64748b' : '#0f172a', fs: l.who === 'filler' ? '14px' : '16px', fw: '400', deco: 'none' };
   });
+  // The lines that came in while what was said wasn't in view: a count on its button and the mini bar.
+  const mac = ctx.device === 'mac';
+  const tView = sc === 'transcript' || (sc === 'call' && mac && st.design !== 'thread');
+  if (tView && st.cSeen !== st.cLines.length) app.quietState({ cSeen: st.cLines.length });
+  const newN = tView ? 0 : st.cLines.slice(st.cSeen || 0).filter((l) => !l.old && (l.who === 'me' || l.who === 'hq')).length;
+  // A choice made in Settings' Sound screen during the call takes over at once, as one made here.
+  if (live && typeof window !== 'undefined') {
+    if (((pick('hq-mic') || {}).id || '') + '|' + keepSound() !== rt.micKey) { rt.micKey = ((pick('hq-mic') || {}).id || '') + '|' + keepSound(); setTimeout(() => switchMic(app), 0); }
+    if (((pick('hq-out') || {}).id || '') !== rt.outKey) setTimeout(applySink, 0);
+  }
   // She asks something: her last line is a question and it's his turn. Yes or No goes in as his typed answer.
   let ask = null, askAt = -1;
   for (let i = st.cLines.length - 1; i >= 0; i--) {
@@ -594,26 +834,32 @@ function realVals(st, ctx, D) {
   };
   const answer = (w) => () => { if (typedNow(w)) app.setState({ cAnswered: askAt }); };
   const sheets = {
-    add: { title: 'Bring someone into the call', rows: ORDER.filter((k) => k !== st.callAgent && k !== secKey).map((k) => ({ a: AG[k].name, b: AG[k].role,
-      pick: () => { app.setState({ sheet: null }); if (typedNow('Bring ' + AG[k].name + ' into the call, please.')) say('Asked ' + ca.name + ' to bring ' + AG[k].name + ' in'); } })) }
+    callSound: soundSheet(app, st),
+    add: { title: 'Bring someone into the call', rows: ORDER.filter((k) => k !== st.callAgent && !others.includes(k)).map((k) => ({ a: AG[k].name, b: AG[k].role,
+      pick: () => { app.setState({ sheet: null }); if (typedNow('Bring ' + AG[k].name + ' into the call, please.')) say('Asked ' + ca.name + ' to bring ' + AG[k].name + ' in'); } }))
+      .concat(ORDER.every((k) => k === st.callAgent || others.includes(k)) ? [{ a: 'Everyone’s on the call', b: '', pick: () => app.setState({ sheet: null }) }] : []) }
   };
   const [label, ring] = st.cs === 'failed' ? ['Not connected', 4] : (ORB[st.cs === 'connecting' ? 'connecting' : st.orb] || ORB.listening);
   const phase = live && st.muted && !st.cHold ? 'Muted' : (live && st.orb === 'speaking' && !st.voiceOn ? 'Speaking · voice off' : label);
   const secs = live && st.cStarted ? Math.max(0, Math.floor((st.cNow - st.cStarted) / 1000)) : 0;
   const elapsed = live ? two(Math.floor(secs / 60)) + ':' + two(secs % 60) : (st.cs === 'failed' ? 'not connected' : 'calling…');
-  const mac = ctx.device === 'mac';
   const hint = st.cHold ? 'Let go when you’re done' : st.cTrans ? 'Turning your last words into text…'
     : (live && st.muted) ? (mac ? 'Muted · hold the space bar to talk' : 'Muted · hold the button to talk')
       : (mac ? 'Space bar: tap to mute, hold to talk' : 'Hold Mute to talk');
   const muteOn = st.muted && !st.cHold;
   const msg = st.cUntapped ? 'Tap anywhere to hear her.' : st.cMsg;
-  const hangNow = () => { app.setState({ confirmHang: false }); if (st.cs === 'live' || st.cs === 'connecting') hangup(app); else ended(app); };
-  const sendBox = () => { const t = ((app.state.drafts || {}).callTyped || '').trim(); if (typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: '' }) })); };
+  const hangNow = () => { app.setState({ confirmHang: false }); if (st.cs === 'live' || st.cs === 'connecting') hangup(app, '', 'button'); else ended(app); };
+  const sendBox = () => {
+    const t = ((app.state.drafts || {}).callTyped || '').trim();
+    if (typedNow(t)) { app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: '' }) })); fitBoxes(); }
+  };
   return {
     sheets,
     submit: { callTyped: (t) => { if (!typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: t }) })); } },
     values: {
-      call, chat: { call: () => app.go('transcript') }, ca, phase, ring,
+      call, chat: { call: () => app.go('transcript') }, ca, ring,
+      // the mini bar says how many lines came in while the call isn't in view
+      phase: showMini && newN ? phase + ' · ' + newN + ' new' : phase,
       showMini, padCls: showMini ? 'pt' : '', chatTop: showMini ? '12px' : '52px',
       // The circle: a tap lets her voice through when the browser held it back; else nothing.
       cyclePhase: () => { startAudio(); if (rt.audio && st.cUntapped) rt.audio.play().then(() => app.setState({ cUntapped: false })).catch(() => {}); },
@@ -623,28 +869,27 @@ function realVals(st, ctx, D) {
       muteBg: st.cHold ? '#dcfce7' : st.cTrans ? '#fef9c3' : (muteOn ? '#fef3c7' : '#ffffff'),
       muteFg: st.cHold ? '#14532d' : (muteOn || st.cTrans ? '#78350f' : '#0f172a'),
       muteShort: st.cHold ? 'Talking…' : st.cTrans ? 'Transcribing…' : (muteOn ? 'Muted' : 'Mute'),
-      askHang: () => app.setState({ confirmHang: true }), stayOn: () => app.setState({ confirmHang: false }),
+      askHang: () => { rt.fromT = false; app.setState({ confirmHang: true }); }, stayOn: () => app.setState({ confirmHang: false }),
       hangUp: hangNow,
-      hangFromT: () => app.setState((x) => { const stack = x.stack.slice(); if (stack[stack.length - 1] === 'call') stack.pop(); return { screen: 'call', stack, confirmHang: true }; }),
+      hangFromT: () => { rt.fromT = true; app.setState((x) => { const stack = x.stack.slice(); if (stack[stack.length - 1] === 'call') stack.pop(); return { screen: 'call', stack, confirmHang: true }; }); },
       confirmHang: st.confirmHang,
       tLines, askOpen,
       sayYes: answer('Yes'), sayNo: answer('No'),
-      callBg: sec ? 'linear-gradient(135deg, ' + ca.tint + ' 50%, ' + sec.tint + ' 50%)' : ca.tint,
-      callTitle: sec ? ca.name + ' and ' + sec.name : ca.name, hasSecond: !!sec, sec: sec || ca,
+      callBg: ter ? 'linear-gradient(135deg, ' + tint(ca) + ' 33.3%, ' + tint(sec) + ' 33.3% 66.6%, ' + tint(ter) + ' 66.6%)'
+        : sec ? 'linear-gradient(135deg, ' + ca.tint + ' 50%, ' + sec.tint + ' 50%)' : ca.tint,
+      // with three on the line the title names them all
+      callTitle: ter ? ca.name + ', ' + sec.name + ' and ' + ter.name : sec ? ca.name + ' and ' + sec.name : ca.name, hasSecond: !!sec && !ter, sec: sec || ca,
       takeBack: () => {
         if (!st.cCancel) { say('Nothing to take back right now'); return; }
-        const early = rt.cancellable;
-        if (!send({ type: 'cancel' })) return;
-        hideCancel(app);
-        if (early) setOrb(app, 'listening');
-        say('Taken back. She won’t act on your last line');
+        if (!rt.cancellable || Date.now() - rt.cancelSince > CANCEL_ASK_MS) { app.setState({ cCxAsk: true }); return; }
+        sendCancel(app);
       },
       callMeBack: () => { if (typedNow('Hang up and call me back, please.')) say('Asked ' + ca.name + ' to call you straight back'); },
       toggleVoice: () => { const on = !st.voiceOn; ls.set('hq-voice-off', on ? 'off' : 'on'); applyVoice(on); app.setState({ voiceOn: on }); thinking(st.orb === 'thinking', Object.assign({}, st, { voiceOn: on })); },
       voiceLabel: st.voiceOn ? 'Voice off' : 'Voice on',
       sheetAdd: () => { if (st.cs !== 'live') { say('The call isn’t connected yet'); return; } app.setState({ sheet: 'add' }); },
       demoOn: st.demo && st.onCall && sc === 'call', callErr: (st.offline || st.cLineDown) && sc === 'call',
-      demoCall: { donna: start('donna', { demo: '' }), pepper: start('pepper', { demo: '' }) },
+      demoCall: { donna: start('donna', { demo: '' }), pepper: start('pepper', { demo: '' }), mp: start('mp', { demo: '' }) },
       incoming: st.incoming,
       pickUp: () => { const r = st.cRing; app.setState({ incoming: false, cRing: null }); app.startCall(r ? r.agent : 'donna', r ? { ring: r.n } : null); },
       decline: () => { const r = st.cRing; app.setState({ incoming: false, cRing: null }); say(((r && AG[r.agent]) || AG.donna).name + ' will text you instead'); },
@@ -652,7 +897,7 @@ function realVals(st, ctx, D) {
         // Call Donna about this: the open appointment, the open to-do item (their ids go with the call)
         aboutAppt: () => app.startCall('donna', st.apptId ? { about: String(st.apptId) } : null),
         aboutTodo: () => app.startCall('donna', st.tdItem ? { about_todo: String(st.tdItem) } : null),
-        elapsed, started: st.cStarted ? clock(st.cStarted) : 'just now', ask: ask ? ask.text : '',
+        elapsed, started: st.cStarted ? clock(st.cStarted) : 'just now', ask: ask ? plainText(ask.text) : '',
         retry: () => { if (st.cLineDown) connect(app); else app.api.get('api/busy').catch(() => {}); },
         msgOn: !!msg, msg, againOn: st.cAgain && st.cs === 'failed', again: () => connect(app),
         press: (e) => {
@@ -663,6 +908,16 @@ function realVals(st, ctx, D) {
         },
         noMenu: (e) => { if (e && e.preventDefault) e.preventDefault(); },
         send: sendBox,
+        // the typing box: it grows with what's typed; Enter sends on a computer, a new line on a phone
+        typed: (e) => { app.keepDraft('callTyped', e.target); fit(e.target); },
+        key: (e) => { if (e.key !== 'Enter' || e.shiftKey || e.isComposing || coarse()) return; e.preventDefault(); sendBox(); },
+        grow: fitRef, enterHint: coarse() ? 'enter' : 'send',
+        // lines said while what was said wasn't in view
+        newOn: newN > 0, newN: newN > 9 ? '9+' : String(newN),
+        // Take that back when she's well into answering: asked first
+        cxAsk: st.cCxAsk && live, cxKeep: () => app.setState({ cCxAsk: false }), cxYes: () => { app.setState({ cCxAsk: false }); sendCancel(app); },
+        // the microphone and where her voice plays, during the call
+        sound: () => { listDevices(app); app.setState({ sheet: 'callSound' }); },
         orbHint: st.cUntapped ? '. Tap to hear her' : '', hint
       }
     }

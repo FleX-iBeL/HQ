@@ -2,8 +2,10 @@
 <h2 class="lab" style="margin: 0 4px">{{ setv.micTitle }}</h2>
 <sc-if value="{{ setv.cantChoose }}"><span class="muted" style="font-size: 14px; margin: 0 4px">This browser can’t choose one.</span></sc-if>
 <sc-if value="{{ setv.canChoose }}"><div class="list"><sc-for list="{{ setv.mics }}" as="m"><button class="row" key="{{ m.key }}" onClick="{{ m.pick }}"><span class="grow" style="font-size: 15px">{{ m.name }}</span><span style="font-size: 13px; font-weight: 600; color: #15803d">{{ m.use }}</span></button></sc-for></div></sc-if>
+<sc-if value="{{ setv.askNames }}"><div class="list"><button class="row" onClick="{{ setv.showNames }}"><span class="grow col"><span style="font-size: 15px">Device names</span><span class="muted" style="font-size: 13px">The browser names them once HQ may use the microphone</span></span><span class="small" style="display: flex; align-items: center">Show</span></button></div></sc-if>
 <sc-if value="{{ setv.showOuts }}"><h2 class="lab" style="margin: 0 4px">Her voice comes out of</h2>
 <div class="list"><sc-for list="{{ setv.outs }}" as="o"><button class="row" key="{{ o.key }}" onClick="{{ o.pick }}"><span class="grow" style="font-size: 15px">{{ o.name }}</span><span style="font-size: 13px; font-weight: 600; color: #15803d">{{ o.use }}</span></button></sc-for></div></sc-if>
+<sc-if value="{{ setv.isMac }}"><div class="list"><button class="row" onClick="{{ setv.toggleKeep }}"><span class="grow col"><span style="font-size: 15px">Other sound</span><span class="muted" style="font-size: 13px">{{ setv.keepLine }}</span></span><span class="muted" style="font-size: 14px">{{ setv.keepWord }}</span></button></div></sc-if>
 <div class="list"><button class="row" onClick="{{ setv.toggleSound }}"><span class="grow col"><span style="font-size: 15px">Thinking sound</span><span class="muted" style="font-size: 13px">A soft tick while she thinks</span></span><span class="muted" style="font-size: 14px">{{ setv.soundWord }}</span></button></div>
 <sc-if value="{{ setv.noOuts }}"><span class="muted" style="font-size: 12px; margin: 0 4px">{{ setv.noOutsLine }}</span></sc-if>
 </sc-if>

@@ -87,12 +87,15 @@ function soon(dl) {
   return Date.parse(m[1] + 'T23:59:00') - Date.now() < 7 * 864e5;
 }
 const planWords = (pl) => (pl ? 'Planned ' + pl.short + (pl.past ? ' (gone by)' : '') : '');
+// A planned block that isn't in the last read of the calendar any more: said in red, as a deadline is.
+const blockGone = (pl) => !!pl && pl.seen === false;
+const GONE = 'its block isn’t in your calendar any more';
 function metaOf(it, closed, kind) {
   const at = it.at ? (kind === 'done' ? 'Done ' : kind === 'letgo' ? 'Let go ' : '') + it.at : '';
   const p = [it.for ? 'For ' + it.for : '', it.deadline ? 'Deadline ' + it.deadline : '', it.status && it.status !== 'open' ? it.status : '',
     it.calendar ? 'In the calendar: ' + it.calendar : '', at, it.often];
   if (!closed && it.repeats) p.push('Repeats ' + it.repeats);
-  if (!closed && it.planned) p.push(planWords(it.planned) + ' · ' + it.planned.title);
+  if (!closed && it.planned) p.push(planWords(it.planned) + ' · ' + it.planned.title + (blockGone(it.planned) ? ', but ' + GONE : ''));
   return p.filter(Boolean).join(' · ');
 }
 function shortDate(s) {
@@ -278,7 +281,7 @@ function realVals(st, ctx, D) {
   });
   const todoRows = shown.map((it, i) => ({
     id: it.id, title: it.title, meta: metaOf(it, closed, l.kind),
-    mc: !closed && soon(it.deadline) ? '#b42318' : '#475569',
+    mc: !closed && (soon(it.deadline) || blockGone(it.planned)) ? '#b42318' : '#475569',
     open: openItem(l, it),
     tick: () => send(app, l.kind === 'groceries' ? { tick: it.id } : { done: it.id }, (x) => without(x, it.id)),
     back: () => app.setState({ tdItem: it.id, sheet: 'move' }),
@@ -377,7 +380,7 @@ function realVals(st, ctx, D) {
       todoRows, todoFilters, listClosed: closed, listOpen: !!l && !closed,
       openDone: () => app.go('todoList', { listKind: 'done', tdList: doneL ? doneL.key : null }),
       openLetgo: () => app.go('todoList', { listKind: 'letgo', tdList: letgoL ? letgoL.key : null }),
-      plannedText: it && it.planned ? planWords(it.planned) + ' · ' + it.planned.title : 'Not planned',
+      plannedText: it && it.planned ? planWords(it.planned) + ' · ' + it.planned.title + (blockGone(it.planned) ? ', but ' + GONE : '') : 'Not planned',
       itemDead: (it && it.deadline) || 'None', itemDeadC: it && it.deadline && soon(it.deadline) ? '#b42318' : '#0f172a',
       repeatText: rep ? 'Repeats ' + rep : 'Doesn’t repeat',
       sheetPlan: () => app.setState({ sheet: 'plan' }), sheetRepeat: () => app.setState({ sheet: 'repeat' }), sheetMove: () => app.setState({ sheet: 'move' }),
@@ -388,11 +391,12 @@ function realVals(st, ctx, D) {
         commitLine: cItems.length ? cItems.slice(0, 3).map((x) => x.title).join(' · ') + (cItems.length > 3 ? ' …' : '') : 'Nothing promised right now',
         openCommit: commit.length ? openList(commit[0].key) : () => {},
         empty: off || empty, full: !!d && !empty,
+        axes: !!d && !empty, mxRows: '1fr', hint: d && !empty ? 'Important but not urgent first: that’s where the needle movers are. Keep it up to date by talking, or tick things off here.' : '',
         nGroceries: groceriesL ? groceriesL.items.length : '', nDone: doneL ? doneL.items.length : '', nLetGo: letgoL ? letgoL.items.length : '',
         listNote, hasRows: todoRows.length > 0, sortable,
         addDraft: st.tdAdd, addInput, addKey,
         itemHere: !!it, itemGone: !!d && !it, plainTitle: false, renamable: !!it, nameValue: it ? it.title : '', rename, renameKey,
-        forWho: (it && it.for) || 'You',
+        forWho: (it && it.for) || 'You', planC: it && blockGone(it.planned) ? '#b42318' : '#0f172a',
         canPlan: !!it && !iClosed && !iGro, canRepeat: !!it && !iClosed && !iGro, canTick: !!it && !iClosed && il.kind !== 'grocoff',
         canLetGo: !!it && !iClosed && !!letgoL, moveLabel: iClosed ? 'Back on a list' : 'Move to a list',
         fields, details,

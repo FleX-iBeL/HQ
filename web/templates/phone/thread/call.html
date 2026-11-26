@@ -3,7 +3,8 @@
 <div class="top" style="width: 100%">
 <button class="iconbtn" aria-label="Back to HQ, the call keeps going" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
 <span class="grow" style="text-align: center; font-size: 14px; font-weight: 600">On a call · {{ cl.elapsed }}</span>
-<button class="iconbtn" aria-label="What was said" onClick="{{ chat.call }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>
+<button class="iconbtn" aria-label="Microphone and sound" onClick="{{ cl.sound }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></button>
+<button class="iconbtn" aria-label="What was said" onClick="{{ chat.call }}" style="position: relative"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><sc-if value="{{ cl.newOn }}"><span aria-label="{{ cl.newN }} new" style="position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 10px; background: {{ ca.color }}; color: {{ ca.ink }}; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{ cl.newN }}</span></sc-if></button>
 </div>
 <sc-if value="{{ demoOn }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 14px; background: #ffffff; font-size: 13px; font-weight: 600; text-align: center">Demo call · nothing is saved or changed</div></sc-if>
 <sc-if value="{{ callErr }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 10px 10px 14px; border-radius: 14px; background: #fef2f2; color: #991b1b; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 13px; line-height: 18px">The call line doesn’t answer. HQ keeps trying.</span><button class="small" onClick="{{ cl.retry }}" style="background: #ffffff">Try now</button></div></sc-if>
@@ -30,6 +31,14 @@
 <div class="card" role="dialog" aria-label="End the call?" style="width: 100%; padding: 22px; display: flex; flex-direction: column; gap: 16px">
 <div class="col" style="gap: 4px"><h2 class="h" style="font-size: 20px">End the call?</h2><span class="muted" style="font-size: 15px">This ends the call with {{ ca.name }}. What was said stays in past calls.</span></div>
 <div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ stayOn }}" style="background: #f1f5f9; color: #0f172a">Stay on</button><button class="pill grow" onClick="{{ hangUp }}" style="background: #d9392b; color: #ffffff">Hang up</button></div>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{ cl.cxAsk }}">
+<div style="position: absolute; inset: 0; background: rgba(15,23,42,0.45); display: flex; align-items: flex-end; padding: 16px 16px 36px; box-sizing: border-box">
+<div class="card" role="alertdialog" aria-label="Are you sure you want to cancel?" style="width: 100%; padding: 22px; display: flex; flex-direction: column; gap: 16px">
+<div class="col" style="gap: 4px"><h2 class="h" style="font-size: 20px">Are you sure you want to cancel?</h2><span class="muted" style="font-size: 15px">{{ ca.name }} is already answering. What you just said is taken back.</span></div>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ cl.cxKeep }}" style="background: #f1f5f9; color: #0f172a">Keep</button><button class="pill grow" onClick="{{ cl.cxYes }}" style="background: #0f172a; color: #ffffff">Cancel</button></div>
 </div>
 </div>
 </sc-if>

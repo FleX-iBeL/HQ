@@ -353,7 +353,8 @@ CHECKIN_RULE = (" The check-ins and the Coaching place (H225): HQ keeps their ch
 
 # H222 (21 October 2026, call at 12:29), in the user's words: "the moment they want to do a 6-week challenge, they need
 # to have a session with you ... You just need to design it and then hand it off to the team so they can tailor it,
-# custom-made for this type of challenge ... They can always open their past history one."
+# custom-made for this type of challenge ... They can always open their past history one." No agent sets a game up: the
+# design is left as a hand-over in HQ/prep/, and it's set up from it in a chat with Claude Code.
 GAME_RULE = (" A six-week game (H222): when they want one, it gets its own design session, with the agent this "
              "workflow is best with; if that isn't you, say so once and offer to go on or switch. Go through the "
              "guide's six-week game layer the usual way, and design with them how it's kept in HQ: what's ticked or "
@@ -361,9 +362,14 @@ GAME_RULE = (" A six-week game (H222): when they want one, it gets its own desig
              "setup week, the six weeks, the week to look back), and whether their agent texts (a reminder at a time "
              "while the tick isn't in, a heads-up on a day away from home around its time). Look at their past games first (python3 "
              f"{ROOT / 'app' / 'games.py'}), and what HQ can keep already (games.py kinds). Write the design under that "
-             "layer in their map.md, as the guide's In HQ part shows, then, on their yes, hand it to the team: "
-             "\"Set up the six-week game <name> from map.md layer 3 on the six-week game template\", kind small, or "
-             "bigbuild when it needs a kind of tracking HQ doesn't have yet. Never make or change the game yourself.")
+             "layer in their map.md, as the guide's In HQ part shows. Then, on their yes, leave it as a hand-over, the "
+             "way Moneypenny leaves hers: one Markdown file in the workspace's HQ/prep/ folder named "
+             "YYYY-MM-DD-six-week-game-<a few words>.md, with a # title (\"Set up the six-week game <name>\"), their ask "
+             "in their words, the design as it stands in map.md (its In HQ part, word for word), whether it needs a kind "
+             "of tracking HQ doesn't keep yet (games.py kinds), and what's still theirs to decide. Then tell them, in a "
+             "sentence, that it gets set up from that design in their next chat with Claude Code on the laptop, and that "
+             "until then the app shows it as designed and waiting. Never make or change the game yourself: games.py new "
+             "and spec are for that chat, not for you.")
 
 
 def main(argv: list[str]) -> int:

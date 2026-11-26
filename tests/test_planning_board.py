@@ -45,5 +45,8 @@ need(by["H2"]["rank"] == 1 and by["H1"]["rank"] == 2 and by["F1"]["rank"] is Non
 need(by["F1"]["bug"] and not by["H1"]["bug"], "a row in the Bugs phase is a bug")
 need([g["tag"] for g in b["groups"]] == ["must", "could", "wont"], "the groups in order")
 need("Must:" in planning_board.words(b), "in words too")
+need([r["label"] for r in b["repeating"]] == ["H3"], f"the repeating rows: {b['repeating']}")
+need([(g["phase"], [r["label"] for r in g["rows"]]) for g in b["finished"]] == [("F", ["F2"])], f"the finished rows per phase: {b['finished']}")
+need(b["finished_count"] == 1 and all(r["label"] != "H9" for g in b["finished"] for r in g["rows"]), "parked rows stay out of finished")
 need(before == ((tmp / "HQ" / "sprint.json").read_text(), (tmp / "HQ" / "roadmap.md").read_text()), "nothing was written")
 done()

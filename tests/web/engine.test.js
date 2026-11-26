@@ -1,6 +1,6 @@
 // Engine tests, run in a browser by web/tests.html. Each test mounts a small template in
 // a scratch container, renders, changes state, renders again, and checks the live DOM.
-import { compile, mount, DCLogic, setStyleLens, rerenderAll, typedIn } from '../engine.js';
+import { compile, mount, DCLogic, setStyleLens, rerenderAll, typedIn, rich } from '../engine.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -239,6 +239,26 @@ test('typedIn: a draft kept without a render is neither written back nor missed 
   eq(writes, 0, 'a render with the draft kept in place writes nothing');
   set({ d: '' });
   eq(desc.get.call(inp), '', 'cleared');
+});
+
+test('rich(): bold, italics, lists, links and line breaks as nodes, never as HTML', () => {
+  const { box, set } = setup('<div>{{ t }}</div><span title="{{ t }}">x {{ t }}</span>', (st) => ({ t: rich(st.s, st.o) }),
+    { s: 'Hi **you** and *me* <b>no</b>, see https://example.com/a.' });
+  const div = box.querySelector('div');
+  eq(div.querySelector('strong').textContent, 'you', 'bold'); eq(div.querySelector('em').textContent, 'me', 'italics');
+  ok(!div.querySelector('b'), 'no HTML from the text'); ok(div.textContent.includes('<b>no</b>'), 'the angle brackets stay text');
+  const a = div.querySelector('a');
+  eq(a.getAttribute('href'), 'https://example.com/a', 'link, without the full stop'); eq(a.getAttribute('target'), '_blank', 'opens outside');
+  eq(box.querySelector('span').getAttribute('title'), 'Hi you and me <b>no</b>, see https://example.com/a.', 'plain in an attribute');
+  set({ s: 'Two things:\n- one\n- two\n  - inside\n\nAnd [the link](https://example.org) here\nnext line' });
+  eq(div.querySelectorAll('ul').length, 2, 'a list inside a list'); eq(div.querySelectorAll('li').length, 3, 'items');
+  eq(div.querySelectorAll('p').length, 2, 'paragraphs'); eq(div.querySelectorAll('br').length, 1, 'line break');
+  eq(div.querySelector('a').textContent, 'the link', 'the words of a link');
+  set({ s: 'javascript:alert(1) and [x](javascript:alert(1))' });
+  ok(!div.querySelector('a'), 'only http and https become links');
+  set({ s: 'his *own* line\nwith www.example.com', o: { marks: false, at: '14:05' } });
+  ok(!div.querySelector('em'), 'no marks on his lines'); eq(div.querySelector('a').getAttribute('href'), 'https://www.example.com', 'www gets https');
+  eq(div.querySelectorAll('br').length, 1, 'his line break'); ok(div.lastChild.textContent === '14:05', 'the time at the end');
 });
 
 export async function run(out) {

@@ -111,16 +111,25 @@ export function vals(st, ctx, D) {
   const nudging = Array.isArray(hers.nudges) ? hers.nudges : [];
   const ready = !!(notes && Array.isArray(notes.items));
 
-  const nudgeDone = (x) => () => notesChange(app, { nudge_done: x.n },
-    (n) => Object.assign({}, n, { hers: Object.assign({}, n.hers, { nudges: (n.hers.nudges || []).filter((y) => y.n !== x.n) }) }), 'Couldn’t stop that nudge. Try again.')
-    .then((ok) => { if (ok) app.say('Done. She stopped nudging'); });
+  const patchNudge = (x, fn) => (n) => Object.assign({}, n, { hers: Object.assign({}, n.hers, { nudges: fn(n.hers.nudges || []) }) });
+  const nudgeDone = (x) => () => notesChange(app, { nudge_done: x.n }, patchNudge(x, (ns) => ns.filter((y) => y.n !== x.n)), 'Couldn’t stop that nudge. Try again.')
+    .then((ok) => { if (ok) app.say('Done. She stopped nudging', () => notesChange(app, { nudge_reopen: x.n }, null, 'Couldn’t bring that nudge back. Try again.')); });
+  // The bell: quiet until tomorrow morning; tapped again, she goes on as before.
+  const nudgeBell = (x) => () => {
+    const quiet = !x.paused;
+    notesChange(app, quiet ? { nudge_later: x.n } : { nudge_wake: x.n }, patchNudge(x, (ns) => ns.map((y) => (y.n === x.n ? Object.assign({}, y, { paused: quiet }) : y))),
+      quiet ? 'Couldn’t quiet that nudge. Try again.' : 'Couldn’t wake that nudge. Try again.')
+      .then((ok) => { if (ok) app.say(quiet ? 'Quiet until tomorrow morning' : 'She’s nudging you again'); });
+  };
+  const quietWords = (x) => (x.next ? 'Quiet until ' + dayWords(x.next).replace(/^(Today|Tomorrow|Yesterday)/, (w) => w.toLowerCase()) : 'Quiet for now');
   // A button inside a tappable row does only its own thing.
   const keyOpen = (fn) => (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fn(); } };
   const own = (fn) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); fn(); };
-  const nudges = nudging.map((x) => ({ title: x.text, sub: x.paused ? 'Paused for now' : 'She’s nudging you until it’s done', label: 'Done', deco: 'none', fc: '#0f172a',
+  const nudges = nudging.map((x) => ({ title: x.text, sub: x.paused ? quietWords(x) : 'She’s nudging you until it’s done', label: 'Done', deco: 'none', fc: '#0f172a',
     toggle: own(nudgeDone(x)), open: () => openNudge(app, x, nudgeDone(x)), key: keyOpen(() => openNudge(app, x, nudgeDone(x))) }));
-  const nudgeRows = nudging.map((x) => ({ t: x.text, when: x.paused ? 'Paused for now' : 'Nudging you until it’s done',
-    bell: own(() => app.say('HQ can’t pause one nudge yet. Tap Done when it’s done, or ask Donna.')), bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9', bellAria: x.paused ? 'Paused for now' : 'Nudging you',
+  const nudgeRows = nudging.map((x) => ({ id: 'n' + x.n, t: x.text, when: x.paused ? quietWords(x) : 'Nudging you until it’s done',
+    bell: own(nudgeBell(x)), bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9',
+    bellAria: x.paused ? 'Quiet until tomorrow morning. Tap to nudge again' : 'Nudging you. Tap for quiet until tomorrow morning',
     done: own(nudgeDone(x)), doneLabel: 'Done', open: () => openNudge(app, x, nudgeDone(x)), key: keyOpen(() => openNudge(app, x, nudgeDone(x))) }));
 
   // Newest first, as the design lists them.
@@ -129,11 +138,15 @@ export function vals(st, ctx, D) {
       .then((ok) => { if (ok) app.say('Cleared the note', () => notesChange(app, { restore: it.id }, null, 'Couldn’t bring that note back. Try again.')); }) })) : [];
   const addNote = (text) => notesChange(app, { add: text }, (n) => Object.assign({}, n, { items: n.items.concat([{ id: 'new-' + Date.now(), when: '', text }]) }), 'Couldn’t save that note. Try again.');
   // Only Donna keeps notes of her own in HQ; Pepper's and Moneypenny's lists are empty until HQ keeps theirs.
-  const herNotes = st.space === 'donna' && Array.isArray(hers.items) ? hers.items.map((it) => ({ t: it.text, when: when(it.when, false) })) : [];
+  const herNotes = st.space === 'donna' && Array.isArray(hers.items) ? hers.items.map((it) => ({ id: it.id, t: it.text, when: when(it.when, false),
+    clear: () => notesChange(app, { clear_hers: it.id }, (n) => Object.assign({}, n, { hers: Object.assign({}, n.hers, { items: (n.hers.items || []).filter((y) => y.id !== it.id) }) }), 'Couldn’t clear her note. Try again.')
+      .then((ok) => { if (ok) app.say('Cleared her note', () => notesChange(app, { restore_hers: it.id }, null, 'Couldn’t bring her note back. Try again.')); }) })) : [];
   const eyeRows = (hers.watches || []).map((w) => ({ t: w.text,
     when: [w.until ? 'until ' + when(w.until, false) : '', w.matches ? w.matches + (w.matches === 1 ? ' update' : ' updates') : ''].filter(Boolean).join(' · ') || 'always' }));
-  // Cleared notes come only if the server sends them (`cleared` on api/notes); it doesn't yet.
-  const clearedRows = ready && Array.isArray(notes.cleared) ? notes.cleared.map((c) => ({ t: c.text, when: 'Cleared ' + when(c.cleared, false).toLowerCase() })) : [];
+  // His newest cleared notes (`cleared` on api/notes), each with Put back.
+  const clearedRows = ready && Array.isArray(notes.cleared) ? notes.cleared.map((c) => ({ id: c.id, t: c.text, when: 'Cleared ' + when(c.cleared, false).replace(/^(Today|Yesterday)/, (w) => w.toLowerCase()),
+    back: () => notesChange(app, { restore: c.id }, (n) => Object.assign({}, n, { items: n.items.concat([{ id: c.id, when: c.when, text: c.text }]), cleared: (n.cleared || []).filter((y) => y.id !== c.id) }), 'Couldn’t put that note back. Try again.')
+      .then((ok) => { if (ok) app.say('The note is back'); }) })) : [];
 
   const mailItems = (mail || []).map((m) => ({ subject: m.subject || '(no subject)', from: 'From ' + (m.from || 'someone') + ' · ' + when(m.when, false).toLowerCase(),
     what: m.what || '', onList: /on the list/i.test(m.status || '') }));

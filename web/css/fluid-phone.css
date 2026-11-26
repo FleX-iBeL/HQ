@@ -26,3 +26,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: non
 
 /* Narrow phones (360 px): chat bubbles may not be wider than the screen. */
 [style*="max-width: 280px"] { max-width: min(280px, 78vw) !important; }
+
+/* Going back by a swipe from the left edge and pulling a sheet down: the page leaves sideways moves to
+   HQ and keeps vertical scrolling and pinch zoom for the browser. A scroller that moves sideways (the
+   Today row) is its own scroll container and keeps panning sideways. */
+html:root, html:root body { touch-action: pan-y pinch-zoom; }
+.pad, [style*="overflow-y: auto"] { touch-action: pan-y pinch-zoom; }

@@ -178,6 +178,7 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const hhmm = (d) => pad2(d.getHours()) + ':' + pad2(d.getMinutes());
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const capFirst = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : '');
 const lowFirst = (t) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : '');
 // When a text was sent, short: 14:02 today, else the weekday, else the date.
 function sentWhen(at) {
@@ -222,6 +223,9 @@ function shellWords(st, ctx, parts, V) {
     return out;
   }
   const now = new Date(st.clockNow || Date.now());
+  // what a ringing call is about, when the server knows it (/api/ring/N, asked by app.js when a ring comes in)
+  const rd = st.cRing && st.data && st.data.ring;
+  const ringAbout = rd && String(rd.n) === String(st.cRing.n) ? String(rd.what || rd.title || '').trim() : '';
   const W = V.setv && V.setv.weather && V.setv.weather.ready ? V.setv.weather : null;
   const soon = W && W.hasBars && /^Rain from about (\d\d:\d\d)/.exec(W.radar || '');
   const wet = W && /^Raining now/.test(W.radar || '');
@@ -261,7 +265,7 @@ function shellWords(st, ctx, parts, V) {
     st: { word: banner.t, upper: String(banner.t || '').toUpperCase(), fg: mpv.hasHealth ? (healthy ? '#15803d' : '#b42318') : '#475569', dot: banner.dot || '#94a3b8' },
     bars, workLine, statusLine: [usageLine, workLine].filter(Boolean).join(' · '),
     threadHead: firstToday ? 'Today' : '', lastLabel: hers ? sa.name + ' · ' + sentWhen(hers.at) : '', hasLast: !!hers,
-    ring: Object.assign(ringBase, { line: st.cRing ? 'About the call you agreed.' : '' }),
+    ring: Object.assign(ringBase, { line: ringAbout ? capFirst(ringAbout) : st.cRing ? 'About the call you agreed.' : '' }),
     miniTime: secs >= 0 ? ' · ' + pad2(Math.floor(secs / 60)) + ':' + pad2(secs % 60) : ''
   };
   real.cards = cards(real.c);
@@ -310,7 +314,12 @@ export function vals(st, ctx, parts, V) {
     isDonnaSpace: st.space === 'donna', isMpSpace: st.space === 'mp',
     notCallView: !(sc === 'call' || sc === 'transcript'), notSub: !s.sub,
     sheetOn: !!sh, sh: sh || { title: '', rows: [] }, closeSheet: () => app.setState({ sheet: null }),
-    hv: Object.assign(shellWords(st, ctx, parts, V), { donnaName: AG.donna.name, pepperName: AG.pepper.name, mpName: AG.mp.name }),
+    hv: Object.assign(shellWords(st, ctx, parts, V), { donnaName: AG.donna.name, pepperName: AG.pepper.name, mpName: AG.mp.name, moneypennyName: AG.mp.name },
+      // the offline line on every screen of the phone (home has its own; the call screen says it itself), under the
+      // mini bar when that shows
+      { offStrip: !!st.offline && !s.home && !s.call && !V.showMini, offStripUnder: !!st.offline && !s.home && !s.call && !!V.showMini,
+        // a tap on the shade beside a sheet closes it
+        sheetOut: (e) => { if (e && e.target === e.currentTarget) app.setState({ sheet: null }); } }),
     toast: st.toast || '', toastOn: !!st.toast, toastUndo: !!st.toastUndo, undo: () => (app.demoMode ? app.setState({ toast: null }) : app.undoToast())
   });
 }

@@ -256,7 +256,7 @@ In HQ:
 
 Their agent can keep them honest by text: a reminder at a set time while the day's tick isn't in, and a heads-up on a day they're away from home around the time they usually play it, with what counts on a day like that. Each weekly look back goes through the game's score.
 
-Then, on their yes, it goes to their team, who set the game up in HQ on the template, tailored to it, and build whatever it needs that HQ can't keep yet. From then on they tick and note it on any call, in the texts, or in the app.
+Then, on their yes, leave it as a hand-over in HQ/prep/ (the design word for word, and anything it needs that HQ can't keep yet), and tell them it gets set up from that design in their next chat with Claude Code; until then the app shows it as designed and waiting. You never set the game up yourself. Once it's set up, they tick and note it on any call, in the texts, or in the app.
 
 **What it hands down.** To the ideal week: the game's weekly part and the blocks that make room for it. To the real week: what this week's part of the game is. To looking back: the score to look at each week, and the debrief at the end.
 

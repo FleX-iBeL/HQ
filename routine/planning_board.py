@@ -4,7 +4,8 @@
 Moneypenny's space shows the planning to look at, not to edit. An open row is a table row marked ⬜ in a
 `## Phase …` section, except Phase P (parked) and rows that repeat (🔁). Each row's place and tag come from the
 workspace's HQ/sprint.json (`order`: the ranked labels, top first; `moscow`: {label: must|should|could|wont}).
-Nothing is written anywhere.
+Next to the open rows the board carries the rows that repeat (🔁) and the finished ones (✅), per phase, newest phase
+first, to look at too. Nothing is written anywhere.
 
     python3 routine/planning_board.py           the board as JSON
     python3 routine/planning_board.py --words   one line per row, grouped
@@ -56,6 +57,33 @@ def open_rows(text: str) -> list[dict]:
     return out
 
 
+def other_rows(text: str) -> tuple[list[dict], list[dict]]:
+    """The rows that repeat, and the finished ones grouped per phase: ([{"label", "title", "phase_title"}],
+    [{"phase", "phase_title", "rows": [{"label", "title"}]}]). Phase P is left out of both."""
+    repeat, done, phase, group = [], [], "", None
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            phase, group = line, None
+            continue
+        if not phase.startswith("## Phase ") or phase.startswith("## Phase P ") or not line.startswith("|"):
+            continue
+        cells = hqpaths.cells(line)
+        if len(cells) < 2 or cells[0] not in ("🔁", "✅"):
+            continue
+        head = cells[1].split(" ", 1)
+        if not LABEL.fullmatch(head[0]):
+            continue
+        row = {"label": head[0], "title": head[1].strip() if len(head) > 1 else head[0]}
+        if cells[0] == "🔁":
+            repeat.append(dict(row, phase_title=phase[9:].strip()))
+            continue
+        if group is None:
+            group = {"phase": phase[9:].split(" ·", 1)[0], "phase_title": phase[9:].strip(), "rows": []}
+            done.append(group)
+        group["rows"].append(row)
+    return repeat, list(reversed(done))
+
+
 def _is_bug(label: str, phase_title: str, line: str) -> bool:
     """A row in the Bugs phase (F, or a phase called Bugs), any F row, or a row sent in as a bug."""
     return (phase_title.split(" ", 1)[0] == "F" or "bug" in phase_title.lower() or label.startswith("F")
@@ -90,7 +118,9 @@ def board(text: str | None = None) -> dict:
         r["moscow"] = tags.get(r["label"])
     rows.sort(key=lambda x: (GROUPS.index(x["moscow"]), not x["bug"], x["rank"] is None, x["rank"] or 0, place[x["label"]]))
     groups = [{"tag": g, "name": GROUP_NAMES[g], "labels": [r["label"] for r in rows if r["moscow"] == g]} for g in GROUPS]
-    return {"rows": rows, "groups": [g for g in groups if g["labels"]], "count": len(rows)}
+    repeat, done = other_rows(text)
+    return {"rows": rows, "groups": [g for g in groups if g["labels"]], "count": len(rows),
+            "repeating": repeat, "finished": done, "finished_count": sum(len(g["rows"]) for g in done)}
 
 
 def words(b: dict) -> str:

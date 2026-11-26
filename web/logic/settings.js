@@ -23,9 +23,12 @@ import { DESIGNS } from './core.js';
 export const start = {
   rain: true, offline: false, fresh: false, free: false,
   feat: Object.assign({}, demo.featuresOn), voices: Object.assign({}, demo.voicesPicked), place: 'here', tour: -1,
-  voiceIds: {}, sound: true, look: 'system', mic: '', out: '', tourPiece: null, tourSeen: [], featBusy: '', keySaid: '', wxBusy: false
+  voiceIds: {}, sound: true, look: 'system', mic: '', out: '', tourPiece: null, tourSeen: [], featBusy: '', keySaid: '', wxBusy: false,
+  keepSound: false, tourOpened: true, tourAt: 'bottom', tourFound: true
 };
 
+// The first sentence of an agent's character, for the line under her name in Voices.
+const firstSentence = (t) => { const m = /^(.+?[.!?])(\s|$)/.exec(String(t).trim()); return (m ? m[1] : String(t).trim()).slice(0, 160); };
 const sw = (on) => ({ bg: on ? '#16a34a' : '#cbd5e1', just: on ? 'flex-end' : 'flex-start' });
 
 // The voices an agent can have (config.VOICES), with the old page's names.
@@ -44,6 +47,7 @@ const json = (k, d) => { try { return JSON.parse(store.get(k) || 'null') || d; }
 // Where the page runs (the old page's own test): the phone decides the mic and sound itself.
 const UA = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
 const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1);
+const IS_MAC = /Macintosh|Mac OS X/.test(UA) && !IS_IOS;
 const IS_PHONE = IS_IOS || /Android.*Mobile|Mobile.*Android/.test(UA)
   || (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches);
 const CAN_SINK = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
@@ -62,6 +66,56 @@ async function read(app, key, path) {
 }
 
 function devPick(k) { return json(k, null); }
+
+// The tutorial's spotlight: an outline round the control a step is about, on the real screen, drawn over the page
+// (outside the templates) once the screen has rendered. A spot is a CSS selector, or `text:` and the words the
+// control starts with. When it isn't there, the card says so and the screen shows without a spotlight.
+let spotEl = null, spotWant = '', spotTimer = 0, spotColour = '#6d28d9';
+function findSpot(spot) {
+  if (!spot || typeof document === 'undefined') return null;
+  const root = document.getElementById('app');
+  if (!root) return null;
+  let list = [];
+  if (spot.startsWith('text:')) {
+    const words = spot.slice(5).trim().toLowerCase();
+    list = [...root.querySelectorAll('button, a, [role=button], .row, .chip, .pill, .small, h2, .lab, label')].filter((n) => (n.textContent || '').trim().toLowerCase().startsWith(words));
+  } else { try { list = [...root.querySelectorAll(spot)]; } catch (e) { list = []; } }
+  return list.find((n) => { if (n.closest('[data-tour-card]')) return false; const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0 && n.offsetParent !== null; }) || null;
+}
+function placeSpotSoon(app, spot, colour) {
+  if (typeof document === 'undefined') return;
+  spotWant = spot;
+  if (colour) spotColour = colour;
+  if (!spot && !spotEl) return;
+  if (spotTimer) return; // one look per burst of renders; it reads spotWant when it runs
+  spotTimer = setTimeout(() => { spotTimer = 0; placeSpot(app); }, 150); // after the render (a timer: a hidden page gets no frames)
+}
+function placeSpot(app) {
+  if (!app) return;
+  const want = spotWant, colour = spotColour;
+  const el = want ? findSpot(want) : null;
+  if (!el) {
+    if (spotEl) { spotEl.remove(); spotEl = null; }
+    if (want && app.state.tourFound !== false && app.state.tour >= 0) app.setState({ tourFound: false, tourAt: 'bottom' });
+    else if (!want && app.state.tour >= 0 && app.state.tourAt !== 'bottom') app.setState({ tourAt: 'bottom' });
+    return;
+  }
+  if (el.scrollIntoView) { const r0 = el.getBoundingClientRect(); if (r0.top < 0 || r0.bottom > window.innerHeight) el.scrollIntoView({ block: 'center' }); }
+  const r = el.getBoundingClientRect(), pad = 6;
+  if (!spotEl) {
+    spotEl = document.createElement('div');
+    spotEl.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(spotEl);
+  }
+  const still = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  Object.assign(spotEl.style, { position: 'fixed', zIndex: '24', pointerEvents: 'none', borderRadius: '16px', left: (r.left - pad) + 'px', top: (r.top - pad) + 'px',
+    width: (r.width + 2 * pad) + 'px', height: (r.height + 2 * pad) + 'px', transition: still ? 'none' : 'all .25s ease',
+    boxShadow: '0 0 0 3px ' + (colour || '#6d28d9') + ', 0 0 0 9999px rgba(15,23,42,0.45)' });
+  // the card on the side with more room, away from the spotlight
+  const at = r.top + r.height / 2 > window.innerHeight * 0.55 ? 'top' : 'bottom';
+  if (app.state.tourAt !== at || app.state.tourFound === false) app.setState({ tourAt: at, tourFound: true });
+}
+if (typeof window !== 'undefined') window.addEventListener('resize', () => { if (spotEl) placeSpot(window.HQ && window.HQ.component); });
 async function listDevices(app) {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) { put(app, { devices: { can: false, ins: [], outs: [] } }); return; }
   let list = [];
@@ -92,7 +146,8 @@ export async function load(app) {
   for (const k of Object.keys(ID)) { const v = store.get('hq-voice-' + ID[k]) || store.get('hq-voice'); if (v && VOICE_NAME[v]) voiceIds[k] = v; }
   const look = store.get('hq-theme');
   app.setState({ voiceIds, free: store.get('hq-free') === 'on', sound: store.get('hq-sound') !== 'off',
-    look: look === 'light' || look === 'dark' ? look : 'system', tourSeen: json('hq-tour-seen', []) });
+    look: look === 'light' || look === 'dark' ? look : 'system', tourSeen: json('hq-tour-seen', []),
+    keepSound: store.get('hq-keep-sound') === 'on', tourOpened: store.get('hq-tour-opened') === '1' });
   put(app, {});
   const [, , , wx] = await Promise.all([read(app, 'features', 'api/features'), read(app, 'agents', 'api/agents'), read(app, 'tour', 'tour.json'), loadWeather(app, false)]);
   // The server only keeps the weather once something asked for it fresh: read it fresh once, so the chip on home has degrees.
@@ -107,14 +162,30 @@ export const enter = {
   features: (app) => read(app, 'features', 'api/features'),
   sound: (app) => listDevices(app),
   weather: (app) => loadWeather(app, true),
-  tutorial: (app) => read(app, 'tour', 'tour.json')
+  tutorial: (app) => { store.set('hq-tour-opened', '1'); if (!app.state.tourOpened) app.setState({ tourOpened: true }); return read(app, 'tour', 'tour.json'); }
 };
 
 // The tutorial's pieces that still fit the new design (see the report for the others).
 const DROP_PIECES = new Set(['news', 'team', 'hours', 'sprint', 'mac']);
 const DROP_STEPS = new Set(['notes:Feedback for HQ', 'notes:Connect to the person who makes HQ', 'notes:Invite someone to send you feedback',
-  'settings:Light or dark', 'settings:Microphone and sound, quickly', 'call:She takes it away', 'yours:Change it, add to it', 'yours:Coming soon: shared best practices',
-  'updates:The version number', 'chat:A quick yes']);
+  'yours:Change it, add to it', 'yours:Coming soon: shared best practices']);
+// Who a piece's Ask button calls when tour.json doesn't say: the agent the piece is about.
+const PIECE_AGENT = { coaching: 'pepper', game: 'pepper', moneypenny: 'mp', updates: 'mp', twohq: 'mp', server: 'mp', phone: 'mp', yours: 'mp' };
+const AGENT_KEY = { donna: 'donna', pepper: 'pepper', moneypenny: 'mp', mp: 'mp' };
+
+// The weather's pictures, drawn as one stroke path each in the design's icon style.
+export const WX_PATH = {
+  sun: 'M7 12a5 5 0 1 0 10 0a5 5 0 1 0-10 0M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
+  moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
+  partly: 'M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41M15.95 12.65A4 4 0 0 0 8.35 9.6M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6z',
+  cloud: 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z',
+  fog: 'M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.2M16 17H7M17 21H9',
+  drizzle: 'M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9M8 19v2M8 13v2M16 19v2M16 13v2M12 21v2M12 15v2',
+  rain: 'M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9M16 14v6M8 14v6M12 16v6',
+  snow: 'M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25M8 16h.01M8 20h.01M12 18h.01M12 22h.01M16 16h.01M16 20h.01',
+  storm: 'M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9M13 11l-4 6h6l-4 6'
+};
+const wxPath = (icon) => WX_PATH[icon] || WX_PATH.rain;
 
 const wxIconWord = { sun: 'Sunny', moon: 'Clear', partly: 'Partly cloudy', cloud: 'Cloudy', fog: 'Fog', drizzle: 'Drizzle', rain: 'Rain', snow: 'Snow', storm: 'Storm' };
 const deg = (t) => (t == null ? '–' : Math.round(t) + '°');
@@ -137,7 +208,7 @@ function weatherView(d, err, st) {
   return {
     ready: true, failed: false, word: '',
     temp: deg(n.temp), line: [n.sunny ? 'Sunny' : capFirst(n.text), n.feels != null ? 'feels like ' + deg(n.feels) : '',
-      n.wind != null ? 'wind ' + Math.round(n.wind) + ' km/h' + (n.dir ? ' from the ' + n.dir : '') + ' (' + n.bft + ' Bft)' : '',
+      n.wind != null ? 'wind ' + Math.round(n.wind) + ' km/h' + (n.dir ? ' from the ' + n.dir : '') + ' (' + n.bft + ' Bft)' + (n.gusts != null && n.gusts > n.wind + 4 ? ', gusts ' + Math.round(n.gusts) : '') : '',
       n.raining ? 'raining now' : 'rain ' + (n.chance || 0) + '%'].filter(Boolean).join(' · '),
     hours: (d.hours || []).slice(0, 10).map((h) => ({ key: h.at, t: h.at, deg: deg(h.temp), rain: h.chance ? h.chance + '%' : ' ' })),
     radar: d.radar || 'No rain radar right now', radarAt: mins.length ? mins[0].at + ' to ' + mins[mins.length - 1].at : '',
@@ -148,7 +219,12 @@ function weatherView(d, err, st) {
     noWarn: !(d.warnings || []).length, noWarnLine: /^(KNMI|MeteoAlarm)$/.test(src) ? 'No weather warnings' : 'Weather warnings: ' + (src || 'not read'),
     alertOn: !!(d.alert && d.alert.on), source: 'From Open-Meteo' + (d.radar ? ', Buienradar' : '') + (/^(KNMI|MeteoAlarm)$/.test(src) ? ' and ' + src : '') + (m == null ? '' : ', ' + (m < 1 ? 'just now' : m < 60 ? m + ' minutes ago' : Math.round(m / 60) + ' h ago')),
     place: d.gps ? (d.place && d.place !== 'Your location' ? d.place : 'Where you are') : (d.place || d.home || ''), gps: !!d.gps, home: d.home || '',
-    chip: deg(n.temp), icon: n.icon || '', busy: !!st.wxBusy
+    chip: deg(n.temp), icon: n.icon || '', path: wxPath(n.icon), busy: !!st.wxBusy,
+    // today and tomorrow: high and low, the rain, the wind's strongest gusts
+    days: [['today', 'Today', d.today], ['tomorrow', 'Tomorrow', d.tomorrow]].filter((x) => x[2]).map(([key, name, x]) => ({ key, name, path: wxPath(x.icon),
+      text: capFirst(x.text || wxIconWord[x.icon] || ''), temps: deg(x.max) + ' / ' + deg(x.min),
+      line: [x.chance != null ? 'rain ' + x.chance + '%' + (x.mm ? ', ' + Math.round(x.mm * 10) / 10 + ' mm' : '') : '', x.gusts != null ? 'gusts up to ' + Math.round(x.gusts) + ' km/h' : ''].filter(Boolean).join(' · ') })),
+    hasDays: !!(d.today || d.tomorrow)
   };
 }
 
@@ -192,7 +268,8 @@ export function vals(st, ctx, D) {
   const realPieces = T && Array.isArray(T.pieces) ? T.pieces.filter((p) => !DROP_PIECES.has(p.id)).map((p) => Object.assign({}, p, { steps: (p.steps || []).filter((s) => !DROP_STEPS.has(p.id + ':' + s.title)) })).filter((p) => p.steps.length) : [];
   const piece = !isDemo && st.tourPiece ? realPieces.find((p) => p.id === st.tourPiece) : null;
   const TOUR = isDemo ? DD.tour : piece ? piece.steps.map((s) => [named(s.title), named(s.text)]) : [];
-  const tourOn = st.tour >= 0 && sc === 'home' && TOUR.length > 0;
+  // the demo walks home; a real piece walks over the screens its steps open, wherever they are
+  const tourOn = isDemo ? st.tour >= 0 && sc === 'home' && TOUR.length > 0 : st.tour >= 0 && TOUR.length > 0;
   const tourStep = tourOn ? TOUR[Math.min(st.tour, TOUR.length - 1)] : ['', ''];
   const finishPiece = () => {
     if (!piece) return;
@@ -200,13 +277,49 @@ export function vals(st, ctx, D) {
     store.set('hq-tour-seen', JSON.stringify(seen));
     app.setState({ tourSeen: seen });
   };
+  // A step opens its screen (with its agent's space for her own screens) under the card.
+  const stepTo = (p, i) => {
+    const step = p.steps[i] || {};
+    const patch = { tour: i, tourFound: true };
+    if (step.go) {
+      patch.screen = step.go;
+      patch.stack = step.go === 'home' ? [] : ['home'];
+      if (step.space || ['donna', 'pepper', 'mp'].includes(step.go)) patch.space = step.space || step.go;
+      if (step.go === 'chat') patch.chatAgent = step.space || 'donna';
+    }
+    app.setState(patch);
+    if (step.go && app.entered) app.entered(step.go);
+  };
   const tourNext = isDemo ? () => app.setState((x) => ({ tour: x.tour + 1 >= TOUR.length ? -1 : x.tour + 1 }))
-    : () => { if (st.tour + 1 >= TOUR.length) { finishPiece(); app.setState({ tour: -1, tourPiece: null }); app.go('tutorial'); } else app.setState({ tour: st.tour + 1 }); };
-  const tourClose = isDemo ? () => app.setState({ tour: -1 }) : () => app.setState({ tour: -1, tourPiece: null });
+    : () => { if (!piece) return; if (st.tour + 1 >= TOUR.length) { finishPiece(); app.setState({ tour: -1, tourPiece: null, screen: 'tutorial', stack: ['home'] }); } else stepTo(piece, st.tour + 1); };
+  const tourBack = isDemo ? () => app.setState((x) => ({ tour: Math.max(0, x.tour - 1) })) : () => { if (piece) stepTo(piece, Math.max(0, st.tour - 1)); };
+  const tourClose = isDemo ? () => app.setState({ tour: -1 }) : () => app.setState({ tour: -1, tourPiece: null, screen: 'tutorial', stack: ['home'] });
+  const startPiece = (p) => () => { app.setState({ tourPiece: p.id, tour: 0 }); stepTo(p, 0); };
   const pieces = isDemo
     ? DD.pieces.map((p) => ({ n: p[0], t: p[1], done: p[2], start: () => app.setState({ screen: 'home', stack: [], tour: 0 }) }))
-    : realPieces.map((p, i) => ({ n: String(i + 1), t: named(p.title), done: (st.tourSeen || []).includes(p.id) ? 'Done' : '', key: p.id,
-      start: () => app.setState({ screen: 'home', stack: [], tour: 0, tourPiece: p.id }) }));
+    : realPieces.map((p, i) => {
+      const seen = (st.tourSeen || []).includes(p.id);
+      return { n: seen ? '✓' : String(i + 1), t: named(p.title), line: named(p.line || ''), done: seen ? 'Done' : '', key: p.id, dot: !seen, start: startPiece(p) };
+    });
+  // The card: which piece and step, its made-up example, the Ask button for the piece's agent, and where it sits.
+  const cur = piece ? piece.steps[Math.min(st.tour, piece.steps.length - 1)] || {} : {};
+  const askKey = piece ? AGENT_KEY[piece.agent] || PIECE_AGENT[piece.id] || 'donna' : 'donna';
+  const askAg = AG[askKey] || AG.donna;
+  const demoRows = cur.demo && Array.isArray(cur.demo.items) ? cur.demo.items.map((x, i) => (cur.demo.kind === 'chat'
+    ? { key: i, a: x[0] === 'you' ? 'You' : askAg.name, b: named(x[1]) } : { key: i, a: named(x[0]), b: named(x[1]) })) : [];
+  const spotOn = tourOn && !isDemo && !!cur.spot && st.tourFound !== false;
+  const tourv = {
+    on: tourOn, real: !isDemo && tourOn,
+    count: isDemo ? 'Home · ' + (st.tour + 1) + ' of ' + TOUR.length : (piece ? named(piece.title) : '') + (TOUR.length > 1 ? ' · ' + (st.tour + 1) + ' of ' + TOUR.length : ''),
+    title: tourStep[0], text: tourStep[1], demo: demoRows, hasDemo: demoRows.length > 0,
+    soon: !!cur.soon, where: !isDemo && tourOn && cur.spot && st.tourFound === false ? 'It isn’t on this screen right now: it shows up on a call, or it’s switched off in Settings, What HQ helps you with.' : '',
+    askName: isDemo ? AG.donna.name : askAg.name, askBg: isDemo ? '#f5f3ff' : askAg.tint, askFg: isDemo ? '#6d28d9' : askAg.accent,
+    ask: isDemo ? () => { app.startCall('donna'); app.setState({ demo: true, tour: -1 }); }
+      : () => { const id = piece ? piece.id : ''; app.setState({ tour: -1, tourPiece: null }); app.startCall(askKey, { demo: id }); },
+    align: st.tourAt === 'top' ? 'flex-start' : 'flex-end', pad: st.tourAt === 'top' ? '72px 16px 16px' : '16px 16px 120px',
+    shade: spotOn ? 'transparent' : 'rgba(15,23,42,0.35)', nextLabel: st.tour === TOUR.length - 1 ? 'Done' : 'Next', backOff: st.tour <= 0
+  };
+  if (!isDemo) placeSpotSoon(app, tourOn && cur.spot ? cur.spot : '', askAg.color);
 
   // ---- real settings ----------------------------------------------------------------------
   let setv = null;
@@ -241,7 +354,7 @@ export function vals(st, ctx, D) {
     const ag = (key) => agentsList.find((a) => a.id === ID[key]) || {};
     const voiceOf = (key) => st.voiceIds[key] || ag(key).voice || 'af_heart';
     const voices = ['donna', 'pepper', 'mp'].map((key) => ({ key, name: ag(key).name || AG[key].name, color: AG[key].color, ink: AG[key].ink, initial: (ag(key).name || AG[key].name)[0],
-      v: VOICE_NAME[voiceOf(key)] || voiceOf(key), character: ag(key).character || '',
+      v: VOICE_NAME[voiceOf(key)] || voiceOf(key), character: firstSentence(ag(key).character || ''), hasCharacter: !!ag(key).character,
       opts: VOICES.map(([id, label]) => ({ key: id, v: label, ring: voiceOf(key) === id ? '7px solid ' + AG[key].color : '2px solid #cbd5e1',
         pick: () => { store.set('hq-voice-' + ID[key], id); app.setState((x) => ({ voiceIds: Object.assign({}, x.voiceIds, { [key]: id }) })); } })) }));
     const dev = R.devices || { can: true, ins: [], outs: [] };
@@ -280,6 +393,16 @@ export function vals(st, ctx, D) {
       outs: devRows(dev.outs, out, 'hq-out', 'Speaker'), showOuts: !IS_PHONE && CAN_SINK && dev.outs.length > 0,
       noOutsLine: IS_PHONE ? (IS_IOS ? 'On an iPhone her voice follows the microphone. You can also switch these in Control Center.' : 'Her voice follows the microphone.') : 'This browser can’t choose where her voice plays: it plays where the computer’s own sound goes.',
       noOuts: IS_PHONE || !CAN_SINK || !dev.outs.length,
+      // the browser names the devices only once the page may use the microphone: Show asks once
+      askNames: dev.can && !IS_PHONE && dev.ins.length > 0 && !dev.ins.some((d) => d.label) && typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      showNames: async () => {
+        try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch (e) { say('The browser didn’t allow the microphone.'); }
+        listDevices(app);
+      },
+      // on a Mac: whether music and videos turn down during a call (hq-keep-sound, read when a call opens the mic)
+      isMac: IS_MAC && !IS_PHONE, keepWord: st.keepSound ? 'Normal' : 'Lower',
+      keepLine: st.keepSound ? 'Music and videos stay at their normal volume during a call' : 'Music and videos turn down while you’re on a call',
+      toggleKeep: () => { store.set('hq-keep-sound', st.keepSound ? 'off' : 'on'); app.setState({ keepSound: !st.keepSound }); },
       soundWord: st.sound ? 'On' : 'Off', toggleSound: () => { store.set('hq-sound', st.sound ? 'off' : 'on'); app.setState({ sound: !st.sound }); }, soundBg: sound.bg, soundJust: sound.just,
       weather: W, wxReady: W.ready, wxWait: !W.ready, wxRetry: () => loadWeather(app, true),
       places: [['here', 'Where you are', true], ['home', 'Home' + (W.home ? ' · ' + W.home : ''), false]].map(([id, name, here]) => {
@@ -307,8 +430,8 @@ export function vals(st, ctx, D) {
       featRows, featCount: isDemo ? featCount + ' of ' + FEAT.length + ' on' : setv.featCount, mapsKey: st.feat.driving && st.feat.travel && st.feat.calendar,
       voiceGroups, placeChips, allOn: () => say('Everything is on'),
       tourOn, tourTitle: tourStep[0], tourText: tourStep[1], tourCount: (st.tour + 1) + ' of ' + TOUR.length, tourNextLabel: st.tour === TOUR.length - 1 ? 'Done' : 'Next',
-      tourNext, tourBack: () => app.setState((x) => ({ tour: Math.max(0, x.tour - 1) })), tourClose,
-      pieces,
+      tourNext, tourBack, tourClose, tourv,
+      pieces, tourDot: !isDemo && !st.tourOpened,
       demoMode: !!app.demoMode,
       offline: st.offline, free: isDemo ? st.free : realFree, fresh: isDemo ? st.fresh : freshReal, notFresh: isDemo ? !st.fresh : !freshReal,
       goOnline: isDemo ? () => app.setState({ offline: false }) : () => app.loadAll(),
@@ -322,6 +445,7 @@ export function vals(st, ctx, D) {
       ringMe: () => app.setState({ incoming: true }),
       // The weather chip on home (for the core's home templates).
       wxChip: isDemo ? '7°' : W && W.ready ? W.chip : '',
+      wxIcon: !isDemo && W && W.ready ? W.path : WX_PATH.rain,
       setv: setv || demoSetv(app, st, voiceGroups, placeChips, featRows, featCount, FEAT.length, rain)
     }
   };
@@ -339,10 +463,11 @@ function demoSetv(app, st, voiceGroups, placeChips, featRows, featCount, total, 
     mics: [{ key: 'a', name: 'iPhone microphone', use: 'In use', pick: () => {} }, { key: 'b', name: 'AirPods', use: '', pick: () => {} }], micTitle: 'Microphone', canChoose: true, cantChoose: false,
     outs: [{ key: 'a', name: 'iPhone speaker', use: 'In use', pick: () => {} }, { key: 'b', name: 'AirPods', use: '', pick: () => {} }], showOuts: true,
     noOutsLine: 'On an iPhone you can also switch these in Control Center.', noOuts: true,
-    soundWord: 'On', toggleSound: () => {}, soundBg: '#16a34a', soundJust: 'flex-end',
+    soundWord: 'On', toggleSound: () => {}, soundBg: '#16a34a', soundJust: 'flex-end', askNames: false, showNames: () => {}, isMac: false, keepWord: 'Lower', keepLine: '', toggleKeep: () => {},
     weather: { ready: true, temp: '7°', line: 'Cloudy · feels like 4° · wind 18 km/h from the south-west', hours: D.hours.map((h) => ({ key: h[0], t: h[0], deg: h[1], rain: h[2] || ' ' })),
       radar: 'Rain from about 16:00', radarAt: '16:00', bars: [], hasBars: false, sunrise: '08:21', sunset: '16:36', uv: '1, low', warnings: [], noWarn: true, noWarnLine: 'No weather warnings',
-      alertOn: st.rain, source: 'From the national weather service, 5 minutes ago', place: 'Amsterdam', gps: st.place === 'here', home: 'Amsterdam', chip: '7°', busy: false },
+      alertOn: st.rain, source: 'From the national weather service, 5 minutes ago', place: 'Amsterdam', gps: st.place === 'here', home: 'Amsterdam', chip: '7°', busy: false,
+      path: WX_PATH.rain, days: [], hasDays: false },
     wxReady: true, wxWait: false, wxRetry: () => {},
     places: placeChips.map((p, i) => Object.assign({ key: i ? 'home' : 'here' }, p)),
     toggleRain: () => app.setState((x) => ({ rain: !x.rain })), rainBg: rain.bg, rainJust: rain.just, tourWait: false, tourWord: ''
