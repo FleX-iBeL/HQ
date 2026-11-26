@@ -1,0 +1,27 @@
+/* The Mac layout in a real window, from about 1024 x 700 up to large screens. The
+   prototypes are drawn at 1440 x 900. The root fills the window; the side columns keep
+   the design's widths on a wide window and give a little on a narrow one; the main
+   panel takes the rest, and its content keeps the design's 760 px reading width.
+   Inline styles are matched by their exact text, so these rules need !important.
+   Hand-written; the split never touches this file. */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #f8fafc; }
+#app { height: 100vh; height: 100dvh; min-width: 1024px; min-height: 640px; }
+@media (max-width: 1023px) { html, body { overflow: auto; } }
+
+/* The root: the whole window, not 1440 x 900. */
+#app > div { width: 100% !important; height: 100% !important; }
+
+/* Side columns: the design's width from 1440 px up, a bit narrower below. */
+[style*="width: 300px; flex-shrink: 0"] { width: clamp(256px, 21vw, 300px) !important; }      /* Desk: the three */
+[style*="width: 420px; flex-shrink: 0"] { width: clamp(340px, 29vw, 420px) !important; }      /* Spotlight: her */
+[style*="width: 330px; flex-shrink: 0"] { width: clamp(272px, 23vw, 330px) !important; }      /* Thread: the list */
+[style*="width: 430px; flex-shrink: 0"] { width: clamp(340px, 30vw, 430px) !important; }      /* Thread: her things */
+
+/* Thread's fixed-width cards in the conversation may not run past a narrow middle. */
+[style*="width: 380px; box-sizing: border-box"] { max-width: 100%; }
+
+/* The incoming call: its sides were 480 px on a 1440 px window. */
+[style*="padding: 120px 480px 120px"] { padding-left: max(24px, calc(50% - 240px)) !important; padding-right: max(24px, calc(50% - 240px)) !important; }
+
+/* Dialogs keep their width but never more than the window. */
+[role="dialog"][style*="width: 480px"], [style*="width: 460px; margin: 0 auto"] { max-width: calc(100vw - 48px); }

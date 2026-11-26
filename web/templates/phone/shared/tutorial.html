@@ -1,0 +1,5 @@
+<sc-if value="{{ s.tutorial }}">
+<span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">Everything in here is made up, so try anything.</span>
+<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ demoCall.donna }}" style="background: #6d28d9; color: #fff">Demo Donna</button><button class="pill grow" onClick="{{ demoCall.pepper }}" style="background: #c2410c; color: #fff">Demo Pepper</button></div>
+<div class="list"><sc-for list="{{ pieces }}" as="p"><div class="row" style="cursor: default"><span style="width: 24px; font-size: 13px; font-weight: 700; color: #475569">{{ p.n }}</span><span class="grow" style="font-size: 15px">{{ p.t }}</span><span style="font-size: 13px; font-weight: 600; color: #15803d">{{ p.done }}</span><button class="small" onClick="{{ p.start }}">Start</button></div></sc-for></div>
+</sc-if>

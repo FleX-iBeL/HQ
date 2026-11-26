@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQ tests</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 24px; color: #0f172a; }
+  h1 { font-size: 20px; margin: 0 0 4px; } .sum { font-weight: 700; margin: 12px 0; }
+  .ok { color: #15803d; } .bad { color: #b42318; } li { margin: 2px 0; }
+  #scratch { position: absolute; left: -10000px; top: 0; width: 400px; }
+  iframe { position: absolute; left: -20000px; top: 0; border: 0; }
+  a { color: #475569; }
+</style>
+</head>
+<body>
+<h1>HQ tests</h1>
+<p><a href="tests.html">Engine tests</a> · <a href="tests.html?smoke">Smoke: all six combinations, every screen, every button</a></p>
+<div class="sum" id="sum">Running…</div>
+<ul id="out"></ul>
+<div id="scratch"></div>
+<script type="module">
+const out = document.getElementById('out');
+const line = (good, text) => { const li = document.createElement('li'); li.className = good ? 'ok' : 'bad'; li.textContent = (good ? 'pass  ' : 'FAIL  ') + text; out.appendChild(li); console.log((good ? 'pass ' : 'FAIL ') + text); };
+const done = (text, bad) => { const s = document.getElementById('sum'); s.textContent = text; s.className = 'sum ' + (bad ? 'bad' : 'ok'); console.log(text); window.TEST_RESULT = text; };
+
+if (!new URLSearchParams(location.search).has('smoke')) {
+  const { run } = await import('./tests/engine.test.js');
+  const { pass, fail } = await run(line);
+  done(pass + ' passed, ' + fail + ' failed', fail);
+} else {
+  // Smoke: the real app in an off-screen frame, per device and design: every screen (also on
+  // a call, and in the Free, offline and first-run states), and every button on it clicked
+  // once, each from the same saved state. Reports any error with its screen and handler.
+  const { SCREENS } = await import('./logic/core.js');
+  const WIDTH = { phone: [390, 844], mac: [1440, 900] };
+  const VARIANTS = [{}, { onCall: true, callAgent: 'pepper' }, { free: true, offline: true, fresh: true }, { space: 'mp', second: 'donna', onCall: true }];
+  let errors = 0, clicks = 0, visits = 0;
+  let saved = null; try { saved = localStorage.getItem('hq-design'); } catch (e) {}
+  for (const device of ['phone', 'mac']) {
+    const frame = document.createElement('iframe');
+    frame.width = WIDTH[device][0]; frame.height = WIDTH[device][1];
+    frame.src = 'index.html?demo=1'; // demo mode: the design-review rows are clicked too
+    document.body.appendChild(frame);
+    await new Promise((r) => frame.onload = r);
+    const w = frame.contentWindow;
+    await w.HQ.ready;
+    for (const design of ['spotlight', 'thread', 'desk']) {
+      await w.HQ.show(device, design);
+      const c = w.HQ.component;
+      let where = '';
+      w.HQ.onError = (err, info) => { errors++; line(false, device + ' ' + design + ' ' + where + ' ' + (info.handler || info.in || '') + ': ' + err.message); };
+      w.onerror = (msg) => { errors++; line(false, device + ' ' + design + ' ' + where + ' (later): ' + msg); };
+      const base = JSON.parse(JSON.stringify(c.state));
+      let n = 0;
+      for (const variant of VARIANTS) {
+        for (const screen of SCREENS) {
+          const at = Object.assign({}, base, variant, { screen, stack: screen === 'home' ? [] : ['home'], space: variant.space || (['donna', 'pepper', 'mp'].includes(screen) ? screen : base.space) });
+          const reset = () => { c.state = JSON.parse(JSON.stringify(at)); w.HQ.app.render(); };
+          where = screen + (Object.keys(variant).length ? ' (' + Object.keys(variant).join('+') + ')' : '');
+          reset(); visits++;
+          const count = () => [...frame.contentDocument.querySelectorAll('#app *')].filter((el) => el.__on && el.__on.click);
+          const total = count().length;
+          for (let i = 0; i < total; i++) {
+            reset();
+            const el = count()[i];
+            if (!el) continue;
+            where = screen + ' button ' + i + ' (' + el.__src.click + ')';
+            el.click(); clicks++; n++;
+            w.HQ.app.flush();
+            if (c.state.design !== design) { await w.HQ.show(device, design); c.state.design = design; }
+          }
+        }
+      }
+      c.state = base; w.HQ.app.render();
+      line(true, device + ' ' + design + ': ' + n + ' clicks over ' + SCREENS.length * VARIANTS.length + ' screen visits');
+    }
+    frame.remove();
+  }
+  try { if (saved == null) localStorage.removeItem('hq-design'); else localStorage.setItem('hq-design', saved); } catch (e) {}
+  await new Promise((r) => setTimeout(r, 2500)); // let timers from the clicks (toasts, the update) run
+  done('Smoke: ' + visits + ' screen visits, ' + clicks + ' clicks, ' + errors + ' errors', errors);
+}
+</script>
+</body>
+</html>

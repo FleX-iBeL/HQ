@@ -1,0 +1,5 @@
+<sc-if value="{{ s.checkin }}">
+<div style="padding: 20px; border-radius: 24px; background: #fff3ec; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; font-weight: 600; color: #c2410c">Due today · 17:00</span><span class="h" style="font-size: 24px">Weekly check-in</span><span style="font-size: 15px; line-height: 22px">About 15 minutes. Pepper looks back at the week with you and sets up the next one.</span></div>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ call.pepper }}" style="background: #c2410c; color: #ffffff">Start now</button><button class="pill grow" onClick="{{ back }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Not now</button></div>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">End of the game</span><span class="muted" style="font-size: 13px">in 30 days</span></div><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">The big one, every 8 weeks</span><span class="muted" style="font-size: 13px">in 5 weeks</span></div></div>
+</sc-if>

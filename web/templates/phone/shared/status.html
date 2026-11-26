@@ -1,0 +1,16 @@
+<sc-if value="{{ s.status }}">
+<div style="padding: 16px 18px; border-radius: 20px; background: #f0fdf4; display: flex; align-items: center; gap: 10px"><span style="width: 10px; height: 10px; border-radius: 5px; background: #16a34a"></span><span style="font-size: 15px; font-weight: 600; color: #14532d">Everything is running</span></div>
+<h2 class="lab" style="margin: 0 4px">Being worked on</h2>
+<div class="list"><sc-for list="{{ working }}" as="w"><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 8px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">{{ w.name }}</span><span class="muted" style="font-size: 13px">{{ w.state }}</span></span><span class="bar"><span style="display: block; width: {{ w.pct }}%; height: 6px; background: #ca8a04"></span></span></div></sc-for></div>
+<h2 class="lab" style="margin: 0 4px">Usage</h2>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 14px">
+<span class="col" style="gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 14px"><span style="font-weight: 600">5-hour</span><span class="muted">34% · resets 18:10</span></span><span class="bar"><span style="display: block; width: 34%; height: 6px; background: #0f172a"></span></span></span>
+<span class="col" style="gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 14px"><span style="font-weight: 600">Weekly</span><span class="muted">61% · resets Monday</span></span><span class="bar"><span style="display: block; width: 61%; height: 6px; background: #0f172a"></span></span></span>
+</div>
+<div class="list">
+<button class="row" onClick="{{ nav.planning }}"><span class="grow" style="font-size: 15px; font-weight: 600">The planning board</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.sessions }}"><span class="grow" style="font-size: 15px; font-weight: 600">Work sessions</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.health }}"><span class="grow" style="font-size: 15px; font-weight: 600">Health</span><span class="muted" style="font-size: 13px">routines, the laptop, incidents</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.updates }}"><span class="grow" style="font-size: 15px; font-weight: 600">Updates</span><span class="muted" style="font-size: 13px">you’re on the latest</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</div>
+</sc-if>

@@ -1,0 +1,9 @@
+workspace
+scratch/
+.status/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+models/
+node_modules/

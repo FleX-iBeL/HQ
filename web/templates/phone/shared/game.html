@@ -1,0 +1,21 @@
+<sc-if value="{{ s.game }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px"><span class="lab">Day 12 of 42 · playing</span><span style="font-size: 16px; line-height: 23px; font-weight: 600">Walk every morning and read 20 pages, five days a week.</span>
+<div style="position: relative; height: 10px; border-radius: 5px; background: #f1f5f9"><div style="width: 34%; height: 10px; border-radius: 5px; background: #c2410c"></div><div style="position: absolute; left: 28%; top: -4px; width: 2px; height: 18px; background: #0f172a"></div></div>
+<span style="font-size: 13px; font-weight: 600; color: #15803d">On track: a little ahead of what it takes</span></div>
+<h2 class="lab" style="margin: 0 4px">Today</h2>
+<div class="list">
+<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Morning walk</span><button class="small" onClick="{{ walkToggle }}" style="background: {{ walkBg }}; color: {{ walkFg }}">{{ walkLabel }}</button></div>
+<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Pages read</span><button class="small" aria-label="One less" onClick="{{ pagesDown }}">−</button><span style="width: 32px; text-align: center; font-family: var(--hq-display); font-weight: 700">{{ pages }}</span><button class="small" aria-label="One more" onClick="{{ pagesUp }}">+</button></div>
+</div>
+<h2 class="lab" style="margin: 0 4px">The last two weeks</h2>
+<div class="card" style="padding: 14px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{ grid }}" as="g"><span style="height: 34px; border-radius: 10px; background: {{ g.bg }}; color: {{ g.fg }}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; box-shadow: {{ g.ring }}">{{ g.d }}</span></sc-for>
+</div>
+<h2 class="lab" style="margin: 0 4px">The game card</h2>
+<div class="list"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What it’s for</span><span style="font-size: 15px">Steady mornings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">The rules</span><span style="font-size: 15px">5 of 7 days</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">At my best</span><span style="font-size: 15px">Up before 7</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What could get in the way</span><span style="font-size: 15px">Late evenings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What keeps me honest</span><span style="font-size: 15px">Friday with Pepper</span></div></div>
+<h2 class="lab" style="margin: 0 4px">Diary</h2>
+<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div class="tbox"><label for="dk-diary" class="sr">How was today?</label><input id="dk-diary" placeholder="How was today?"></div><div style="display: flex; gap: 6px"><sc-for list="{{ feelChips }}" as="f"><button class="chip" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></div>
+<h2 class="lab" style="margin: 0 4px">This week’s look back</h2>
+<sc-if value="{{ notKept }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span style="font-size: 15px; line-height: 22px">What made this week easier than the last?</span><div class="tbox"><label for="dk-look" class="sr">Your answer</label><input id="dk-look" placeholder="A line or two"></div><button class="pill" onClick="{{ keepIt }}" style="align-self: flex-start; background: #c2410c; color: #ffffff">Keep it</button></div></sc-if>
+<sc-if value="{{ kept }}"><div class="card" style="padding: 16px 18px; font-size: 15px">Kept. Pepper reads it at Friday’s check-in.</div></sc-if>
+</sc-if>

@@ -1,0 +1,17 @@
+<sc-if value="{{ s.lists }}">
+<div role="tablist" aria-label="Lists" style="display: flex; gap: 6px">
+<sc-for list="{{ listTabs }}" as="t"><button role="tab" aria-selected="{{ t.on }}" class="chip" onClick="{{ t.pick }}" style="background: {{ t.bg }}; color: {{ t.fg }}; box-shadow: {{ t.shadow }}">{{ t.name }}</button></sc-for>
+</div>
+<hq-include name="groceries"></hq-include>
+<sc-if value="{{ lt.bucket }}">
+<div class="card" style="padding: 16px 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px"><span class="col"><span class="h" style="font-size: 18px">€4,070</span><span class="muted" style="font-size: 12px">once</span></span><span class="col"><span class="h" style="font-size: 18px">160 h</span><span class="muted" style="font-size: 12px">time</span></span><span class="col"><span class="h" style="font-size: 18px">1 of 5</span><span class="muted" style="font-size: 12px">done</span></span></div>
+<div class="list"><sc-for list="{{ bucket }}" as="b"><button class="row" onClick="{{ b.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ b.name }}</span><span class="muted" style="font-size: 13px">{{ b.meta }}</span></span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div>
+<!-- HQ: the add box the prototypes left out, in the style of the to-do list's -->
+<div class="tbox"><label for="hq-bucket-add" class="sr">Add to your bucketlist</label><input id="hq-bucket-add" placeholder="Add to your bucketlist" value="{{ drafts.bucket }}" onInput="{{ typed.bucket }}" onKeyDown="{{ enter.bucket }}"></div>
+</sc-if>
+<sc-if value="{{ lt.wish }}">
+<div class="list"><sc-for list="{{ wish }}" as="b"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ b.name }}</span><span class="muted" style="font-size: 13px">{{ b.meta }}</span></span></div></sc-for></div>
+<!-- HQ: the add box the prototypes left out, in the style of the to-do list's -->
+<div class="tbox"><label for="hq-wish-add" class="sr">Add to your wishlist</label><input id="hq-wish-add" placeholder="Add to your wishlist" value="{{ drafts.wish }}" onInput="{{ typed.wish }}" onKeyDown="{{ enter.wish }}"></div>
+</sc-if>
+</sc-if>

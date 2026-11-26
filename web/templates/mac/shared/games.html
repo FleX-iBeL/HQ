@@ -1,0 +1,5 @@
+<sc-if value="{{ s.games }}">
+<button class="card" onClick="{{ openGame }}" style="border: none; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #c2410c">Playing · day 12 of 42</span><span class="h" style="font-size: 20px">Mornings</span><span class="muted" style="font-size: 14px; line-height: 20px">Walk every morning and read 20 pages, five days a week.</span><span style="font-size: 13px; font-weight: 600; color: #15803d">On track</span></button>
+<h2 class="lab" style="margin: 0 4px">Past games</h2>
+<div class="list"><sc-for list="{{ pastGames }}" as="g"><button class="row" onClick="{{ g.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.meta }}</span></span></button></sc-for></div>
+</sc-if>

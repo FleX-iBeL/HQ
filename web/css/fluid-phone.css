@@ -1,0 +1,28 @@
+/* The phone layout on a real screen. The prototypes are drawn at 390 x 844 with a fake
+   status bar and home bar; here the root fills the screen and those spaces become the
+   safe-area insets plus a normal margin. Inline styles in the templates are matched by
+   their exact text, so these rules need !important. Hand-written; the split never
+   touches this file. */
+:root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #f8fafc; }
+#app { height: 100vh; height: 100dvh; }
+
+/* The root: the whole screen, not 390 x 844. */
+#app > div { width: 100% !important; height: 100vh !important; height: 100dvh !important; }
+
+/* Top: the status bar's space becomes the inset plus a margin. */
+.pad { padding-top: calc(var(--sat) + 12px); padding-bottom: calc(var(--sab) + 16px); }
+.pad.pt { padding-top: 12px; }
+[style*="margin: 50px 12px 0"] { margin-top: calc(var(--sat) + 8px) !important; }
+[style*="padding: 52px "], [style*="padding-top: 52px"] { padding-top: calc(var(--sat) + 12px) !important; }
+[style*="padding: 56px 20px 36px"] { padding-top: calc(var(--sat) + 16px) !important; padding-bottom: calc(var(--sab) + 20px) !important; }
+[style*="top: 56px"] { top: calc(var(--sat) + 12px) !important; }
+[style*="padding: 120px 24px 60px"] { padding-top: calc(var(--sat) + 80px) !important; padding-bottom: calc(var(--sab) + 40px) !important; }
+
+/* Bottom: the home bar's space becomes the inset plus a margin. */
+[style*="padding: 10px 16px 34px"], [style*="padding: 16px 16px 36px"] { padding-bottom: calc(var(--sab) + 16px) !important; }
+[style*="padding: 8px 12px 30px"], [style*="padding: 10px 12px 30px"], [style*="padding: 10px 18px 30px"],
+[style*="padding: 10px 16px 28px"], [style*="padding: 0 20px 30px"] { padding-bottom: calc(var(--sab) + 12px) !important; }
+
+/* Narrow phones (360 px): chat bubbles may not be wider than the screen. */
+[style*="max-width: 280px"] { max-width: min(280px, 78vw) !important; }

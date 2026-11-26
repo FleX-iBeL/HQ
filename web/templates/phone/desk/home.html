@@ -1,0 +1,48 @@
+<sc-if value="{{ s.home }}">
+<div class="pad {{ padCls }}">
+<div class="top" style="padding: 0 4px">
+<h1 class="h grow" style="font-size: 24px; line-height: 30px">Thursday 26</h1>
+<button onClick="{{ nav.weather }}" style="height: 40px; padding: 0 12px; display: flex; align-items: center; gap: 6px; border: none; border-radius: 20px; background: #ffffff; color: #0f172a; font: 600 13px Inter, sans-serif; box-shadow: 0 0 0 1px #e2e8f0 inset; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9"></path><path d="M16 14v6M8 14v6M12 16v6"></path></svg>7°</button>
+<button class="iconbtn" aria-label="Tutorial" onClick="{{ nav.tutorial }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg></button>
+<button class="iconbtn" aria-label="Settings" onClick="{{ nav.settings }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg></button>
+</div>
+<sc-if value="{{ free }}"><div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 18px; background: #0f172a; color: #ffffff"><span style="padding: 2px 8px; border-radius: 8px; background: #ffffff; color: #0f172a; font-size: 11px; font-weight: 800; letter-spacing: 0.06em">FREE</span><span style="font-size: 13px; line-height: 18px">Plain Claude: none of your files, nothing saved.</span></div></sc-if>
+<sc-if value="{{ offline }}"><div style="display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-radius: 18px; background: #fef3c7; color: #78350f"><span style="width: 8px; height: 8px; border-radius: 4px; background: #d97706; flex-shrink: 0"></span><span class="grow" style="font-size: 13px; line-height: 18px">HQ doesn’t answer right now. This is from 14:02.</span><button class="small" onClick="{{ goOnline }}" style="background: #ffffff">Try again</button></div></sc-if>
+
+<button class="card" onClick="{{ open.donna }}" style="border: none; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; font: inherit; color: #0f172a; cursor: pointer">
+<span class="top" style="width: 100%"><span class="face" style="width: 36px; height: 36px; background: #6d28d9; color: #ffffff; font-size: 15px">D</span><span class="h grow" style="font-size: 17px">Donna</span><span style="font-size: 13px; color: #b42318; font-weight: 600">1 important mail</span></span>
+<span class="col" style="gap: 2px"><span class="h" style="font-size: 22px; line-height: 28px">Dentist at 15:00</span><span class="muted" style="font-size: 14px">Leave at 14:40 · {{ nudgeCount }} nudges</span></span>
+</button>
+<button class="card" onClick="{{ open.pepper }}" style="border: none; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; font: inherit; color: #0f172a; cursor: pointer">
+<span class="top" style="width: 100%"><span class="face" style="width: 36px; height: 36px; background: #c2410c; color: #ffffff; font-size: 15px">P</span><span class="h grow" style="font-size: 17px">Pepper</span><span class="muted" style="font-size: 13px">Day 12 of the game</span></span>
+<span class="col" style="gap: 2px"><span class="h" style="font-size: 22px; line-height: 28px">Weekly check-in</span><span class="muted" style="font-size: 14px">Due at 17:00 · about 15 minutes</span></span>
+</button>
+<button class="card" onClick="{{ open.mp }}" style="border: none; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; font: inherit; color: #0f172a; cursor: pointer">
+<span class="top" style="width: 100%"><span class="face" style="width: 36px; height: 36px; background: #ca8a04; color: #0f172a; font-size: 15px">M</span><span class="h grow" style="font-size: 17px">Moneypenny</span><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #15803d; font-weight: 600"><span style="width: 8px; height: 8px; border-radius: 4px; background: #16a34a"></span>All running</span></span>
+<span class="col" style="gap: 2px"><span class="h" style="font-size: 22px; line-height: 28px">Calendar clean-up</span><span class="muted" style="font-size: 14px">New hand-over for you and Claude Code</span></span>
+</button>
+
+<div class="col" style="gap: 10px">
+<div class="top" style="padding: 0 4px"><h2 class="h grow" style="font-size: 17px">Today</h2><button onClick="{{ nav.agenda }}" style="border: none; background: transparent; font: 600 13px Inter, sans-serif; color: #6d28d9; cursor: pointer; padding: 8px 0">Agenda</button></div>
+<div style="display: flex; align-items: stretch; gap: 8px; margin-right: -16px; overflow-x: auto; padding-bottom: 2px">
+<sc-for list="{{ todayRow }}" as="t">
+<sc-if value="{{ t.isNow }}"><div style="flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px"><span style="padding: 2px 8px; border-radius: 9px; background: #0f172a; color: #ffffff; font-size: 11px; font-weight: 700">Now</span><span style="width: 2px; flex-grow: 1; background: #0f172a"></span></div></sc-if>
+<sc-if value="{{ t.isItem }}"><button onClick="{{ t.open }}" style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: none; border-radius: 16px; background: {{ t.bg }}; box-shadow: {{ t.shadow }}; text-align: left; font: inherit; cursor: pointer"><span style="font-size: 12px; font-weight: 600; color: {{ t.tc }}">{{ t.time }}</span><span style="font-size: 14px; font-weight: 600; color: {{ t.fc }}">{{ t.title }}</span></button></sc-if>
+</sc-for>
+</div>
+</div>
+
+<div style="flex-grow: 1"></div>
+<div class="col" style="gap: 8px">
+<div role="radiogroup" aria-label="Talk to" style="display: flex; gap: 6px; padding: 0 4px">
+<sc-for list="{{ textChips }}" as="c"><button role="radio" aria-checked="{{ c.on }}" class="chip" onClick="{{ c.pick }}" style="background: {{ c.bg }}; color: {{ c.fg }}; box-shadow: {{ c.shadow }}">{{ c.name }}</button></sc-for>
+</div>
+<div class="tbox">
+<label for="dk-home-text" class="sr">Text {{ tt.name }}</label>
+<input id="dk-home-text" placeholder="Text {{ tt.name }}">
+<button aria-label="Send to {{ tt.name }}" onClick="{{ chat.textTo }}" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: #f1f5f9; color: #0f172a; cursor: pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button>
+<button aria-label="Call {{ tt.name }}" onClick="{{ call.textTo }}" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: {{ tt.color }}; color: {{ tt.ink }}; cursor: pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
+</div>
+</div>
+</div>
+</sc-if>

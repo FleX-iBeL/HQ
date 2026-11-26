@@ -1,0 +1,4 @@
+<sc-if value="{{ s.map }}">
+<span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">From the life you want in three to five years, down to this week. Tap a layer to work on it with Pepper.</span>
+<div class="list"><sc-for list="{{ layers }}" as="l"><button class="row" onClick="{{ l.open }}" style="flex-direction: column; align-items: stretch; gap: 8px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">{{ l.name }}</span><span class="muted" style="font-size: 13px">{{ l.st }}</span></span><span class="bar"><span style="display: block; width: {{ l.pct }}%; height: 6px; background: #c2410c"></span></span></button></sc-for></div>
+</sc-if>

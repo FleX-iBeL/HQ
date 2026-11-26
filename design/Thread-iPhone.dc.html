@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thread, clickable iPhone prototype</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+
+body{margin:0}
+a{color:#475569}a:hover{color:#0f172a}
+.pad{flex-grow:1;min-height:0;overflow-y:auto;box-sizing:border-box;padding:52px 16px 28px;display:flex;flex-direction:column;gap:14px}
+.pad.pt{padding-top:12px}
+.card{background:#ffffff;border-radius:24px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 0 0 1px #e2e8f0 inset}
+.list{display:flex;flex-direction:column;background:#ffffff;border-radius:24px;box-shadow:0 0 0 1px #e2e8f0 inset;overflow:hidden}
+.h{font-family:Inter, sans-serif;font-weight:700;letter-spacing:-0.03em;margin:0}
+.muted{color:#475569}
+.lab{font-size:13px;font-weight:600;color:#475569}
+.row{display:flex;align-items:center;gap:12px;padding:14px 18px;border:0;border-bottom:1px solid #f1f5f9;background:transparent;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:#0f172a;cursor:pointer;text-decoration:none}
+.row:last-child{border-bottom:0}
+.iconbtn{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:none;border-radius:22px;background:#ffffff;color:#0f172a;box-shadow:0 0 0 1px #e2e8f0 inset;cursor:pointer}
+.pill{height:44px;padding:0 18px;flex-shrink:0;border:none;border-radius:22px;font:600 14px Inter,sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.chip{height:36px;padding:0 14px;flex-shrink:0;border:none;border-radius:18px;font:600 13px Inter,sans-serif;cursor:pointer}
+.small{height:40px;padding:0 14px;border:none;border-radius:20px;background:#f1f5f9;color:#0f172a;font:600 13px Inter,sans-serif;cursor:pointer;flex-shrink:0}
+.face{border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:Inter, sans-serif;font-weight:600;flex-shrink:0}
+.top{display:flex;align-items:center;gap:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.bar{height:6px;border-radius:3px;background:#f1f5f9;overflow:hidden}
+.grow{flex-grow:1;min-width:0}
+.col{display:flex;flex-direction:column}
+.tbox{display:flex;align-items:center;gap:8px;padding:5px 5px 5px 16px;border-radius:28px;background:#ffffff;box-shadow:0 0 0 1px #e2e8f0 inset}
+.tbox input{flex-grow:1;min-width:0;border:none;outline:none;background:transparent;font:400 15px Inter,sans-serif;color:#0f172a}
+
+[style*="overflow-y: auto"] > *, .pad > * { flex-shrink: 0 }
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; display: flex; flex-direction: column; background: #ffffff; color: #111114; font-family: Inter, system-ui, sans-serif">
+
+<sc-if value="{{ showMini }}" hint-placeholder-val="{{ false }}">
+<button onClick="{{ nav.call }}" style="margin: 50px 12px 0; height: 52px; flex-shrink: 0; padding: 0 8px; display: flex; align-items: center; gap: 10px; border: none; border-radius: 26px; background: {{ ca.color }}; color: {{ ca.ink }}; font: 600 14px Inter, sans-serif; cursor: pointer">
+<span class="face" style="width: 36px; height: 36px; background: rgba(255,255,255,0.25); font-size: 14px">{{ ca.initial }}</span>
+<span style="flex-grow: 1; text-align: left">On a call with {{ ca.name }} · {{ phase }}</span>
+<span style="padding: 0 12px; font-size: 13px">Open</span>
+</button>
+</sc-if>
+
+<!-- HOME: three conversations -->
+<sc-if value="{{ s.home }}" hint-placeholder-val="{{ true }}">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; padding-top: {{ chatTop }}">
+<div class="top" style="padding: 0 10px">
+<button class="iconbtn" aria-label="Tutorial" onClick="{{ nav.tutorial }}" style="box-shadow: none; background: transparent"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg></button>
+<div class="grow"></div>
+<button class="iconbtn" aria-label="Settings" onClick="{{ nav.settings }}" style="box-shadow: none; background: transparent"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg></button>
+</div>
+<div class="col" style="padding: 2px 20px 14px; gap: 2px"><h1 class="h" style="font-size: 34px; line-height: 41px">HQ</h1><button onClick="{{ nav.weather }}" style="align-self: flex-start; border: none; background: transparent; padding: 2px 0; font: 400 15px Inter, sans-serif; color: #55555c; cursor: pointer">Thursday · 7° and rain from 16:00</button></div>
+<sc-if value="{{ free }}" hint-placeholder-val="{{ false }}"><div style="margin: 0 16px 10px; padding: 10px 14px; border-radius: 14px; background: #111114; color: #ffffff; font-size: 13px"><b>FREE</b> · Plain Claude: none of your files, nothing saved.</div></sc-if>
+<sc-if value="{{ offline }}" hint-placeholder-val="{{ false }}"><div style="margin: 0 16px 10px; padding: 8px 8px 8px 14px; border-radius: 14px; background: #fef3c7; color: #78350f; display: flex; align-items: center; gap: 10px; font-size: 13px"><span class="grow">HQ doesn’t answer right now.</span><button class="small" onClick="{{ goOnline }}" style="background: #ffffff">Try again</button></div></sc-if>
+<sc-for list="{{ chatList }}" as="c" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 20px">
+<span class="face" style="width: 58px; height: 58px; background: {{ c.color }}; color: {{ c.ink }}; font-size: 23px">{{ c.initial }}</span>
+<button onClick="{{ c.open }}" class="grow col" style="gap: 2px; padding: 4px 0 14px; border: none; border-bottom: 1px solid #e8e8ec; background: transparent; text-align: left; font: inherit; color: #111114; cursor: pointer">
+<span style="display: flex; justify-content: space-between; align-items: baseline; width: 100%"><span style="font-size: 17px; font-weight: 600">{{ c.name }}</span><span style="font-size: 14px; color: {{ c.tc }}; font-weight: 600">{{ c.time }}</span></span>
+<span style="display: flex; align-items: center; gap: 8px; width: 100%"><span class="grow" style="font-size: 15px; line-height: 20px; color: #3c3c43">{{ c.preview }}</span><sc-if value="{{ c.hasUnread }}" hint-placeholder-val="{{ false }}"><span style="min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box; border-radius: 11px; background: {{ c.color }}; color: {{ c.ink }}; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center">{{ c.unread }}</span></sc-if></span>
+</button>
+<button class="iconbtn" aria-label="Call {{ c.name }}" onClick="{{ c.call }}" style="background: #f2f2f5; box-shadow: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
+</div>
+</sc-for>
+<div style="flex-grow: 1"></div>
+<div class="col" style="align-items: center; gap: 12px; padding: 0 20px 30px">
+<div role="radiogroup" aria-label="Talk to" style="display: flex; gap: 6px"><sc-for list="{{ textChips }}" as="c" hint-placeholder-count="3"><button role="radio" aria-checked="{{ c.on }}" class="chip" onClick="{{ c.pick }}" style="background: {{ c.bg }}; color: {{ c.fg }}; box-shadow: {{ c.shadow }}">{{ c.name }}</button></sc-for></div>
+<button onClick="{{ call.textTo }}" aria-label="Hold to talk to {{ tt.name }}" style="width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; border: none; border-radius: 42px; background: #111114; color: #ffffff; cursor: pointer"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></button>
+<span style="font-size: 14px; color: #55555c">Hold to talk to <b style="color: {{ tt.accent }}">{{ tt.name }}</b></span>
+</div>
+</div>
+</sc-if>
+
+<!-- HER THREAD: her things live inside the conversation -->
+<sc-if value="{{ s.space }}" hint-placeholder-val="{{ false }}">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column">
+<div style="padding: {{ chatTop }} 12px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #ececf0; background: #fbfbfc">
+<div class="top" style="gap: 8px">
+<button class="iconbtn" aria-label="Back to the three" onClick="{{ back }}" style="box-shadow: none; background: transparent; color: {{ sa.accent }}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></button>
+<span class="face" style="width: 40px; height: 40px; background: {{ sa.color }}; color: {{ sa.ink }}; font-size: 16px">{{ sa.initial }}</span>
+<div class="grow col"><h1 class="h" style="font-size: 17px; letter-spacing: -0.01em">{{ sa.name }}</h1><span class="muted" style="font-size: 12px">{{ sa.role }}</span></div>
+<button class="iconbtn" aria-label="Call {{ sa.name }}" onClick="{{ call.space }}" style="background: {{ sa.color }}; color: {{ sa.ink }}; box-shadow: none"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
+</div>
+<div style="display: flex; gap: 6px; padding: 0 6px; overflow-x: auto"><sc-for list="{{ spaceRows }}" as="r" hint-placeholder-count="5"><button onClick="{{ r.go }}" style="flex-shrink: 0; height: 36px; padding: 0 12px; border: none; border-radius: 18px; background: {{ sa.tint }}; color: {{ sa.accent }}; font: 600 13px Inter, sans-serif; cursor: pointer">{{ r.label }}</button></sc-for></div>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px">
+<span style="align-self: center; padding: 4px 10px; border-radius: 10px; background: #f2f2f5; font-size: 12px; font-weight: 600; color: #55555c">Today</span>
+<sc-for list="{{ spaceBubbles }}" as="b" hint-placeholder-count="3"><div style="align-self: {{ b.align }}; max-width: 280px; padding: 9px 14px; border-radius: {{ b.radius }}; background: {{ b.bg }}; color: {{ b.fg }}; font-size: 15px; line-height: 21px">{{ b.t }}</div></sc-for>
+<div style="align-self: flex-start; width: 300px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 20px; box-shadow: 0 0 0 1px #e4e4ea inset"><span style="font-size: 12px; font-weight: 700; color: {{ sa.accent }}">{{ sa.kicker }}</span><span style="font-size: 18px; font-weight: 700">{{ sa.headline }}</span><span style="font-size: 14px; color: #3c3c43">{{ sa.sub }}</span><sc-if value="{{ sa.hasAction }}" hint-placeholder-val="{{ false }}"><button class="pill" onClick="{{ sa.action }}" style="align-self: flex-start; margin-top: 6px; height: 40px; background: {{ sa.color }}; color: {{ sa.ink }}">{{ sa.actionLabel }}</button></sc-if></div>
+<sc-if value="{{ s.donna }}" hint-placeholder-val="{{ false }}"><div style="align-self: flex-start; width: 300px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 20px; background: #f7f7f9"><span style="font-size: 12px; font-weight: 700; color: #55555c">STILL OPEN · I’LL KEEP NUDGING</span><sc-for list="{{ nudges }}" as="n" hint-placeholder-count="2"><div class="top"><span class="grow" style="font-size: 15px; font-weight: 600; text-decoration: {{ n.deco }}; color: {{ n.fc }}">{{ n.title }}</span><button class="small" onClick="{{ n.toggle }}" style="background: #ffffff; box-shadow: 0 0 0 1px #e4e4ea inset">{{ n.label }}</button></div></sc-for></div></sc-if>
+<sc-if value="{{ s.mp }}" hint-placeholder-val="{{ false }}"><button onClick="{{ nav.status }}" style="align-self: flex-start; width: 300px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: none; border-radius: 20px; background: #f7f7f9; text-align: left; font: inherit; color: #111114; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #15803d">STATUS · EVERYTHING IS RUNNING</span><span style="font-size: 14px">Usage 34% now, 61% this week · 2 things being worked on</span><span style="font-size: 13px; font-weight: 600; color: #854d0e">Open Status</span></button></sc-if>
+<span style="padding-left: 6px; font-size: 12px; color: #55555c">{{ sa.name }} · 14:02</span>
+</div>
+<div style="padding: 8px 12px 30px; display: flex; align-items: center; gap: 8px; border-top: 1px solid #ececf0; background: #fbfbfc">
+<div class="tbox grow" style="padding: 0 6px 0 16px; height: 44px"><label for="th-space-text" class="sr">Text {{ sa.name }}</label><input id="th-space-text" placeholder="Text {{ sa.name }}"></div>
+<button aria-label="Hold to talk to {{ sa.name }}" onClick="{{ call.space }}" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: #111114; color: #ffffff; cursor: pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><path d="M12 19v3"></path></svg></button>
+</div>
+</div>
+</sc-if>
+
+<!-- CALL -->
+<sc-if value="{{ s.call }}" hint-placeholder-val="{{ false }}">
+<div style="position: relative; flex-grow: 1; box-sizing: border-box; padding: 56px 20px 36px; display: flex; flex-direction: column; align-items: center; gap: 16px; background: {{ callBg }}">
+<div class="top" style="width: 100%">
+<button class="iconbtn" aria-label="Back to HQ, the call keeps going" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<span class="grow" style="text-align: center; font-size: 14px; font-weight: 600">On a call · 00:42</span>
+<button class="iconbtn" aria-label="What was said" onClick="{{ chat.call }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>
+</div>
+<sc-if value="{{ demoOn }}" hint-placeholder-val="{{ false }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 14px; background: #ffffff; font-size: 13px; font-weight: 600; text-align: center">Demo call · nothing is saved or changed</div></sc-if>
+<sc-if value="{{ callErr }}" hint-placeholder-val="{{ false }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 10px 10px 14px; border-radius: 14px; background: #fef2f2; color: #991b1b; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 13px; line-height: 18px">The call line doesn’t answer. HQ keeps trying.</span><button class="small" onClick="{{ goOnline }}" style="background: #ffffff">Try now</button></div></sc-if>
+<div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px">
+<button onClick="{{ cyclePhase }}" aria-label="{{ ca.name }}: {{ phase }}. Tap to see the next state" style="width: 200px; height: 200px; border: none; border-radius: 100px; background: {{ ca.color }}; color: {{ ca.ink }}; box-shadow: 0 0 0 {{ ring }}px {{ ca.ring }}; font: 600 72px Inter, sans-serif; cursor: pointer">{{ ca.initial }}</button>
+<div class="col" style="align-items: center; gap: 4px"><h1 class="h" style="font-size: 30px">{{ callTitle }}</h1><span style="font-size: 16px; font-weight: 600; color: {{ ca.accent }}">{{ phase }}</span><sc-if value="{{ hasSecond }}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; font-weight: 600; color: {{ sec.accent }}">{{ sec.name }} is on the line too</span></sc-if></div>
+<div class="card" style="width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px; line-height: 22px">{{ ca.line }}</div>
+<div style="width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<button class="small" onClick="{{ takeBack }}" style="height: 52px; border-radius: 16px; background: #ffffff; font-size: 12px; line-height: 15px; padding: 0 4px">Take that back</button>
+<button class="small" onClick="{{ sheetAdd }}" style="height: 52px; border-radius: 16px; background: #ffffff; font-size: 12px; line-height: 15px; padding: 0 4px">Add someone</button>
+<button class="small" onClick="{{ callMeBack }}" style="height: 52px; border-radius: 16px; background: #ffffff; font-size: 12px; line-height: 15px; padding: 0 4px">Call me back</button>
+<button class="small" onClick="{{ toggleVoice }}" style="height: 52px; border-radius: 16px; background: #ffffff; font-size: 12px; line-height: 15px; padding: 0 4px">{{ voiceLabel }}</button>
+</div>
+</div>
+<div style="width: 100%; display: flex; gap: 10px">
+<button class="pill grow" onClick="{{ toggleMute }}" style="height: 60px; border-radius: 30px; background: {{ muteBg }}; color: {{ muteFg }}; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ muteLabel }}</button>
+<button class="pill grow" onClick="{{ askHang }}" style="height: 60px; border-radius: 30px; background: #d9392b; color: #ffffff">Hang up</button>
+</div>
+<span class="muted" style="font-size: 13px">Hold Mute to talk · tap the circle to see her states</span>
+
+<sc-if value="{{ confirmHang }}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; inset: 0; background: rgba(15,23,42,0.45); display: flex; align-items: flex-end; padding: 16px 16px 36px; box-sizing: border-box">
+<div class="card" role="dialog" aria-label="End the call?" style="width: 100%; padding: 22px; display: flex; flex-direction: column; gap: 16px">
+<div class="col" style="gap: 4px"><h2 class="h" style="font-size: 20px">End the call?</h2><span class="muted" style="font-size: 15px">This ends the call with {{ ca.name }}. What was said stays in past calls.</span></div>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ stayOn }}" style="background: #f1f5f9; color: #0f172a">Stay on</button><button class="pill grow" onClick="{{ hangUp }}" style="background: #d9392b; color: #ffffff">Hang up</button></div>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<!-- CALL TRANSCRIPT -->
+<sc-if value="{{ s.transcript }}" hint-placeholder-val="{{ false }}">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; background: {{ ca.tint }}">
+<div class="top" style="padding: 52px 16px 12px">
+<button class="iconbtn" aria-label="Back to the call" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+<div class="grow col"><h1 class="h" style="font-size: 17px; letter-spacing: -0.01em">What was said</h1><span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: {{ ca.accent }}"><span style="width: 8px; height: 8px; border-radius: 4px; background: #d9392b"></span>Live · on a call with {{ ca.name }}</span></div>
+<span class="face" style="width: 40px; height: 40px; background: {{ ca.color }}; color: {{ ca.ink }}; font-size: 16px">{{ ca.initial }}</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 8px 22px 16px; display: flex; flex-direction: column; gap: 16px">
+<span class="muted" style="font-size: 12px">Started 14:19 · this is the call, not your texts with {{ ca.name }}</span>
+<sc-for list="{{ tLines }}" as="l" hint-placeholder-count="3"><div class="col" style="gap: 2px"><span style="font-size: 12px; font-weight: 700; color: {{ l.nc }}">{{ l.who }}</span><span style="font-size: {{ l.fs }}; line-height: 23px; color: {{ l.fc }}; font-weight: {{ l.fw }}; text-decoration: {{ l.deco }}">{{ l.t }}</span></div></sc-for>
+<sc-if value="{{ askOpen }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px"><span style="font-size: 15px; font-weight: 600">{{ ca.name }} asks: shall I move the gym to 20:00?</span><div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ sayYes }}" style="background: {{ ca.color }}; color: {{ ca.ink }}">Yes</button><button class="pill grow" onClick="{{ sayNo }}" style="background: #f1f5f9; color: #0f172a">No</button></div></div>
+</sc-if>
+</div>
+<div style="padding: 10px 12px 30px; background: #ffffff; border-top: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 10px">
+<div class="tbox"><label for="dk-tr-text" class="sr">Type to {{ ca.name }} on the call</label><input id="dk-tr-text" placeholder="Type instead of talking"><button aria-label="Send to the call" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: #0f172a; color: #ffffff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>
+<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ toggleMute }}" style="background: {{ muteBg }}; color: {{ muteFg }}; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ muteShort }}</button><button class="pill grow" onClick="{{ hangFromT }}" style="background: #d9392b; color: #ffffff">Hang up</button></div>
+</div>
+</div>
+</sc-if>
+
+<!-- CHAT (texts) -->
+<sc-if value="{{ s.chat }}" hint-placeholder-val="{{ false }}">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column">
+<div class="top" style="padding: {{ chatTop }} 16px 12px; background: #ffffff; border-bottom: 1px solid #e2e8f0">
+<button class="iconbtn" aria-label="Back" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></button>
+<span class="face" style="width: 40px; height: 40px; background: {{ cha.color }}; color: {{ cha.ink }}; font-size: 16px">{{ cha.initial }}</span>
+<div class="grow col"><h1 class="h" style="font-size: 17px; letter-spacing: -0.01em">{{ cha.name }}</h1><span class="muted" style="font-size: 12px">{{ cha.role }}</span></div>
+<button class="iconbtn" aria-label="{{ bellAria }}" onClick="{{ toggleTexts }}" style="background: {{ bellBtnBg }}; color: {{ bellBtnFg }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button>
+<button class="iconbtn" aria-label="Call {{ cha.name }}" onClick="{{ call.chat }}" style="background: {{ cha.color }}; color: {{ cha.ink }}; box-shadow: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
+</div>
+<sc-if value="{{ textsOff }}" hint-placeholder-val="{{ false }}"><div style="padding: 10px 16px; background: #f1f5f9; font-size: 13px; line-height: 18px; color: #475569">Her texts don’t reach your phone yet. Tap the bell to turn them on.</div></sc-if>
+<div style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 8px">
+<span style="align-self: center; padding: 4px 10px; border-radius: 10px; background: #e2e8f0; font-size: 12px; font-weight: 600; color: #475569">Texts · today</span>
+<sc-for list="{{ bubbles }}" as="b" hint-placeholder-count="4">
+<div style="align-self: {{ b.align }}; max-width: 280px; padding: 10px 14px; border-radius: {{ b.radius }}; background: {{ b.bg }}; color: {{ b.fg }}; font-size: 15px; line-height: 21px">{{ b.t }}</div>
+</sc-for>
+<sc-if value="{{ showFailed }}" hint-placeholder-val="{{ false }}"><div style="align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px"><div style="max-width: 280px; padding: 10px 14px; border-radius: 20px 20px 6px 20px; background: #dcfce7; color: #14532d; font-size: 15px; line-height: 21px">Can you book the car wash too?</div><button onClick="{{ retry }}" style="border: none; background: transparent; padding: 4px 0; font: 600 12px Inter, sans-serif; color: #b42318; cursor: pointer">Didn’t send · Try again</button></div></sc-if>
+</div>
+<div style="padding: 8px 12px 30px; background: #ffffff; border-top: 1px solid #e2e8f0">
+<div class="tbox"><label for="dk-chat-text" class="sr">Text {{ cha.name }}</label><input id="dk-chat-text" placeholder="Text {{ cha.name }}"><button aria-label="Send" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: #0f172a; color: #ffffff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>
+</div>
+</div>
+</sc-if>
+
+
+
+<sc-if value="{{ s.sub }}" hint-placeholder-val="{{ false }}">
+<div class="pad {{ padCls }}">
+<div class="top">
+<button class="iconbtn" aria-label="Back" onClick="{{ back }}" style="box-shadow: none; background: transparent"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></button>
+<div class="grow col"><span style="font-size: 12px; font-weight: 600; color: {{ owner.accent }}">{{ owner.label }}</span><h1 class="h" style="font-size: 22px; line-height: 28px">{{ title }}</h1></div>
+</div>
+<!-- AGENDA -->
+<sc-if value="{{ s.agenda }}" hint-placeholder-val="{{ false }}">
+<div class="top" style="padding: 0 4px"><span class="muted grow" style="font-size: 13px">All calendars · all kinds of time</span><button class="small" onClick="{{ nav.agendaFilter }}" style="background: #ffffff; box-shadow: 0 0 0 1px #e2e8f0 inset">Filter</button></div>
+<sc-for list="{{ agenda }}" as="d" hint-placeholder-count="3">
+<div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ d.day }}</h2>
+<div class="list"><sc-for list="{{ d.items }}" as="i" hint-placeholder-count="3"><button class="row" onClick="{{ i.open }}"><span style="width: 44px; font-size: 14px; font-weight: 600; color: {{ i.tc }}">{{ i.t }}</span><span style="width: 8px; height: 8px; border-radius: 4px; flex-shrink: 0; background: {{ i.kind }}"></span><span class="grow" style="font-size: 15px; color: {{ i.fc }}; text-decoration: {{ i.deco }}">{{ i.title }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div></div>
+</sc-for>
+<span class="muted" style="font-size: 12px; text-align: center">Read from your calendar 2 minutes ago</span>
+</sc-if>
+
+<!-- APPOINTMENT -->
+<sc-if value="{{ s.appt }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; font-weight: 600; color: #6d28d9">{{ appt.when }}</span><span class="h" style="font-size: 26px">{{ appt.title }}</span><span class="muted" style="font-size: 14px">{{ appt.where }}</span>
+<sc-if value="{{ apptMarked }}" hint-placeholder-val="{{ false }}"><span style="margin-top: 6px; font-size: 14px; font-weight: 600; color: {{ apptMarkColor }}">{{ apptMarkText }}</span></sc-if>
+</div>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ markDone }}" style="background: #dcfce7; color: #14532d">Done</button><button class="pill grow" onClick="{{ markMissed }}" style="background: #f1f5f9; color: #0f172a">Didn’t happen</button></div>
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px"><h2 class="h" style="font-size: 17px">Travel</h2><div style="display: flex; gap: 6px; flex-wrap: wrap"><sc-for list="{{ travelChips }}" as="t" hint-placeholder-count="3"><button class="chip" onClick="{{ t.pick }}" style="background: {{ t.bg }}; color: {{ t.fg }}; box-shadow: {{ t.shadow }}">{{ t.name }}</button></sc-for></div><span style="font-size: 15px">{{ travelText }}</span><span class="muted" style="font-size: 13px">Light rain from 16:00, dry on the way there</span><a href="#" style="font-size: 14px; font-weight: 600; color: #6d28d9; text-decoration: none">Open the route</a></div>
+<div class="list">
+<button class="row" onClick="{{ toggleBell }}"><span class="grow" style="font-size: 15px; font-weight: 600">Text me when it starts</span><span style="width: 48px; height: 28px; border-radius: 14px; background: {{ bellBg }}; display: flex; align-items: center; justify-content: {{ bellJust }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button>
+<button class="row" onClick="{{ call.donna }}"><span class="grow" style="font-size: 15px; font-weight: 600">Call Donna about this</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</div>
+<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 4px"><span class="lab">From your calendar</span><span style="font-size: 14px; line-height: 20px">Six-monthly check-up. Bring your insurance card.</span></div>
+<h2 class="lab" style="margin: 0 4px">Your notes on it</h2>
+<div class="list"><sc-for list="{{ apptNoteRows }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">{{ n.t }}</span><button class="small" onClick="{{ n.clear }}">Clear</button></div></sc-for></div>
+<div class="tbox"><label for="dk-appt-note" class="sr">Add a note</label><input id="dk-appt-note" placeholder="Add a quick note"></div>
+</sc-if>
+
+<!-- TO-DO -->
+<sc-if value="{{ s.todo }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px"><span class="lab">Commitments to others</span><span style="font-size: 15px">Send Alex the photos · Call the plumber back</span></div>
+<sc-if value="{{ fresh }}" hint-placeholder-val="{{ false }}"><div class="card" style="padding: 20px; font-size: 15px; line-height: 22px">Nothing on your list yet. Tell Donna what’s on your mind, on a call or in a text, and it gets sorted in here.</div></sc-if>
+<sc-if value="{{ notFresh }}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{ boxes }}" as="b" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 20px; background: #ffffff; box-shadow: {{ b.shadow }}; opacity: {{ b.op }}">
+<button onClick="{{ b.openAll }}" class="top" style="border: none; background: transparent; padding: 0 0 4px; font: inherit; cursor: pointer; text-align: left"><span class="grow" style="font-size: 12px; font-weight: 700; color: #475569">{{ b.name }}</span><span style="font-family: Inter, sans-serif; font-size: 18px; font-weight: 700; color: {{ b.cc }}">{{ b.count }}</span></button>
+<sc-for list="{{ b.items }}" as="i" hint-placeholder-count="2"><button onClick="{{ i.open }}" style="border: none; background: transparent; padding: 4px 0; text-align: left; font: 500 13px/18px Inter, sans-serif; color: #0f172a; cursor: pointer">{{ i.title }}</button></sc-for>
+<button onClick="{{ b.openAll }}" style="border: none; background: transparent; padding: 4px 0; text-align: left; font: 600 12px Inter, sans-serif; color: #6d28d9; cursor: pointer">{{ b.more }}</button>
+</div>
+</sc-for>
+</div>
+</sc-if>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><button class="chip" onClick="{{ lists.groceries }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Groceries 6</button><button class="chip" onClick="{{ lists.bucket }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Bucketlist 3</button><button class="chip" onClick="{{ lists.wish }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Wishlist 2</button><button class="chip" onClick="{{ openDone }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Done 6</button><button class="chip" onClick="{{ openLetgo }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Let go 2</button></div>
+<div class="tbox"><label for="dk-todo-add" class="sr">Add to your list</label><input id="dk-todo-add" placeholder="Add something, one per line"></div>
+</sc-if>
+
+<!-- TO-DO ITEM -->
+<sc-if value="{{ s.todoItem }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 6px"><span class="lab">{{ item.box }}</span><span class="h" style="font-size: 24px; text-decoration: {{ itemDeco }}">{{ item.title }}</span></div>
+<div class="list">
+<div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">For</span><span style="font-size: 15px">You</span></div>
+<div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Deadline</span><span style="font-size: 15px; color: {{ itemDeadC }}; font-weight: 600">{{ itemDead }}</span></div>
+<button class="row" onClick="{{ sheetPlan }}"><span class="grow muted" style="font-size: 14px">In the calendar</span><span style="font-size: 15px">{{ plannedText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ sheetRepeat }}"><span class="grow muted" style="font-size: 14px">Comes back</span><span style="font-size: 15px">{{ repeatText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<button class="pill" onClick="{{ tickItem }}" style="background: #dcfce7; color: #14532d">{{ tickLabel }}</button>
+<button class="pill" onClick="{{ sheetPlan }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Plan it in</button>
+<button class="pill" onClick="{{ sheetMove }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Move to a list</button>
+<button class="pill" onClick="{{ letGo }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Let it go</button>
+</div>
+<button class="row card" onClick="{{ call.donna }}" style="border-radius: 20px"><span class="grow" style="font-size: 15px; font-weight: 600">Call Donna about this</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</sc-if>
+
+<!-- LISTS -->
+<sc-if value="{{ s.lists }}" hint-placeholder-val="{{ false }}">
+<div role="tablist" aria-label="Lists" style="display: flex; gap: 6px">
+<sc-for list="{{ listTabs }}" as="t" hint-placeholder-count="3"><button role="tab" aria-selected="{{ t.on }}" class="chip" onClick="{{ t.pick }}" style="background: {{ t.bg }}; color: {{ t.fg }}; box-shadow: {{ t.shadow }}">{{ t.name }}</button></sc-for>
+</div>
+<sc-if value="{{ lt.groceries }}" hint-placeholder-val="{{ false }}">
+<div class="list"><sc-for list="{{ groceries }}" as="g" hint-placeholder-count="6"><button class="row" onClick="{{ g.toggle }}"><span style="width: 24px; height: 24px; border-radius: 12px; flex-shrink: 0; box-sizing: border-box; border: 2px solid {{ g.ring }}; background: {{ g.fill }}"></span><span class="grow" style="font-size: 15px; text-decoration: {{ g.deco }}; color: {{ g.fc }}">{{ g.name }}</span></button></sc-for></div>
+<div class="tbox"><label for="dk-gro" class="sr">Add groceries</label><input id="dk-gro" placeholder="Add groceries, commas work too"></div>
+<h2 class="lab" style="margin: 6px 4px 0">Ticked off · tap to put back</h2>
+<div class="list"><sc-for list="{{ groTicked }}" as="g" hint-placeholder-count="3"><button class="row" onClick="{{ g.back }}"><span class="grow" style="font-size: 15px; color: #475569">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.when }}</span></button></sc-for></div>
+</sc-if>
+<sc-if value="{{ lt.bucket }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 16px 18px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px"><span class="col"><span class="h" style="font-size: 18px">€4,070</span><span class="muted" style="font-size: 12px">once</span></span><span class="col"><span class="h" style="font-size: 18px">160 h</span><span class="muted" style="font-size: 12px">time</span></span><span class="col"><span class="h" style="font-size: 18px">1 of 5</span><span class="muted" style="font-size: 12px">done</span></span></div>
+<div class="list"><sc-for list="{{ bucket }}" as="b" hint-placeholder-count="3"><button class="row" onClick="{{ b.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ b.name }}</span><span class="muted" style="font-size: 13px">{{ b.meta }}</span></span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div>
+</sc-if>
+<sc-if value="{{ lt.wish }}" hint-placeholder-val="{{ false }}">
+<div class="list"><sc-for list="{{ wish }}" as="b" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ b.name }}</span><span class="muted" style="font-size: 13px">{{ b.meta }}</span></span></div></sc-for></div>
+</sc-if>
+</sc-if>
+
+<!-- BUCKET ITEM -->
+<sc-if value="{{ s.bucketItem }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 13px">Bucketlist › Trip to Japan</span>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span class="lab">With everything under it</span><div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px"><span class="col"><span class="h" style="font-size: 18px">€3,020</span><span class="muted" style="font-size: 12px">once</span></span><span class="col"><span class="h" style="font-size: 18px">€1,620</span><span class="muted" style="font-size: 12px">still to spend</span></span><span class="col"><span class="h" style="font-size: 18px">1 of 3</span><span class="muted" style="font-size: 12px">done</span></span></div></div>
+<div class="list"><sc-for list="{{ subs }}" as="b" hint-placeholder-count="3"><div class="row" style="cursor: default"><button aria-label="Tick {{ b.name }}" onClick="{{ b.toggle }}" style="width: 28px; height: 28px; padding: 0; border-radius: 14px; flex-shrink: 0; box-sizing: border-box; border: 2px solid {{ b.ring }}; background: {{ b.fill }}; cursor: pointer"></button><button onClick="{{ openSub }}" class="grow col" style="border: none; background: transparent; padding: 0; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 15px; font-weight: 600; text-decoration: {{ b.deco }}">{{ b.name }}</span><span class="muted" style="font-size: 13px">{{ b.meta }}</span></button><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></div></sc-for><div class="row" style="cursor: default; color: #475569; font-size: 14px">+ Add something under it</div></div>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 16px">
+<div class="col" style="gap: 6px"><span class="lab">Kind</span><div style="display: flex; gap: 6px"><span class="chip" style="display: flex; align-items: center; background: #0f172a; color: #ffffff">Experience</span><span class="chip" style="display: flex; align-items: center; background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Product</span><span class="chip" style="display: flex; align-items: center; background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Service</span></div></div>
+<div class="col" style="gap: 6px"><span class="lab">Price</span><div class="tbox" style="padding: 5px 16px"><label for="dk-price" class="sr">Price</label><input id="dk-price" value="€3,020"></div><div style="display: flex; gap: 6px"><sc-for list="{{ periodChips }}" as="p" hint-placeholder-count="3"><button class="chip" onClick="{{ p.pick }}" style="background: {{ p.bg }}; color: {{ p.fg }}; box-shadow: {{ p.shadow }}">{{ p.name }}</button></sc-for></div></div>
+<div class="col" style="gap: 6px"><span class="lab">Time goal and hours</span><div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px"><div class="tbox" style="padding: 5px 16px"><label for="dk-goal" class="sr">Goal</label><input id="dk-goal" value="Spring 2027"></div><div class="tbox" style="padding: 5px 16px"><label for="dk-hours" class="sr">Hours</label><input id="dk-hours" value="120 hours"></div></div></div>
+<div class="col" style="gap: 6px"><span class="lab">How much it brings your vision closer</span><div style="display: flex; gap: 6px"><sc-for list="{{ scoreBtns }}" as="n" hint-placeholder-count="5"><button onClick="{{ n.pick }}" aria-label="Score {{ n.n }}" style="width: 44px; height: 44px; border: none; border-radius: 22px; background: {{ n.bg }}; color: {{ n.fg }}; box-shadow: 0 0 0 1px #e2e8f0 inset; font: 700 15px Inter, sans-serif; cursor: pointer">{{ n.n }}</button></sc-for></div><div class="tbox" style="padding: 5px 16px"><label for="dk-why" class="sr">Why</label><input id="dk-why" value="Slow travel, new food"></div></div>
+<div class="col" style="gap: 6px"><span class="lab">Links</span><sc-for list="{{ linkRows }}" as="l" hint-placeholder-count="2"><div class="top"><a href="#" class="grow" style="font-size: 14px; color: #6d28d9; text-decoration: none">{{ l.t }}</a><button class="small" onClick="{{ l.remove }}">Remove</button></div></sc-for><div class="tbox" style="padding: 5px 16px"><label for="dk-link" class="sr">Add a link</label><input id="dk-link" placeholder="Paste a link"></div></div>
+<div class="col" style="gap: 6px"><span class="lab">Notes</span><div class="tbox" style="padding: 5px 16px"><label for="dk-bnotes" class="sr">Notes</label><input id="dk-bnotes" placeholder="Anything else"></div></div>
+<span class="muted" style="font-size: 12px">Saves as you leave a field</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px"><button class="pill" style="background: #dcfce7; color: #14532d">Done</button><button class="pill" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Let go</button></div>
+<button class="pill" onClick="{{ delTap }}" style="background: {{ delBg }}; color: {{ delFg }}; box-shadow: 0 0 0 1px #fecaca inset">{{ delLabel }}</button>
+</sc-if>
+
+<!-- MAIL -->
+<sc-if value="{{ s.mail }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 18px 20px; border-radius: 24px; background: #fef2f2; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; font-weight: 700; color: #b42318">Very important</span><span class="h" style="font-size: 20px">Your contract is ready to sign</span><span class="muted" style="font-size: 14px">From the landlord · this morning</span><span style="font-size: 14px; line-height: 20px; margin-top: 4px">Donna flagged it because it has a deadline: Monday.</span></div>
+<div class="card" style="padding: 16px 18px; font-size: 15px; line-height: 22px">Everything else: 23 mails today, nothing that needs you.</div>
+</sc-if>
+
+<!-- NOTES -->
+<sc-if value="{{ s.notes }}" hint-placeholder-val="{{ false }}">
+<h2 class="lab" style="margin: 0 4px">Your quick notes</h2>
+<div class="tbox"><label for="dk-note" class="sr">Write a note</label><input id="dk-note" placeholder="Write a note, the next call can read it"></div>
+<div class="list"><sc-for list="{{ myNotes }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span><button class="small">Clear</button></div></sc-for></div>
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: {{ sa.accent }}">{{ sa.name }}’s notes</h2>
+<div class="list"><sc-for list="{{ herNotes }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span></div></sc-for></div>
+<sc-if value="{{ isDonnaNotes }}" hint-placeholder-val="{{ false }}">
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: #6d28d9">She nudges you until it’s done</h2>
+<div class="list"><sc-for list="{{ nudgeRows }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span><button class="iconbtn" aria-label="{{ n.bellAria }}" onClick="{{ n.bell }}" style="background: {{ n.bellBg }}; color: {{ n.bellFg }}; box-shadow: none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button><button class="small" onClick="{{ n.done }}">{{ n.doneLabel }}</button></div></sc-for></div>
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: #6d28d9">She keeps an eye out</h2>
+<div class="list"><sc-for list="{{ eyeRows }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 13px">{{ n.when }}</span></div></sc-for></div>
+</sc-if>
+<button onClick="{{ toggleCleared }}" style="align-self: center; border: none; background: transparent; font: 600 13px Inter, sans-serif; color: #475569; padding: 10px; cursor: pointer">{{ clearedLabel }}</button>
+<sc-if value="{{ clearedOpen }}" hint-placeholder-val="{{ false }}"><div class="list"><sc-for list="{{ clearedRows }}" as="n" hint-placeholder-count="2"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; color: #94a3b8; text-decoration: line-through">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></div></sc-for></div></sc-if>
+</sc-if>
+
+<!-- PAST CALLS -->
+<sc-if value="{{ s.pastCalls }}" hint-placeholder-val="{{ false }}">
+<sc-for list="{{ pastCalls }}" as="d" hint-placeholder-count="2">
+<div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ d.day }}</h2><div class="list"><sc-for list="{{ d.items }}" as="c" hint-placeholder-count="2"><button class="row" onClick="{{ c.open }}"><span style="width: 44px; font-size: 14px; font-weight: 600; color: #475569">{{ c.time }}</span><span class="grow" style="font-size: 15px">{{ c.about }}</span><span class="muted" style="font-size: 13px">{{ c.lines }} lines</span></button></sc-for></div></div>
+</sc-for>
+</sc-if>
+
+<!-- ONE PAST CALL -->
+<sc-if value="{{ s.callLog }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; background: {{ sa.tint }}; box-shadow: none">
+<span class="lab">Call transcript · 4 minutes</span>
+<sc-for list="{{ logBubbles }}" as="l" hint-placeholder-count="4"><div class="col" style="gap: 2px"><span style="font-size: 12px; font-weight: 700; color: {{ l.nc }}">{{ l.who }}</span><span style="font-size: {{ l.fs }}; line-height: 23px; color: {{ l.fc }}; font-weight: {{ l.fw }}">{{ l.t }}</span></div></sc-for>
+</div>
+<button class="pill" onClick="{{ call.space }}" style="background: {{ sa.color }}; color: {{ sa.ink }}">Continue this call with {{ sa.name }}</button>
+</sc-if>
+
+<!-- MAP -->
+<sc-if value="{{ s.map }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">From the life you want in three to five years, down to this week. Tap a layer to work on it with Pepper.</span>
+<div class="list"><sc-for list="{{ layers }}" as="l" hint-placeholder-count="6"><button class="row" onClick="{{ l.open }}" style="flex-direction: column; align-items: stretch; gap: 8px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">{{ l.name }}</span><span class="muted" style="font-size: 13px">{{ l.st }}</span></span><span class="bar"><span style="display: block; width: {{ l.pct }}%; height: 6px; background: #c2410c"></span></span></button></sc-for></div>
+</sc-if>
+
+<!-- CHECK-IN -->
+<sc-if value="{{ s.checkin }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 20px; border-radius: 24px; background: #fff3ec; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; font-weight: 600; color: #c2410c">Due today · 17:00</span><span class="h" style="font-size: 24px">Weekly check-in</span><span style="font-size: 15px; line-height: 22px">About 15 minutes. Pepper looks back at the week with you and sets up the next one.</span></div>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ call.pepper }}" style="background: #c2410c; color: #ffffff">Start now</button><button class="pill grow" onClick="{{ back }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Not now</button></div>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">End of the game</span><span class="muted" style="font-size: 13px">in 30 days</span></div><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">The big one, every 8 weeks</span><span class="muted" style="font-size: 13px">in 5 weeks</span></div></div>
+</sc-if>
+
+<!-- GAME -->
+<sc-if value="{{ s.game }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px"><span class="lab">Day 12 of 42 · playing</span><span style="font-size: 16px; line-height: 23px; font-weight: 600">Walk every morning and read 20 pages, five days a week.</span>
+<div style="position: relative; height: 10px; border-radius: 5px; background: #f1f5f9"><div style="width: 34%; height: 10px; border-radius: 5px; background: #c2410c"></div><div style="position: absolute; left: 28%; top: -4px; width: 2px; height: 18px; background: #0f172a"></div></div>
+<span style="font-size: 13px; font-weight: 600; color: #15803d">On track: a little ahead of what it takes</span></div>
+<h2 class="lab" style="margin: 0 4px">Today</h2>
+<div class="list">
+<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Morning walk</span><button class="small" onClick="{{ walkToggle }}" style="background: {{ walkBg }}; color: {{ walkFg }}">{{ walkLabel }}</button></div>
+<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Pages read</span><button class="small" aria-label="One less" onClick="{{ pagesDown }}">−</button><span style="width: 32px; text-align: center; font-family: Inter, sans-serif; font-weight: 700">{{ pages }}</span><button class="small" aria-label="One more" onClick="{{ pagesUp }}">+</button></div>
+</div>
+<h2 class="lab" style="margin: 0 4px">The last two weeks</h2>
+<div class="card" style="padding: 14px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px">
+<sc-for list="{{ grid }}" as="g" hint-placeholder-count="14"><span style="height: 34px; border-radius: 10px; background: {{ g.bg }}; color: {{ g.fg }}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; box-shadow: {{ g.ring }}">{{ g.d }}</span></sc-for>
+</div>
+<h2 class="lab" style="margin: 0 4px">The game card</h2>
+<div class="list"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What it’s for</span><span style="font-size: 15px">Steady mornings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">The rules</span><span style="font-size: 15px">5 of 7 days</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">At my best</span><span style="font-size: 15px">Up before 7</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What could get in the way</span><span style="font-size: 15px">Late evenings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What keeps me honest</span><span style="font-size: 15px">Friday with Pepper</span></div></div>
+<h2 class="lab" style="margin: 0 4px">Diary</h2>
+<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div class="tbox"><label for="dk-diary" class="sr">How was today?</label><input id="dk-diary" placeholder="How was today?"></div><div style="display: flex; gap: 6px"><sc-for list="{{ feelChips }}" as="f" hint-placeholder-count="4"><button class="chip" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></div>
+<h2 class="lab" style="margin: 0 4px">This week’s look back</h2>
+<sc-if value="{{ notKept }}" hint-placeholder-val="{{ true }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span style="font-size: 15px; line-height: 22px">What made this week easier than the last?</span><div class="tbox"><label for="dk-look" class="sr">Your answer</label><input id="dk-look" placeholder="A line or two"></div><button class="pill" onClick="{{ keepIt }}" style="align-self: flex-start; background: #c2410c; color: #ffffff">Keep it</button></div></sc-if>
+<sc-if value="{{ kept }}" hint-placeholder-val="{{ false }}"><div class="card" style="padding: 16px 18px; font-size: 15px">Kept. Pepper reads it at Friday’s check-in.</div></sc-if>
+</sc-if>
+
+<!-- HAND-OVERS -->
+<sc-if value="{{ s.handovers }}" hint-placeholder-val="{{ false }}">
+<div class="list"><sc-for list="{{ handovers }}" as="h" hint-placeholder-count="3"><button class="row" onClick="{{ h.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ h.name }}</span><span style="font-size: 13px; color: {{ h.mc }}">{{ h.meta }}</span></span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div>
+</sc-if>
+
+<!-- ONE HAND-OVER -->
+<sc-if value="{{ s.handover }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 20px; border-radius: 24px; background: #fefce8; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; font-weight: 700; color: #854d0e">New · prepared today</span><span class="h" style="font-size: 24px">Calendar clean-up</span><span style="font-size: 15px; line-height: 22px">Ready for you and Claude Code to build.</span></div>
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 22px"><span class="lab">What she prepared</span><span>Birthdays show twice when two calendars hold them. She lists where it happens, what to keep, and a test to prove it’s gone.</span><span class="muted" style="font-size: 13px">3 parts · about 40 minutes of work</span></div>
+<button class="pill" onClick="{{ back }}" style="background: #ca8a04; color: #0f172a">Mark as picked up</button>
+</sc-if>
+
+<!-- STATUS -->
+<sc-if value="{{ s.status }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 16px 18px; border-radius: 20px; background: #f0fdf4; display: flex; align-items: center; gap: 10px"><span style="width: 10px; height: 10px; border-radius: 5px; background: #16a34a"></span><span style="font-size: 15px; font-weight: 600; color: #14532d">Everything is running</span></div>
+<h2 class="lab" style="margin: 0 4px">Being worked on</h2>
+<div class="list"><sc-for list="{{ working }}" as="w" hint-placeholder-count="2"><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 8px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">{{ w.name }}</span><span class="muted" style="font-size: 13px">{{ w.state }}</span></span><span class="bar"><span style="display: block; width: {{ w.pct }}%; height: 6px; background: #ca8a04"></span></span></div></sc-for></div>
+<h2 class="lab" style="margin: 0 4px">Usage</h2>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 14px">
+<span class="col" style="gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 14px"><span style="font-weight: 600">5-hour</span><span class="muted">34% · resets 18:10</span></span><span class="bar"><span style="display: block; width: 34%; height: 6px; background: #0f172a"></span></span></span>
+<span class="col" style="gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 14px"><span style="font-weight: 600">Weekly</span><span class="muted">61% · resets Monday</span></span><span class="bar"><span style="display: block; width: 61%; height: 6px; background: #0f172a"></span></span></span>
+</div>
+<div class="list">
+<button class="row" onClick="{{ nav.planning }}"><span class="grow" style="font-size: 15px; font-weight: 600">The planning board</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.sessions }}"><span class="grow" style="font-size: 15px; font-weight: 600">Work sessions</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.health }}"><span class="grow" style="font-size: 15px; font-weight: 600">Health</span><span class="muted" style="font-size: 13px">routines, the laptop, incidents</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.updates }}"><span class="grow" style="font-size: 15px; font-weight: 600">Updates</span><span class="muted" style="font-size: 13px">you’re on the latest</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</div>
+</sc-if>
+
+<!-- PLANNING BOARD -->
+<sc-if value="{{ s.planning }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 14px; margin: 0 4px">To look at. You and Claude Code change it.</span>
+<sc-for list="{{ planning }}" as="p" hint-placeholder-count="3">
+<div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ p.phase }}</h2><div class="list"><sc-for list="{{ p.items }}" as="i" hint-placeholder-count="2"><div class="row" style="cursor: default"><span style="width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: {{ i.c }}"></span><span class="grow" style="font-size: 15px">{{ i.t }}</span><span class="muted" style="font-size: 13px">{{ i.s }}</span></div></sc-for></div></div>
+</sc-for>
+</sc-if>
+
+<!-- WORK SESSIONS -->
+<sc-if value="{{ s.sessions }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px"><span class="top"><span class="h grow" style="font-size: 17px">Today, 10:00 to now</span><span class="muted" style="font-size: 13px">2 of 3 done</span></span>
+<sc-for list="{{ sessionRows }}" as="r" hint-placeholder-count="3"><div class="col" style="gap: 6px"><span style="display: flex; justify-content: space-between; font-size: 13px"><span style="font-weight: 600">{{ r.name }}</span><span class="muted">{{ r.state }}</span></span><div style="display: flex; height: 14px; border-radius: 7px; background: #f8fafc"><div style="width: {{ r.start }}%"></div><div style="width: {{ r.w }}%; border-radius: 7px; background: {{ r.c }}; box-sizing: border-box; border: {{ r.border }}"></div></div></div></sc-for>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #64748b"><span>10:00</span><span>12:00</span><span>14:20</span></div>
+</div>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">Tuesday</span><span class="muted" style="font-size: 13px">4 done</span></div><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">Monday</span><span class="muted" style="font-size: 13px">3 done, 1 found broken</span></div></div>
+</sc-if>
+
+<!-- HEALTH -->
+<sc-if value="{{ s.health }}" hint-placeholder-val="{{ false }}">
+<div class="list"><sc-for list="{{ routines }}" as="r" hint-placeholder-count="5"><div class="row" style="cursor: default"><span style="width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: #16a34a"></span><span class="grow" style="font-size: 15px">{{ r.n }}</span><span class="muted" style="font-size: 13px">{{ r.l }}</span></div></sc-for></div>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 4px"><span class="lab">The laptop</span><span style="font-size: 15px">Cool · battery 82% · keeps working with the lid closed</span></div>
+<h2 class="lab" style="margin: 0 4px">Incidents</h2>
+<div class="list"><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 4px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">Mail check stopped</span><span class="muted" style="font-size: 12px">Monday · 12 min</span></span><span class="muted" style="font-size: 13px; line-height: 18px">The mail server timed out. It restarted itself and caught up.</span></div><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 4px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 600">Calendar sync was slow</span><span class="muted" style="font-size: 12px">Last week · 40 min</span></span><span class="muted" style="font-size: 13px; line-height: 18px">Google answered slowly. Nothing was lost.</span></div></div>
+<button class="pill" onClick="{{ allOn }}" style="background: #0f172a; color: #ffffff">Turn everything on</button>
+</sc-if>
+
+<!-- UPDATES -->
+<sc-if value="{{ s.updates }}" hint-placeholder-val="{{ false }}">
+<div class="list"><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 4px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 700">v4.2</span><span style="font-size: 12px; font-weight: 600; color: #15803d">You’re here</span></span><span class="muted" style="font-size: 14px">Bucketlist items can hold items of their own.</span></div><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 4px"><span class="top"><span class="grow" style="font-size: 15px; font-weight: 700">v4.3</span><span class="muted" style="font-size: 12px; font-weight: 600">Coming next</span></span><span class="muted" style="font-size: 14px">Calendar clean-up.</span></div></div>
+<sc-if value="{{ updIdle }}" hint-placeholder-val="{{ true }}"><button class="pill" onClick="{{ startUpdate }}" style="background: #0f172a; color: #ffffff">{{ updLabel }}</button><button class="pill" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Check now</button></sc-if>
+<sc-if value="{{ updBusy }}" hint-placeholder-val="{{ false }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px"><span style="font-size: 15px; font-weight: 600">{{ updLabel }}</span><span class="bar"><span style="display: block; width: 55%; height: 6px; background: #0f172a"></span></span></div></sc-if>
+<sc-if value="{{ updDone }}" hint-placeholder-val="{{ false }}"><div style="padding: 12px 12px 12px 18px; border-radius: 18px; background: #f0fdf4; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 15px; font-weight: 600; color: #14532d">Update done</span><button class="small" onClick="{{ reload }}" style="background: #ffffff">Reload</button></div></sc-if>
+</sc-if>
+
+<!-- SETTINGS -->
+<sc-if value="{{ s.settings }}" hint-placeholder-val="{{ false }}">
+<h2 class="lab" style="margin: 0 4px">Design</h2>
+<div class="list"><sc-for list="{{ designs }}" as="d" hint-placeholder-count="3"><a class="row" role="radio" aria-checked="{{ d.on }}" href="{{ d.href }}" style="text-decoration: none"><span class="grow" style="font-size: 15px; font-weight: 600">{{ d.name }}</span><span style="width: 22px; height: 22px; border-radius: 11px; box-sizing: border-box; border: {{ d.ring }}; flex-shrink: 0"></span></a></sc-for></div>
+<h2 class="lab" style="margin: 0 4px">Look</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 4px; border-radius: 22px; background: #e2e8f0"><button class="small" style="background: #ffffff">System</button><button class="small" style="background: transparent">Light</button><button class="small" style="background: transparent">Dark</button></div>
+<h2 class="lab" style="margin: 0 4px">Voices</h2>
+<div class="list"><div class="row" style="cursor: default"><span class="face" style="width: 28px; height: 28px; background: #6d28d9; color: #fff; font-size: 12px">D</span><span class="grow" style="font-size: 15px">Donna</span><span class="muted" style="font-size: 14px">Warm, quick</span></div><div class="row" style="cursor: default"><span class="face" style="width: 28px; height: 28px; background: #c2410c; color: #fff; font-size: 12px">P</span><span class="grow" style="font-size: 15px">Pepper</span><span class="muted" style="font-size: 14px">Calm, unhurried</span></div><div class="row" style="cursor: default"><span class="face" style="width: 28px; height: 28px; background: #ca8a04; color: #0f172a; font-size: 12px">M</span><span class="grow" style="font-size: 15px">Moneypenny</span><span class="muted" style="font-size: 14px">Cool, few words</span></div></div>
+<div class="list">
+<button class="row" onClick="{{ nav.features }}"><span class="grow" style="font-size: 15px; font-weight: 600">What HQ helps you with</span><span class="muted" style="font-size: 14px">{{ featCount }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.sound }}"><span class="grow" style="font-size: 15px; font-weight: 600">Microphone and sound</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ nav.voices }}"><span class="grow" style="font-size: 15px; font-weight: 600">Change a voice</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row" onClick="{{ toggleFree }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">Free mode</span><span class="muted" style="font-size: 13px">Plain Claude, nothing of yours, nothing saved</span></span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ freeBg }}; display: flex; align-items: center; justify-content: {{ freeJust }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button>
+</div>
+<h2 class="lab" style="margin: 6px 4px 0">For the design review</h2>
+<div class="list">
+<button class="row" onClick="{{ toggleOffline }}"><span class="grow" style="font-size: 15px">HQ is offline</span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ offBg }}; display: flex; align-items: center; justify-content: {{ offJust }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button>
+<button class="row" onClick="{{ toggleFresh }}"><span class="grow" style="font-size: 15px">A fresh install, nothing yet</span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ freshBg }}; display: flex; align-items: center; justify-content: {{ freshJust }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button>
+<button class="row" onClick="{{ ringMe }}"><span class="grow" style="font-size: 15px">Donna calls you</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</div>
+</sc-if>
+
+<!-- WEATHER -->
+<sc-if value="{{ s.weather }}" hint-placeholder-val="{{ false }}">
+<div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 4px"><span class="h" style="font-size: 48px; line-height: 52px">7°</span><span style="font-size: 15px">Cloudy · feels like 4° · wind 18 km/h from the south-west</span></div>
+<div class="card" style="padding: 14px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; text-align: center"><sc-for list="{{ hours }}" as="h" hint-placeholder-count="5"><span class="col" style="gap: 4px"><span class="muted" style="font-size: 12px">{{ h.t }}</span><span style="font-family: Inter, sans-serif; font-weight: 700">{{ h.deg }}</span><span style="font-size: 12px; color: #1d4ed8; font-weight: 600">{{ h.rain }}</span></span></sc-for></div>
+<div style="display: flex; gap: 6px"><sc-for list="{{ placeChips }}" as="p" hint-placeholder-count="2"><button class="chip" onClick="{{ p.pick }}" style="background: {{ p.bg }}; color: {{ p.fg }}; box-shadow: {{ p.shadow }}">{{ p.name }}</button></sc-for></div>
+<div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px"><span class="top"><span class="lab grow">Rain radar · next 2 hours</span><span class="muted" style="font-size: 12px">16:00</span></span><div style="position: relative; height: 140px; border-radius: 16px; background: #eef2f7; overflow: hidden"><div style="position: absolute; left: 12%; top: 18%; width: 130px; height: 70px; border-radius: 50%; background: rgba(37,99,235,0.3)"></div><div style="position: absolute; left: 44%; top: 38%; width: 100px; height: 54px; border-radius: 50%; background: rgba(37,99,235,0.5)"></div><div style="position: absolute; left: 54%; top: 56%; width: 10px; height: 10px; border-radius: 5px; background: #0f172a; box-shadow: 0 0 0 4px #ffffff"></div></div></div>
+<div class="card" style="padding: 14px 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px"><span class="col"><span class="muted" style="font-size: 12px">Sunrise</span><span style="font-size: 15px; font-weight: 600">08:21</span></span><span class="col"><span class="muted" style="font-size: 12px">Sunset</span><span style="font-size: 15px; font-weight: 600">16:36</span></span><span class="col"><span class="muted" style="font-size: 12px">UV</span><span style="font-size: 15px; font-weight: 600">1, low</span></span></div>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">No weather warnings</span></div><button class="row" onClick="{{ toggleRain }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">Rain alerts</span><span class="muted" style="font-size: 13px">Donna texts you when rain is coming</span></span><span style="width: 48px; height: 28px; border-radius: 14px; background: {{ rainBg }}; display: flex; align-items: center; justify-content: {{ rainJust }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button></div>
+<span class="muted" style="font-size: 12px; text-align: center">From the national weather service, 5 minutes ago</span>
+</sc-if>
+
+<!-- A WHOLE LIST -->
+<sc-if value="{{ s.todoList }}" hint-placeholder-val="{{ false }}">
+<sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}"><div role="group" aria-label="Show" style="display: flex; gap: 6px"><sc-for list="{{ todoFilters }}" as="f" hint-placeholder-count="3"><button class="chip" aria-pressed="{{ f.on }}" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></sc-if>
+<div class="list"><sc-for list="{{ todoRows }}" as="r" hint-placeholder-count="8"><div class="row" style="cursor: default; gap: 10px">
+<sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true" style="display: flex; flex-direction: column; gap: 3px; padding: 4px 2px; cursor: grab"><span style="width: 12px; height: 2px; background: #cbd5e1"></span><span style="width: 12px; height: 2px; background: #cbd5e1"></span><span style="width: 12px; height: 2px; background: #cbd5e1"></span></span></sc-if>
+<button onClick="{{ r.open }}" class="grow col" style="border: none; background: transparent; padding: 0; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 15px; font-weight: 600">{{ r.title }}</span><span style="font-size: 13px; color: {{ r.mc }}">{{ r.meta }}</span></button>
+<sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}"><button aria-label="Tick off {{ r.title }}" onClick="{{ r.tick }}" style="width: 28px; height: 28px; flex-shrink: 0; border-radius: 14px; border: 2px solid #cbd5e1; background: transparent; cursor: pointer"></button></sc-if>
+<sc-if value="{{ listClosed }}" hint-placeholder-val="{{ false }}"><button class="small" onClick="{{ r.back }}">Back on a list</button></sc-if>
+</div></sc-for></div>
+<sc-if value="{{ listOpen }}" hint-placeholder-val="{{ true }}"><div class="tbox"><label for="dk-list-add" class="sr">Add to this list</label><input id="dk-list-add" placeholder="Add several, one per line"></div><span class="muted" style="font-size: 12px; text-align: center">Drag the grip to reorder</span></sc-if>
+</sc-if>
+
+<!-- AGENDA FILTER -->
+<sc-if value="{{ s.agendaFilter }}" hint-placeholder-val="{{ false }}">
+<h2 class="lab" style="margin: 0 4px">Calendars</h2>
+<div class="list"><sc-for list="{{ calRows }}" as="c" hint-placeholder-count="3"><button class="row" onClick="{{ c.toggle }}"><span class="grow" style="font-size: 15px">{{ c.name }}</span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ c.bg }}; display: flex; align-items: center; justify-content: {{ c.just }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button></sc-for></div>
+<h2 class="lab" style="margin: 0 4px">Kinds of time</h2>
+<div class="list"><sc-for list="{{ kindRows }}" as="k" hint-placeholder-count="6"><div class="row" style="cursor: default"><span style="width: 12px; height: 12px; border-radius: 6px; background: {{ k.c }}; flex-shrink: 0"></span><span class="grow" style="font-size: 15px">{{ k.name }}</span></div></sc-for></div>
+<button class="pill" onClick="{{ nav.kinds }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Rename or recolour the kinds</button>
+</sc-if>
+
+<!-- KINDS OF TIME -->
+<sc-if value="{{ s.kinds }}" hint-placeholder-val="{{ false }}">
+<sc-for list="{{ kindRows }}" as="k" hint-placeholder-count="6"><div class="card" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px"><div class="top"><span style="width: 14px; height: 14px; border-radius: 7px; background: {{ k.c }}; flex-shrink: 0"></span><div class="tbox grow" style="padding: 5px 14px"><label for="dk-kind-{{ $index }}" class="sr">Name</label><input id="dk-kind-{{ $index }}" value="{{ k.name }}"></div></div><div style="display: flex; gap: 6px"><sc-for list="{{ swatches }}" as="w" hint-placeholder-count="9"><span style="width: 26px; height: 26px; border-radius: 13px; background: {{ w.c }}"></span></sc-for></div></div></sc-for>
+<div style="display: flex; gap: 10px"><button class="pill grow" onClick="{{ saveKinds }}" style="background: #0f172a; color: #ffffff">Save</button><button class="pill grow" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Back to the start</button></div>
+</sc-if>
+
+<!-- A SUB-ITEM -->
+<sc-if value="{{ s.subItem }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 13px">Bucketlist › Trip to Japan › Ryokan, 3 nights</span>
+<div class="list"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Kind</span><span style="font-size: 15px">Experience</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Price</span><span style="font-size: 15px">€1,200 once</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Goal</span><span style="font-size: 15px">Spring 2027</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Score</span><span style="font-size: 15px; font-weight: 700">4 of 5</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Notes</span><span style="font-size: 15px">The one in the mountains</span></div></div>
+<div class="list"><div class="row" style="cursor: default; color: #475569; font-size: 14px">Nothing under it yet · + Add something under it</div></div>
+</sc-if>
+
+<!-- A MAP LAYER -->
+<sc-if value="{{ s.layer }}" hint-placeholder-val="{{ false }}">
+<div style="padding: 18px 20px; border-radius: 24px; background: #fff3ec; display: flex; flex-direction: column; gap: 8px"><span style="font-size: 13px; font-weight: 600; color: #c2410c">In progress</span><span class="h" style="font-size: 22px">7 of 12 answered</span><span class="bar" style="background: #fde3d3"><span style="display: block; width: 58%; height: 6px; background: #c2410c"></span></span></div>
+<div class="list"><sc-for list="{{ checklist }}" as="c" hint-placeholder-count="5"><div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 4px"><span class="top" style="align-items: flex-start"><span class="grow" style="font-size: 15px; font-weight: 600; line-height: 21px">{{ c.q }}</span><span style="font-size: 12px; font-weight: 700; color: {{ c.mc }}">{{ c.mark }}</span></span><sc-if value="{{ c.hasNote }}" hint-placeholder-val="{{ false }}"><span class="muted" style="font-size: 13px; line-height: 18px">{{ c.note }}</span></sc-if></div></sc-for></div>
+<button class="pill" onClick="{{ call.pepper }}" style="background: #c2410c; color: #ffffff">Continue with Pepper</button>
+</sc-if>
+
+<!-- YOUR GAMES -->
+<sc-if value="{{ s.games }}" hint-placeholder-val="{{ false }}">
+<button class="card" onClick="{{ openGame }}" style="border: none; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #c2410c">Playing · day 12 of 42</span><span class="h" style="font-size: 20px">Mornings</span><span class="muted" style="font-size: 14px; line-height: 20px">Walk every morning and read 20 pages, five days a week.</span><span style="font-size: 13px; font-weight: 600; color: #15803d">On track</span></button>
+<h2 class="lab" style="margin: 0 4px">Past games</h2>
+<div class="list"><sc-for list="{{ pastGames }}" as="g" hint-placeholder-count="2"><button class="row" onClick="{{ openGame }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.meta }}</span></span></button></sc-for></div>
+</sc-if>
+
+<!-- WHAT HQ HELPS YOU WITH -->
+<sc-if value="{{ s.features }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 14px; margin: 0 4px">{{ featCount }}</span>
+<div class="list"><sc-for list="{{ featRows }}" as="f" hint-placeholder-count="10"><button class="row" onClick="{{ f.toggle }}" style="opacity: {{ f.op }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ f.name }}</span><span class="muted" style="font-size: 13px">{{ f.line }}</span></span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ f.bg }}; display: flex; align-items: center; justify-content: {{ f.just }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button></sc-for></div>
+<sc-if value="{{ mapsKey }}" hint-placeholder-val="{{ false }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span class="lab">Maps key for driving</span><div class="tbox"><label for="dk-key" class="sr">Paste the maps key</label><input id="dk-key" type="password" placeholder="Paste the key"><button class="small">Save</button></div><span class="muted" style="font-size: 12px">Once saved: Replace or Forget</span></div></sc-if>
+</sc-if>
+
+<!-- MICROPHONE AND SOUND -->
+<sc-if value="{{ s.sound }}" hint-placeholder-val="{{ false }}">
+<h2 class="lab" style="margin: 0 4px">Microphone</h2>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">iPhone microphone</span><span style="font-size: 13px; font-weight: 600; color: #15803d">In use</span></div><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">AirPods</span></div></div>
+<h2 class="lab" style="margin: 0 4px">Her voice comes out of</h2>
+<div class="list"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">iPhone speaker</span><span style="font-size: 13px; font-weight: 600; color: #15803d">In use</span></div><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">AirPods</span></div></div>
+<div class="list"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px">Thinking sound</span><span class="muted" style="font-size: 13px">A soft tick while she thinks</span></span><span class="muted" style="font-size: 14px">On</span></div></div>
+<span class="muted" style="font-size: 12px; margin: 0 4px">On an iPhone you can also switch these in Control Center.</span>
+</sc-if>
+
+<!-- VOICES -->
+<sc-if value="{{ s.voices }}" hint-placeholder-val="{{ false }}">
+<sc-for list="{{ voiceGroups }}" as="g" hint-placeholder-count="3"><div class="col" style="gap: 8px"><div class="top" style="padding: 0 4px"><span class="face" style="width: 28px; height: 28px; background: {{ g.color }}; color: {{ g.ink }}; font-size: 12px">{{ g.initial }}</span><h2 class="h" style="font-size: 16px; letter-spacing: -0.01em">{{ g.name }}</h2></div><div class="list"><sc-for list="{{ g.opts }}" as="o" hint-placeholder-count="3"><button class="row" onClick="{{ o.pick }}"><span class="grow" style="font-size: 15px">{{ o.v }}</span><span style="width: 22px; height: 22px; flex-shrink: 0; border-radius: 11px; box-sizing: border-box; border: {{ o.ring }}"></span></button></sc-for></div></div></sc-for>
+</sc-if>
+
+<!-- TUTORIAL -->
+<sc-if value="{{ s.tutorial }}" hint-placeholder-val="{{ false }}">
+<span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">Everything in here is made up, so try anything.</span>
+<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ demoCall.donna }}" style="background: #6d28d9; color: #fff">Demo Donna</button><button class="pill grow" onClick="{{ demoCall.pepper }}" style="background: #c2410c; color: #fff">Demo Pepper</button></div>
+<div class="list"><sc-for list="{{ pieces }}" as="p" hint-placeholder-count="6"><div class="row" style="cursor: default"><span style="width: 24px; font-size: 13px; font-weight: 700; color: #475569">{{ p.n }}</span><span class="grow" style="font-size: 15px">{{ p.t }}</span><span style="font-size: 13px; font-weight: 600; color: #15803d">{{ p.done }}</span><button class="small" onClick="{{ p.start }}">Start</button></div></sc-for></div>
+</sc-if>
+
+</div>
+</sc-if>
+
+<sc-if value="{{ sheetOn }}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; inset: 0; z-index: 20; background: rgba(15,23,42,0.4); display: flex; align-items: flex-end">
+<div role="dialog" aria-label="{{ sh.title }}" style="width: 100%; box-sizing: border-box; padding: 10px 16px 34px; border-radius: 28px 28px 0 0; background: #f8fafc; display: flex; flex-direction: column; gap: 12px">
+<span aria-hidden="true" style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #cbd5e1"></span>
+<div class="top"><h2 class="h grow" style="font-size: 18px">{{ sh.title }}</h2><button class="small" onClick="{{ closeSheet }}">Close</button></div>
+<div class="list"><sc-for list="{{ sh.rows }}" as="r" hint-placeholder-count="4"><button class="row" onClick="{{ r.pick }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ r.a }}</span><span class="muted" style="font-size: 13px">{{ r.b }}</span></span></button></sc-for></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}"><div role="status" style="position: absolute; left: 16px; right: 16px; top: 56px; z-index: 30; padding: 10px 10px 10px 18px; border-radius: 18px; background: #0f172a; color: #ffffff; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(15,23,42,0.25)"><span class="grow" style="font-size: 14px; line-height: 20px">{{ toast }}</span><sc-if value="{{ toastUndo }}" hint-placeholder-val="{{ false }}"><button onClick="{{ undo }}" style="height: 36px; padding: 0 14px; border: none; border-radius: 18px; background: rgba(255,255,255,0.16); color: #ffffff; font: 600 13px Inter, sans-serif; cursor: pointer">Undo</button></sc-if></div></sc-if>
+
+<sc-if value="{{ incoming }}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="Donna is calling" style="position: absolute; inset: 0; z-index: 40; box-sizing: border-box; padding: 120px 24px 60px; background: #f5f3ff; display: flex; flex-direction: column; align-items: center; gap: 18px">
+<span class="face" style="width: 160px; height: 160px; background: #6d28d9; color: #ffffff; font-size: 60px; box-shadow: 0 0 0 18px rgba(109,40,217,0.15)">D</span>
+<h1 class="h" style="font-size: 30px">Donna is calling</h1>
+<span class="muted" style="font-size: 15px; text-align: center; line-height: 22px">About the dentist: it’s nearly time to leave.</span>
+<div style="flex-grow: 1"></div>
+<div style="width: 100%; display: flex; gap: 12px"><button class="pill grow" onClick="{{ decline }}" style="height: 60px; border-radius: 30px; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Not now</button><button class="pill grow" onClick="{{ pickUp }}" style="height: 60px; border-radius: 30px; background: #16a34a; color: #ffffff">Pick up</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ tourOn }}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; inset: 0; z-index: 25; background: rgba(15,23,42,0.35); display: flex; align-items: flex-end; padding: 16px 16px 120px; box-sizing: border-box">
+<div class="card" style="width: 100%; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<span class="top"><span style="padding: 2px 8px; border-radius: 8px; background: #f1f5f9; font-size: 11px; font-weight: 700; color: #475569">DEMO</span><span class="muted grow" style="font-size: 12px">Home · {{ tourCount }}</span><button class="small" aria-label="Close the tour" onClick="{{ tourClose }}">Close</button></span>
+<span class="h" style="font-size: 20px">{{ tourTitle }}</span>
+<span style="font-size: 15px; line-height: 22px">{{ tourText }}</span>
+<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ tourBack }}" style="background: #f1f5f9; color: #0f172a">Back</button><button class="pill grow" onClick="{{ demoCall.donna }}" style="background: #f5f3ff; color: #6d28d9">Ask Donna</button><button class="pill grow" onClick="{{ tourNext }}" style="background: #0f172a; color: #ffffff">{{ tourNextLabel }}</button></div>
+</div>
+</div>
+</sc-if>
+
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      screen: 'home', stack: [], space: 'donna', chatAgent: 'donna', textTo: 'donna',
+      onCall: false, callAgent: 'donna', phase: 0, confirmHang: false, muted: false,
+      nudges: { passport: false, fine: false }, apptMark: null, bell: true,
+      appt: null, item: null, itemDone: false, listTab: 'groceries',
+      bought: {}, subsDone: { flights: true }, walk: true, pages: 14, rain: true,
+      design: 'thread', logAgent: 'donna', yes: null,
+      todoBox: 'Important, not urgent', listKind: 'box', todoFilter: 'all', toast: null, sheet: null, planned: null, repeat: 'Doesn’t repeat',
+      travel: 'bike', apptNotes: ['Ask about the night guard', 'Bring the insurance card'], cal: { personal: true, work: true, birthdays: true },
+      bDel: false, score: 5, period: 'once', links: ['japan-rail.example', 'ryokan-guide.example'], voiceOn: true, second: null, takenBack: false,
+      incoming: false, offline: false, fresh: false, free: false, demo: false, textsOn: false, retried: false, nbell: { passport: true, fine: true },
+      clearedOpen: false, feel: null, kept: false, updating: 0,
+      feat: { calendar: true, todo: true, texts: true, weather: true, travel: true, driving: false, mail: true, notes: true, coaching: true, team: true },
+      voices: { donna: 'Warm, quick', pepper: 'Calm, unhurried', mp: 'Cool, few words' }, place: 'here', tour: -1
+    };
+  }
+  go(screen, extra) {
+    this.setState(st => Object.assign({ screen: screen, stack: st.stack.concat([st.screen]) }, extra || {}));
+  }
+  back() {
+    this.setState(st => {
+      const stack = st.stack.slice();
+      const prev = stack.length ? stack.pop() : 'home';
+      return { screen: prev, stack: stack, confirmHang: false };
+    });
+  }
+  startCall(a) {
+    this.setState(st => ({ onCall: true, callAgent: a, phase: 0, confirmHang: false, muted: false, yes: null, second: null, takenBack: false, incoming: false, demo: false,
+      screen: 'call', stack: st.screen === 'call' ? st.stack : st.stack.concat([st.screen]) }));
+  }
+  say(t) {
+    this.setState({ toast: t, toastUndo: /^(Ticked|Moved|Let go|Note cleared|Deleted|“)|is back on/.test(t) });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ toast: null }), 4000);
+  }
+  renderVals() {
+    const st = this.state;
+    const AG = {
+      donna: { key: 'donna', name: 'Donna', initial: 'D', role: 'Your personal secretary', color: '#6d28d9', ink: '#ffffff', tint: '#f5f3ff', accent: '#6d28d9', ring: 'rgba(109,40,217,0.18)',
+        kicker: 'Next · in 40 minutes', headline: 'Dentist at 15:00', sub: 'Leave at 14:40 · 18 minutes by bike', line: 'Sure. I moved the gym to 20:00 and I’ll text you at 14:30 to leave.' },
+      pepper: { key: 'pepper', name: 'Pepper', initial: 'P', role: 'Your life coach', color: '#c2410c', ink: '#ffffff', tint: '#fff3ec', accent: '#c2410c', ring: 'rgba(194,65,12,0.18)',
+        kicker: 'Due today · 17:00', headline: 'Weekly check-in', sub: 'About 15 minutes, whenever you’re ready', line: 'Let’s look back at the week first. What went better than you expected?' },
+      mp: { key: 'mp', name: 'Moneypenny', initial: 'M', role: 'Your head of the development team', color: '#ca8a04', ink: '#0f172a', tint: '#fefce8', accent: '#854d0e', ring: 'rgba(202,138,4,0.22)',
+        kicker: 'New hand-over', headline: 'Calendar clean-up', sub: 'Ready for you and Claude Code', line: 'Everything is running. One hand-over is waiting for you.' }
+    };
+    const sc = st.screen;
+    const subs = ['agenda','appt','todo','todoItem','lists','bucketItem','mail','notes','pastCalls','callLog','map','checkin','game','handovers','handover','status','planning','sessions','health','updates','settings','weather','tutorial','todoList','agendaFilter','kinds','subItem','layer','games','features','sound','voices'];
+    const s = { home: sc === 'home', inner: sc !== 'home', herView: sc === 'home' || ['donna','pepper','mp'].indexOf(sc) >= 0, space: ['donna','pepper','mp'].indexOf(sc) >= 0, donna: sc === 'donna', pepper: sc === 'pepper', mp: sc === 'mp', call: sc === 'call', transcript: sc === 'transcript', chat: sc === 'chat', sub: subs.indexOf(sc) >= 0 };
+    subs.forEach(k => { s[k] = sc === k; });
+    const nav = {};
+    subs.concat(['call']).forEach(k => { nav[k] = () => this.go(k); });
+    const open = {
+      donna: () => this.go('donna', { space: 'donna' }),
+      pepper: () => this.go('pepper', { space: 'pepper' }),
+      mp: () => this.go('mp', { space: 'mp' })
+    };
+    const sa = Object.assign({}, AG[st.space]);
+    sa.hasAction = st.space !== 'donna';
+    sa.action = st.space === 'pepper' ? () => this.go('checkin') : () => this.go('handover');
+    sa.actionLabel = st.space === 'pepper' ? 'Start the check-in' : 'Read the hand-over';
+    const ca = AG[st.callAgent];
+    const cha = AG[st.chatAgent];
+    const tt = AG[st.textTo];
+    const phases = ['Calling…', 'Your turn', 'Listening…', 'Thinking…', 'Speaking'];
+    const showMini = st.onCall && sc !== 'call' && sc !== 'transcript';
+
+    const call = {
+      donna: () => this.startCall('donna'), pepper: () => this.startCall('pepper'), mp: () => this.startCall('mp'),
+      space: () => this.startCall(st.space), chat: () => this.startCall(st.chatAgent), textTo: () => this.startCall(st.textTo)
+    };
+    const chat = {
+      space: () => this.go('chat', { chatAgent: st.space }), textTo: () => this.go('chat', { chatAgent: st.textTo }),
+      call: () => this.go('transcript')
+    };
+
+    const textChips = ['donna','pepper','mp'].map(k => {
+      const on = st.textTo === k;
+      return { name: AG[k].name, on: on ? 'true' : 'false', pick: () => this.setState({ textTo: k }),
+        bg: on ? AG[k].color : '#ffffff', fg: on ? AG[k].ink : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' };
+    });
+
+    const dentist = { title: 'Dentist', when: 'Today · 15:00 to 15:45', where: 'Dental practice · Personal calendar · Admin essentials' };
+    const openAppt = (i) => () => this.go('appt', { appt: { title: i.title, when: i.when, where: i.where || 'Personal calendar' }, apptMark: null });
+    const todayRow = [
+      { isItem: true, time: '12:30', title: 'Lunch', past: true },
+      { isNow: true },
+      { isItem: true, time: '14:40', title: 'Leave', who: 'donna' },
+      { isItem: true, time: '15:00', title: 'Dentist', who: 'donna' },
+      { isItem: true, time: '17:00', title: 'Check-in', who: 'pepper' },
+      { isItem: true, time: '20:00', title: 'Gym', who: 'donna' }
+    ].map(t => Object.assign({ isNow: false, isItem: false }, t, {
+      bg: t.past ? '#f1f5f9' : '#ffffff', shadow: t.past ? 'none' : '0 0 0 1px #e2e8f0 inset',
+      tc: t.past ? '#94a3b8' : (t.who ? AG[t.who].accent : '#475569'), fc: t.past ? '#94a3b8' : '#0f172a',
+      open: t.who === 'pepper' ? () => this.go('checkin') : openAppt({ title: t.title === 'Leave' ? 'Dentist' : t.title, when: 'Today · ' + t.time, where: t.title === 'Dentist' || t.title === 'Leave' ? dentist.where : 'Personal calendar' })
+    }));
+
+    const nudgeDefs = [{ id: 'passport', title: 'Renew your passport', sub: 'She’s nudging you since Monday' }, { id: 'fine', title: 'Pay the parking fine', sub: 'Due Friday' }];
+    const nudges = nudgeDefs.map(n => {
+      const done = st.nudges[n.id];
+      return { title: n.title, sub: done ? 'Done · she stopped nudging' : n.sub, label: done ? 'Undo' : 'Done',
+        deco: done ? 'line-through' : 'none', fc: done ? '#94a3b8' : '#0f172a',
+        toggle: () => this.setState(x => ({ nudges: Object.assign({}, x.nudges, { [n.id]: !x.nudges[n.id] }) })) };
+    });
+    const nudgeCount = nudges.filter((n, i) => !st.nudges[nudgeDefs[i].id]).length;
+
+    const R = (label, value, go, vc, vw) => ({ label: label, value: value, go: go, vc: vc || '#475569', vw: vw || '400' });
+    const rowsBy = {
+      donna: [ R('Agenda', '4 today', () => this.go('agenda')), R('Mail', '1 very important', () => this.go('mail'), '#b42318', '600'), R('To-do', '12 open', () => this.go('todo')),
+        R('Lists', 'Groceries, bucket, wish', () => this.go('lists')), R('Notes', 'Yours and hers', () => this.go('notes')), R('Past calls', 'Last today', () => this.go('pastCalls')), R('Texts', '2 today', () => this.go('chat', { chatAgent: 'donna' })) ],
+      pepper: [ R('The map', 'This year 7 of 12', () => this.go('map')), R('The six-week game', 'Day 12, on track', () => this.go('games')), R('Check-ins', 'One due', () => this.go('checkin')),
+        R('Coaching line', '1 new', () => this.go('chat', { chatAgent: 'pepper' })), R('Her notes', '3', () => this.go('notes')), R('Past calls', 'Last Tuesday', () => this.go('pastCalls')) ],
+      mp: [ R('Hand-overs', '1 new', () => this.go('handovers')), R('Her notes', '2', () => this.go('notes')), R('Texts', 'Yesterday', () => this.go('chat', { chatAgent: 'mp' })), R('Past calls', 'Last Monday', () => this.go('pastCalls')) ]
+    };
+    const spaceRows = rowsBy[st.space];
+
+    const chatsBy = {
+      donna: [ ['h','Morning. Four things today and two I’m still nudging you on.'], ['m','Can you move the gym to 20:00?'], ['h','Done. The gym is at 20:00 now.'], ['h','Leave at 14:40 for the dentist. I’ll text you at 14:30.'] ],
+      pepper: [ ['h','Your weekly check-in is ready whenever you are. Fifteen minutes.'], ['m','After the dentist?'], ['h','Perfect. I’ll keep 17:00 for us.'] ],
+      mp: [ ['h','Hand-over ready: calendar clean-up. Everything’s running.'], ['m','Thanks, I’ll pick it up tonight.'], ['h','Noted.'] ]
+    };
+    const toBubbles = (arr, ag) => arr.map(b => b[0] === 'm'
+      ? { t: b[1], align: 'flex-end', bg: '#22c55e', fg: '#052e16', radius: '20px 20px 6px 20px' }
+      : { t: b[1], align: 'flex-start', bg: ag.tint, fg: '#0f172a', radius: '20px 20px 20px 6px' });
+    const bubbles = toBubbles(chatsBy[st.chatAgent], cha);
+
+    const owner = s.status || s.planning || s.sessions || s.health || s.updates || s.handovers || s.handover ? AG.mp
+      : (s.map || s.checkin || s.game ? AG.pepper : (s.settings || s.weather || s.tutorial ? null : AG[st.space]));
+    const ownerOut = owner ? { label: owner.name, accent: owner.accent } : { label: 'HQ', accent: '#475569' };
+    const titles = { agenda: 'Agenda', appt: (st.appt || dentist).title, todo: 'To-do', todoItem: 'To-do', lists: 'Lists', bucketItem: 'Trip to Japan', mail: 'Mail', notes: 'Notes', pastCalls: 'Past calls', callLog: 'A past call',
+      map: 'The map', checkin: 'Check-ins', game: 'The six-week game', handovers: 'Hand-overs', handover: 'Hand-over', status: 'Status', planning: 'The planning board', sessions: 'Work sessions', health: 'Health', updates: 'Updates', settings: 'Settings', weather: 'Weather · Amsterdam', tutorial: 'Tutorial' };
+
+    const kinds = { admin: '#dc2626', ceo: '#0d9488', money: '#eab308', client: '#16a34a', cup: '#9333ea', none: '#cbd5e1' };
+    const A = (t, title, kind, past, where) => { const o = { t: t, title: title, kind: kinds[kind], tc: past ? '#94a3b8' : '#475569', fc: past ? '#94a3b8' : '#0f172a', deco: past ? 'line-through' : 'none' }; o.open = openAppt({ title: title, when: t, where: where }); return o; };
+    const agenda = [
+      { day: 'Today', items: [ A('09:30', 'Team standup', 'client', true), A('12:30', 'Lunch with Alex', 'cup', true), A('15:00', 'Dentist', 'admin', false, dentist.where), A('20:00', 'Gym', 'cup') ] },
+      { day: 'Tomorrow', items: [ A('10:00', 'Call with the accountant', 'admin'), A('Day', 'Sam’s birthday', 'none') ] },
+      { day: 'Saturday 28', items: [ A('11:00', 'Market with Alex', 'cup'), A('14:00', 'Plan the Japan trip', 'ceo') ] }
+    ];
+    const appt = st.appt || dentist;
+
+    const openItem = (box, title) => () => this.go('todoItem', { item: { box: box, title: title }, itemDone: false, planned: null, repeat: 'Doesn’t repeat' });
+    const boxes = [
+      { name: 'Urgent and important', count: 2, cc: '#b42318', shadow: '0 0 0 1px #e2e8f0 inset', op: 1, items: ['Renew your passport', 'Pay the parking fine'] },
+      { name: 'Important, not urgent', count: 28, cc: '#0f172a', shadow: '0 0 0 2px #0f172a inset', op: 1, items: ['Plan the Japan trip', 'Book the yearly check-up'] },
+      { name: 'Urgent, not important', count: 3, cc: '#0f172a', shadow: '0 0 0 1px #e2e8f0 inset', op: 1, items: ['Reply to the building', 'Return the parcel'] },
+      { name: 'Neither', count: 2, cc: '#0f172a', shadow: '0 0 0 1px #e2e8f0 inset', op: 0.6, items: ['Sort the photo library'] }
+    ].map(b => Object.assign({}, b, { openAll: () => this.go('todoList', { todoBox: b.name, listKind: 'box', todoFilter: 'all' }), more: b.count > b.items.length ? '+ ' + (b.count - b.items.length) + ' more' : 'See the list', items: b.items.map(t => ({ title: t, open: openItem(b.name, t) })) }));
+    const item = st.item || { box: 'Urgent and important', title: 'Renew your passport' };
+
+    const lists = { groceries: () => this.go('lists', { listTab: 'groceries' }), bucket: () => this.go('lists', { listTab: 'bucket' }), wish: () => this.go('lists', { listTab: 'wish' }) };
+    const listTabs = [['groceries','Groceries'],['bucket','Bucketlist'],['wish','Wishlist']].map(t => {
+      const on = st.listTab === t[0];
+      return { name: t[1], on: on ? 'true' : 'false', pick: () => this.setState({ listTab: t[0] }), bg: on ? '#0f172a' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' };
+    });
+    const lt = { groceries: st.listTab === 'groceries', bucket: st.listTab === 'bucket', wish: st.listTab === 'wish' };
+    const tick = (on) => ({ ring: on ? '#16a34a' : '#cbd5e1', fill: on ? '#16a34a' : 'transparent', deco: on ? 'line-through' : 'none', fc: on ? '#94a3b8' : '#0f172a' });
+    const groceries = ['Oat milk','Eggs','Spinach','Coffee beans','Lemons','Rice'].map(n => Object.assign({ name: n, toggle: () => this.setState(x => ({ bought: Object.assign({}, x.bought, { [n]: !x.bought[n] }) })) }, tick(!!st.bought[n])));
+    const bucket = [
+      { name: 'Trip to Japan', meta: '€3,020 · spring 2027 · 3 inside', open: () => this.go('bucketItem') },
+      { name: 'Learn to surf', meta: '€450 · this summer · 40 hours', open: () => this.go('bucketItem') },
+      { name: 'Run a half marathon', meta: 'Tap to give it a price, a goal, links, notes', open: () => this.go('bucketItem') }
+    ];
+    const wish = [ { name: 'Espresso machine', meta: '€699 once · score 3 of 5' }, { name: 'New running shoes', meta: '€160 once · score 4 of 5' } ];
+    const subs2 = [ ['flights','Flights','€1,400 once'], ['ryokan','Ryokan, 3 nights','€1,200 once'], ['jr','JR pass','€420 once'] ].map(x => Object.assign({ name: x[1], meta: x[2] + (st.subsDone[x[0]] ? ' · done' : ''), toggle: () => this.setState(y => ({ subsDone: Object.assign({}, y.subsDone, { [x[0]]: !y.subsDone[x[0]] }) })) }, tick(!!st.subsDone[x[0]])));
+
+    const notesBy = {
+      donna: [ { t: 'You prefer appointments after 10:00', when: 'Noted 3 weeks ago' }, { t: 'Keeping an eye out: the parcel from the shoe shop, until Friday', when: 'Since Tuesday' } ],
+      pepper: [ { t: 'Mornings are when you feel best. Protect them.', when: 'From Tuesday’s call' }, { t: 'Your word for this year: steady', when: 'From the map' } ],
+      mp: [ { t: 'Birthdays show twice in two calendars', when: 'Today' }, { t: 'The Mac strip still follows the system’s dark mode', when: 'Last week' } ]
+    };
+    const myNotes = [ { t: 'Ask the landlord about the boiler', when: 'Today, 11:02' }, { t: 'Gift idea for Sam: a pasta machine', when: 'Yesterday' } ];
+    const herNotes = notesBy[st.space];
+
+    const PC = { donna: [ { day: 'Today', items: [ ['09:12','Moving the gym',14] ] }, { day: 'Tuesday', items: [ ['08:05','The week ahead',9] ] } ],
+      pepper: [ { day: 'Tuesday', items: [ ['18:40','The year, part two',52] ] }, { day: 'Last week', items: [ ['19:10','Setting up the game',61] ] } ],
+      mp: [ { day: 'Monday', items: [ ['21:10','What’s next for HQ',23] ] } ] };
+    const pastCalls = PC[st.space].map(d => ({ day: d.day, items: d.items.map(c => ({ time: c[0], about: c[1], lines: c[2], open: () => this.go('callLog') })) }));
+    const toLines = (arr, ag) => arr.map(b => b[0] === 'm'
+      ? { who: 'You', t: b[1], nc: '#15803d', fc: '#0f172a', fs: '16px', fw: '500' }
+      : (b[0] === 'w' ? { who: ag.name, t: b[1], nc: ag.accent, fc: '#64748b', fs: '14px', fw: '400' } : { who: ag.name, t: b[1], nc: ag.accent, fc: '#0f172a', fs: '16px', fw: '400' }));
+    const TL = {
+      donna: [ ['m','Can you move the gym to 20:00?'], ['w','Let me look…'], ['h','Twenty hundred is free, nothing else that evening.'] ],
+      pepper: [ ['m','Can we do the check-in now?'], ['h','Of course. Let’s look back at the week first.'], ['h','What went better than you expected?'] ],
+      mp: [ ['m','How’s everything running?'], ['h','Everything is running. One hand-over is waiting for you.'] ]
+    };
+    let tLines = toLines(TL[st.callAgent], ca);
+    if (st.callAgent === 'donna' && st.yes === 'yes') tLines = tLines.concat(toLines([['m','Yes.'], ['h','Done. The gym is at 20:00 now.']], ca));
+    if (st.callAgent === 'donna' && st.yes === 'no') tLines = tLines.concat(toLines([['m','No.'], ['h','Fine, I’ll leave it at 19:00.']], ca));
+    const logBubbles = toLines([ ['m','Can you move the gym to 20:00?'], ['h','Sure. Twenty hundred works, nothing else that evening.'], ['m','And remind me to leave for the dentist.'], ['h','I’ll text you at 14:30. Leave at 14:40.'] ], sa);
+
+    const layers = [ ['The life you want','Done',100], ['This year','7 of 12',58], ['The six-week game','In progress',30], ['The ideal week','Not started',0], ['This week','Not started',0], ['Looking back','Not started',0] ].map(l => ({ name: l[0], st: l[1], pct: l[2], open: () => this.go('layer') }));
+
+    const marks = ['done','done','x','done','done','none','none','done','done','done','x','done','today','future'];
+    const days = ['M','T','W','T','F','S','S','M','T','W','T','F','S','S'];
+    const grid = marks.map((m, i) => {
+      if (m === 'today') m = st.walk ? 'done' : 'today';
+      const map = { done: ['#c2410c','#ffffff','none'], x: ['#f1f5f9','#94a3b8','none'], none: ['#f8fafc','#cbd5e1','none'], today: ['#ffffff','#0f172a','0 0 0 2px #0f172a inset'], future: ['#f8fafc','#cbd5e1','none'] };
+      const v = map[m] || map.none;
+      return { d: days[i], bg: v[0], fg: v[1], ring: i === 12 ? '0 0 0 2px #0f172a inset' : v[2] };
+    });
+
+    const handovers = [ { name: 'Calendar clean-up', meta: 'New · today', mc: '#854d0e', open: () => this.go('handover') }, { name: 'Bucketlist totals', meta: 'Being built', mc: '#475569', open: () => this.go('handover') }, { name: 'Weather radar', meta: 'Built · last week', mc: '#475569', open: () => this.go('handover') } ];
+    const working = [ { name: 'Calendar clean-up', state: 'Building', pct: 60 }, { name: 'Bucketlist totals', state: 'Testing', pct: 85 } ];
+    const planning = [
+      { phase: 'Now', items: [ { t: 'Calendar clean-up', s: 'building', c: '#ca8a04' }, { t: 'Bucketlist totals', s: 'testing', c: '#ca8a04' } ] },
+      { phase: 'Next', items: [ { t: 'The new design', s: 'designing', c: '#94a3b8' }, { t: 'Pick a design in settings', s: 'planned', c: '#94a3b8' } ] },
+      { phase: 'Done', items: [ { t: 'Bucketlist sub-items', s: '26 Nov', c: '#16a34a' }, { t: 'Weather radar', s: '19 Nov', c: '#16a34a' } ] }
+    ];
+    const sessionRows = [ { name: 'Bucketlist sub-items', state: 'Done', start: 0, w: 40, c: '#16a34a', border: 'none' }, { name: 'Bucketlist totals', state: 'Testing now', start: 35, w: 45, c: '#ca8a04', border: 'none' }, { name: 'Calendar clean-up', state: 'Next', start: 78, w: 22, c: 'transparent', border: '1.5px dashed #a16207' } ];
+    const routines = [ { n: 'Calendar sync', l: '2 min ago' }, { n: 'Mail check', l: '5 min ago' }, { n: 'Reminders', l: 'running' }, { n: 'Call line', l: 'ready' }, { n: 'Backups', l: '03:00 last night' } ];
+
+    const designDefs = [ ['spotlight','Spotlight','One of the three at a time, swipe between them'], ['thread','Thread','HQ as three conversations'], ['desk','Desk','The three side by side, today underneath'] ];
+    const designs = designDefs.map(d => { const on = st.design === d[0]; return { name: d[1], line: d[2], on: on ? 'true' : 'false', ring: on ? '7px solid #0f172a' : '2px solid #cbd5e1', pick: () => this.setState({ design: d[0] }) }; });
+    const hours = [ ['15:00','8°',''], ['16:00','7°','70%'], ['17:00','6°','80%'], ['18:00','6°','40%'], ['19:00','5°',''] ].map(h => ({ t: h[0], deg: h[1], rain: h[2] || ' ' }));
+    const pieces = [ ['1','Calling one of the three','Done'], ['2','Texting',''], ['3','Today on home',''], ['4','Donna’s space',''], ['5','Pepper’s map',''], ['6','Moneypenny and Status',''] ].map(p => ({ n: p[0], t: p[1], done: p[2] }));
+
+    const say = (t) => this.say(t);
+    const BOXES = {
+      'Urgent and important': ['Renew your passport', 'Pay the parking fine'],
+      'Important, not urgent': ['Plan the Japan trip','Book the yearly check-up','Write the vision page','Sort the pension papers','Learn the surf basics','Call grandma on Sunday','Back up the photo library','Pick a new bank','Read Deep Work','Plan the garden','Fix the bike light','Update the CV','Book the boiler service','Choose a running plan','Clear out the attic','Meal-prep on Sundays','Set up the home office','Renew the gym card','Plan Sam’s surprise','Write to the old team','Price a new laptop','Try the climbing hall','Learn ten Japanese phrases','Frame the posters','Make a will','Plan the winter trip','Sell the old camera','Start a morning journal'],
+      'Urgent, not important': ['Reply to the building', 'Return the parcel', 'Confirm the dentist'],
+      'Neither': ['Sort the photo library', 'Unsubscribe from newsletters']
+    };
+    const DONE = ['Book the dentist','Send the invoice','Buy a birthday card','Fix the doorbell','Renew the bike lock','Call the insurer'];
+    const LETGO = ['Learn the guitar', 'Redo the kitchen tiles'];
+    const PLANNED = { 'Plan the Japan trip': 'Planned Saturday 14:00 · CEO time', 'Book the yearly check-up': 'Planned tomorrow 10:00 · Admin', 'Write the vision page': 'Planned Monday 09:00 · CEO time', 'Call grandma on Sunday': 'Planned Sunday 11:00 · Cup fillers', 'Pick a new bank': 'Planned Tuesday 16:00 · Admin', 'Fix the bike light': 'Planned Wednesday 10:00 · gone by' };
+    const DEAD = { 'Renew your passport': 'Friday', 'Pay the parking fine': 'Friday', 'Sort the pension papers': 'Monday', 'Return the parcel': 'Saturday' };
+    const closedL = st.listKind !== 'box';
+    let src = st.listKind === 'done' ? DONE : st.listKind === 'letgo' ? LETGO : (BOXES[st.todoBox] || []);
+    const cntAll = src.length, cntPl = src.filter(t => PLANNED[t]).length;
+    if (!closedL && st.todoFilter === 'planned') src = src.filter(t => PLANNED[t]);
+    if (!closedL && st.todoFilter === 'open') src = src.filter(t => !PLANNED[t]);
+    const todoRows = src.map(t => ({ title: t, meta: [DEAD[t] ? 'Deadline ' + DEAD[t] : '', PLANNED[t] || ''].filter(Boolean).join(' · ') || (closedL ? (st.listKind === 'done' ? 'Done this week' : 'Let go last month') : 'For you'), mc: DEAD[t] ? '#b42318' : '#475569',
+      open: () => this.go('todoItem', { item: { box: st.todoBox, title: t }, itemDone: false, planned: null, repeat: 'Doesn’t repeat' }), tick: () => say('Ticked off “' + t + '”'), back: () => say('“' + t + '” is back on a list') }));
+    const todoFilters = closedL ? [] : [['all','All',cntAll],['planned','Planned',cntPl],['open','Not planned',cntAll - cntPl]].map(f => { const on = st.todoFilter === f[0]; return { name: f[1] + ' ' + f[2], on: on ? 'true' : 'false', pick: () => this.setState({ todoFilter: f[0] }), bg: on ? '#0f172a' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' }; });
+    const todoListTitle = st.listKind === 'done' ? 'Done' : st.listKind === 'letgo' ? 'Let go' : st.todoBox;
+    const SHEETS = {
+      plan: { title: 'Plan it in a block', rows: [['Today','16:00 to 17:00','Admin essentials'],['Tomorrow','10:00 to 12:00','CEO time'],['Tomorrow','14:00 to 15:00','Money makers'],['Monday','09:00 to 11:00','CEO time']].map(r => ({ a: r[0] + ' · ' + r[1], b: r[2], pick: () => { this.setState({ planned: 'Planned ' + r[0].toLowerCase() + ' ' + r[1].slice(0, 5) + ' · ' + r[2], sheet: null }); say('Planned ' + r[0].toLowerCase() + ' at ' + r[1].slice(0, 5)); } })) },
+      repeat: { title: 'Comes back', rows: ['Doesn’t repeat','Every week','Every month','Every quarter','Every year'].map(r => ({ a: r, b: st.repeat === r ? 'Chosen' : '', pick: () => this.setState({ repeat: r, sheet: null }) })) },
+      move: { title: 'Move to another list', rows: ['Urgent and important','Important, not urgent','Urgent, not important','Neither','Commitments to others','Groceries','Wishlist'].map(r => ({ a: r, b: '', pick: () => { this.setState({ sheet: null }); say('Moved to ' + r); } })) },
+      add: { title: 'Bring someone into the call', rows: ['donna','pepper','mp'].filter(k => k !== st.callAgent).map(k => ({ a: AG[k].name, b: AG[k].role, pick: () => { this.setState({ second: k, sheet: null }); say(AG[k].name + ' picked up'); } })) }
+    };
+    const sh = st.sheet ? SHEETS[st.sheet] : null;
+    const sec = st.second ? AG[st.second] : null;
+    const tl2 = tLines.map(l => Object.assign({ deco: 'none' }, l));
+    if (st.takenBack) { for (let i = tl2.length - 1; i >= 0; i--) { if (tl2[i].who === 'You') { tl2[i] = Object.assign({}, tl2[i], { deco: 'line-through', fc: '#94a3b8' }); break; } } }
+    if (sec) tl2.push({ who: sec.name, t: sec.name + ' picked up and is listening in.', nc: sec.accent, fc: sec.accent, fs: '14px', fw: '600', deco: 'none' });
+    const groTicked = [['Bread','last Tuesday'],['Butter','2 weeks ago'],['Tomatoes','last week']].map(g => ({ name: g[0], when: g[1], back: () => say(g[0] + ' is back on the list') }));
+    const calRows = [['personal','Personal'],['work','Work'],['birthdays','Birthdays']].map(c => { const on = st.cal[c[0]]; return { name: c[1], toggle: () => this.setState(x => ({ cal: Object.assign({}, x.cal, { [c[0]]: !x.cal[c[0]] }) })), bg: on ? '#16a34a' : '#cbd5e1', just: on ? 'flex-end' : 'flex-start' }; });
+    const kindRows = [['money','Money makers'],['client','Client delivery'],['admin','Admin essentials'],['ceo','CEO time'],['cup','Cup fillers'],['none','Not set yet']].map(k => ({ name: k[1], c: kinds[k[0]] }));
+    const swatches = ['#dc2626','#ea580c','#eab308','#16a34a','#0d9488','#2563eb','#9333ea','#db2777','#64748b'].map(c => ({ c: c }));
+    const TRAVEL = { bike: 'Leave at 14:40 · 18 minutes by bike', transit: 'Tram 5 at 14:31 from the stop around the corner · 22 minutes', car: 'Leave at 14:45 · 12 minutes · parking nearby' };
+    const travelChips = [['bike','Bike'],['transit','Public transport'],['car','Car']].map(t => { const on = st.travel === t[0]; return { name: t[1], pick: () => this.setState({ travel: t[0] }), bg: on ? '#6d28d9' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' }; });
+    const apptNoteRows = st.apptNotes.map((t, i) => ({ t: t, clear: () => { this.setState(x => ({ apptNotes: x.apptNotes.filter((_, j) => j !== i) })); say('Note cleared'); } }));
+    const periodChips = [['once','Once'],['month','A month'],['year','A year']].map(p => { const on = st.period === p[0]; return { name: p[1], pick: () => this.setState({ period: p[0] }), bg: on ? '#0f172a' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' }; });
+    const scoreBtns = [1,2,3,4,5].map(n => { const on = st.score === n; return { n: n, pick: () => this.setState({ score: n }), bg: on ? '#0f172a' : '#ffffff', fg: on ? '#ffffff' : '#0f172a' }; });
+    const linkRows = st.links.map((l, i) => ({ t: l, remove: () => this.setState(x => ({ links: x.links.filter((_, j) => j !== i) })) }));
+    const delTap = () => { if (st.bDel) { this.setState({ bDel: false }); this.back(); say('Deleted, with everything under it'); } else { this.setState({ bDel: true }); clearTimeout(this._d); this._d = setTimeout(() => this.setState({ bDel: false }), 5000); } };
+    const nudgeRows = [['passport','Renew your passport','since Monday'],['fine','Pay the parking fine','until Friday']].map(n => { const on = st.nbell[n[0]]; const done = st.nudges[n[0]]; return { t: n[1], when: done ? 'Done' : 'Nudging you ' + n[2], bell: () => this.setState(x => ({ nbell: Object.assign({}, x.nbell, { [n[0]]: !x.nbell[n[0]] }) })), bellBg: on ? '#f5f3ff' : '#f1f5f9', bellFg: on ? '#6d28d9' : '#94a3b8', bellAria: on ? 'Stop the texts for this nudge' : 'Text me for this nudge', done: () => this.setState(x => ({ nudges: Object.assign({}, x.nudges, { [n[0]]: !x.nudges[n[0]] }) })), doneLabel: done ? 'Undo' : 'Done' }; });
+    const eyeRows = [ { t: 'The parcel from the shoe shop', when: 'until Friday' }, { t: 'Rain on your bike rides', when: 'every day' } ];
+    const clearedRows = [ { t: 'Call the bike shop', when: 'Cleared Monday' }, { t: 'Buy a present for Sam', when: 'Cleared last week' } ];
+    const checklist = [ ['What does a great year look like, in one sentence?','Answered','#15803d','Steady and healthy, with the Japan trip booked.'], ['Which three things matter most?','Answered','#15803d','Health, the trip, HQ.'], ['What will you stop doing?','Parked','#a16207','Come back to it after the game.'], ['What does a good month look like?','Later','#475569',''], ['Who do you want more time with?','Open','#64748b',''] ].map(c => ({ q: c[0], mark: c[1], mc: c[2], note: c[3], hasNote: !!c[3] }));
+    const pastGames = [ { name: 'Autumn reset', meta: 'September to October · won' }, { name: 'Summer basics', meta: 'July to August · not won this time' } ];
+    const feelChips = ['Great','Fine','Tired','Low'].map(f => { const on = st.feel === f; return { name: f, pick: () => this.setState({ feel: f }), bg: on ? '#c2410c' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' }; });
+    const FEAT = [ ['calendar','Calendar','Your days, two weeks ahead',null], ['todo','To-do','Your lists, the Eisenhower way',null], ['texts','Texts','The three can text you',null], ['weather','Weather','The chip on home and rain alerts',null], ['travel','Travel','When to leave, by bike or public transport','calendar'], ['driving','Driving','Drive times too, with a maps key','travel'], ['mail','Mail check','Donna flags the very important ones',null], ['notes','Notes','Quick notes the next call can read',null], ['coaching','Life coaching','Pepper’s map, check-ins and the game',null], ['team','The team’s work','Moneypenny’s hand-overs and Status',null] ];
+    const featRows = FEAT.map(f => { const on = st.feat[f[0]]; const blocked = !!f[3] && !st.feat[f[3]]; const need = f[3] ? FEAT.filter(x => x[0] === f[3])[0][1] : ''; return { name: f[1], line: blocked ? 'Needs ' + need + ': turn that on first' : f[2], toggle: () => { if (!blocked) this.setState(x => ({ feat: Object.assign({}, x.feat, { [f[0]]: !x.feat[f[0]] }) })); }, bg: blocked ? '#e2e8f0' : (on ? '#16a34a' : '#cbd5e1'), just: on && !blocked ? 'flex-end' : 'flex-start', op: blocked ? 0.5 : 1 }; });
+    const featCount = FEAT.filter(f => st.feat[f[0]] && !(f[3] && !st.feat[f[3]])).length;
+    const VOICES = { donna: ['Warm, quick','Bright, clear','Low, steady'], pepper: ['Calm, unhurried','Soft, close','Warm, low'], mp: ['Cool, few words','Crisp, dry','Even, quiet'] };
+    const voiceGroups = ['donna','pepper','mp'].map(k => ({ name: AG[k].name, color: AG[k].color, ink: AG[k].ink, initial: AG[k].initial, opts: VOICES[k].map(v => { const on = st.voices[k] === v; return { v: v, pick: () => this.setState(x => ({ voices: Object.assign({}, x.voices, { [k]: v }) })), ring: on ? '7px solid ' + AG[k].color : '2px solid #cbd5e1' }; }) }));
+    const placeChips = [['here','Where you are'],['home','Home']].map(p => { const on = st.place === p[0]; return { name: p[1], pick: () => this.setState({ place: p[0] }), bg: on ? '#0f172a' : '#ffffff', fg: on ? '#ffffff' : '#475569', shadow: on ? 'none' : '0 0 0 1px #e2e8f0 inset' }; });
+    const TOUR = [ ['These are your three','Tap one to go into her space. Hold a card to call her straight away.'], ['Today, in order','Everything with a time, from all three. Tap one to open it.'], ['Text or call from here','Pick who first, then type, or tap the phone to call.'] ];
+    const tourOn = st.tour >= 0 && sc === 'home';
+    const tourStep = tourOn ? TOUR[st.tour] : ['', ''];
+    const DEVICE = 'iPhone';
+    const order = ['donna', 'pepper', 'mp'];
+    const idx = order.indexOf(st.space);
+    const homeLines = {
+      donna: [ { t: (st.nudges.passport && st.nudges.fine ? 'No nudges left' : '2 nudges: passport, parking fine'), c: '#0f172a', w: '400' }, { t: '1 very important mail', c: '#b42318', w: '600' }, { t: '12 to-dos open', c: '#0f172a', w: '400' } ],
+      pepper: [ { t: 'The game: day 12 of 42, on track', c: '#0f172a', w: '400' }, { t: 'The map: this year, 7 of 12 answered', c: '#0f172a', w: '400' } ],
+      mp: [ { t: 'Everything is running', c: '#15803d', w: '600' }, { t: 'Usage: 34% now, 61% this week', c: '#0f172a', w: '400' }, { t: '2 things being worked on', c: '#0f172a', w: '400' } ]
+    };
+    const homeCards = order.map(k => Object.assign({}, AG[k], { lines: homeLines[k], call: () => this.startCall(k), open: () => this.go(k, { space: k }) }));
+    const rail = order.map(k => { const on = sc !== 'home' && st.space === k; return { name: AG[k].name, initial: AG[k].initial, color: AG[k].color, ink: AG[k].ink, line: AG[k].rail || AG[k].headline, current: on ? 'true' : 'false', currentSpot: st.space === k ? 'true' : 'false', open: () => this.go(k, { space: k }), pick: () => this.setState({ space: k, screen: 'home', stack: [] }), bg: on ? AG[k].tint : '#ffffff', shadow: on ? '0 0 0 2px ' + AG[k].color + ' inset' : '0 0 0 1px #e2e8f0 inset', spotRing: st.space === k ? AG[k].color : 'transparent' }; });
+    const LONG = { Lunch: 'Lunch with Alex', Leave: 'Leave for the dentist', 'Check-in': 'Weekly check-in' };
+    const todayRowX = todayRow.map(t => Object.assign({ longTitle: LONG[t.title] || t.title }, t));
+    const railToday = todayRowX.filter(t => t.isItem);
+    const spotDots = order.map(k => ({ w: k === st.space ? '24px' : '8px', c: AG[k].color, op: k === st.space ? 1 : 0.4 }));
+    const TIMES = { donna: '14:02', pepper: '09:00', mp: 'Yesterday' }, UNREAD = { donna: 2, pepper: 1, mp: 0 };
+    const chatList = order.map(k => { const arr = chatsBy[k]; const last = arr[arr.length - 1]; const cur = st.space === k; return { name: AG[k].name, initial: AG[k].initial, color: AG[k].color, ink: AG[k].ink, accent: AG[k].accent, preview: last[1], time: TIMES[k], tc: UNREAD[k] ? AG[k].accent : '#55555c', unread: UNREAD[k], hasUnread: UNREAD[k] > 0, current: cur ? 'true' : 'false', bg: cur ? AG[k].color : 'transparent', fg: cur ? AG[k].ink : '#111114', faceBg: cur ? '#ffffff' : AG[k].color, faceFg: cur ? AG[k].color : AG[k].ink, open: () => this.go(k, { space: k }), call: () => this.startCall(k) }; });
+    const spaceBubbles = toBubbles(chatsBy[st.space], sa);
+    const extra = {
+      title: ({ todoList: todoListTitle, agendaFilter: 'Show in the agenda', kinds: 'Kinds of time', subItem: 'Ryokan, 3 nights', layer: 'This year', games: 'Your games', features: 'What HQ helps you with', sound: 'Microphone and sound', voices: 'Voices' })[sc] || titles[sc] || '',
+      owner: (sc === 'layer' || sc === 'games') ? { label: 'Pepper', accent: '#c2410c' } : (['features','sound','voices'].indexOf(sc) >= 0 ? { label: 'Settings', accent: '#475569' } : ownerOut),
+      tLines: tl2, callBg: sec ? 'linear-gradient(135deg, ' + ca.tint + ' 50%, ' + sec.tint + ' 50%)' : ca.tint,
+      callTitle: sec ? ca.name + ' and ' + sec.name : ca.name, hasSecond: !!sec, sec: sec || ca,
+      takeBack: () => { this.setState({ takenBack: true }); say('Taken back. She won’t act on your last line'); },
+      callMeBack: () => { this.setState({ phase: 0 }); say(ca.name + ' hangs up and calls you straight back'); },
+      toggleVoice: () => this.setState(x => ({ voiceOn: !x.voiceOn })), voiceLabel: st.voiceOn ? 'Voice off' : 'Voice on',
+      sheetAdd: () => this.setState({ sheet: 'add' }), sheetPlan: () => this.setState({ sheet: 'plan' }), sheetRepeat: () => this.setState({ sheet: 'repeat' }), sheetMove: () => this.setState({ sheet: 'move' }),
+      sheetOn: !!sh, sh: sh || { title: '', rows: [] }, closeSheet: () => this.setState({ sheet: null }),
+      toast: st.toast || '', toastOn: !!st.toast, toastUndo: !!st.toastUndo, undo: () => this.setState({ toast: null }),
+      demoOn: st.demo && sc === 'call', offline: st.offline, callErr: st.offline && sc === 'call', free: st.free, fresh: st.fresh, notFresh: !st.fresh,
+      goOnline: () => this.setState({ offline: false }),
+      demoCall: { donna: () => { this.startCall('donna'); this.setState({ demo: true, tour: -1 }); }, pepper: () => { this.startCall('pepper'); this.setState({ demo: true }); } },
+      incoming: st.incoming, pickUp: () => { this.setState({ incoming: false }); this.startCall('donna'); }, decline: () => { this.setState({ incoming: false }); say('Donna will text you instead'); },
+      textsOff: !st.textsOn, toggleTexts: () => this.setState(x => ({ textsOn: !x.textsOn })), bellBtnBg: st.textsOn ? cha.tint : '#ffffff', bellBtnFg: st.textsOn ? cha.accent : '#0f172a', bellAria: st.textsOn ? 'Her texts are on. Turn them off' : 'Turn her texts on',
+      showFailed: st.chatAgent === 'donna' && !st.retried, retry: () => { this.setState({ retried: true }); say('Sent'); },
+      todoRows: todoRows, todoFilters: todoFilters, listClosed: closedL, listOpen: !closedL,
+      openDone: () => this.go('todoList', { listKind: 'done' }), openLetgo: () => this.go('todoList', { listKind: 'letgo' }),
+      plannedText: st.planned || 'Not planned', itemDead: DEAD[item.title] || 'None', itemDeadC: DEAD[item.title] ? '#b42318' : '#0f172a', repeatText: st.repeat,
+      tickItem: () => { this.setState(x => ({ itemDone: !x.itemDone })); if (!st.itemDone) say('Ticked off. It’s under Done now'); },
+      letGo: () => { this.back(); say('Let go. You’ll find it under Let go'); },
+      groTicked: groTicked, calRows: calRows, kindRows: kindRows, swatches: swatches, saveKinds: () => { this.back(); say('Kinds saved'); },
+      travelChips: travelChips, travelText: TRAVEL[st.travel], apptNoteRows: apptNoteRows,
+      periodChips: periodChips, scoreBtns: scoreBtns, linkRows: linkRows, delTap: delTap, delLabel: st.bDel ? 'Tap again to delete' : 'Delete', delBg: st.bDel ? '#d9392b' : '#ffffff', delFg: st.bDel ? '#ffffff' : '#b42318',
+      openSub: () => this.go('subItem'),
+      isDonnaNotes: st.space === 'donna', nudgeRows: nudgeRows, eyeRows: eyeRows, clearedRows: clearedRows, clearedOpen: st.clearedOpen, toggleCleared: () => this.setState(x => ({ clearedOpen: !x.clearedOpen })), clearedLabel: st.clearedOpen ? 'Hide cleared notes' : 'Show cleared notes (2)',
+      checklist: checklist, pastGames: pastGames, openGame: () => this.go('game'), feelChips: feelChips, kept: st.kept, notKept: !st.kept, keepIt: () => { this.setState({ kept: true }); say('Kept. Pepper reads it at the check-in'); },
+      featRows: featRows, featCount: featCount + ' of ' + FEAT.length + ' on', mapsKey: st.feat.driving && st.feat.travel && st.feat.calendar,
+      voiceGroups: voiceGroups, placeChips: placeChips,
+      tourOn: tourOn, tourTitle: tourStep[0], tourText: tourStep[1], tourCount: (st.tour + 1) + ' of ' + TOUR.length, tourNextLabel: st.tour === TOUR.length - 1 ? 'Done' : 'Next',
+      tourNext: () => this.setState(x => ({ tour: x.tour + 1 >= TOUR.length ? -1 : x.tour + 1 })), tourBack: () => this.setState(x => ({ tour: Math.max(0, x.tour - 1) })), tourClose: () => this.setState({ tour: -1 }),
+      pieces: pieces.map(p => Object.assign({}, p, { start: () => this.setState({ screen: 'home', stack: [], tour: 0 }) })),
+      updLabel: ['Update to v4.3', 'Updating: getting the new version…', 'Update done'][st.updating], updIdle: st.updating === 0, updBusy: st.updating === 1, updDone: st.updating === 2,
+      startUpdate: () => { this.setState({ updating: 1 }); setTimeout(() => this.setState({ updating: 2 }), 1800); }, reload: () => { this.setState({ updating: 0 }); say('You’re on v4.3'); },
+      allOn: () => say('Everything is on'),
+      toggleFree: () => this.setState(x => ({ free: !x.free })), freeBg: st.free ? '#16a34a' : '#cbd5e1', freeJust: st.free ? 'flex-end' : 'flex-start',
+      toggleOffline: () => this.setState(x => ({ offline: !x.offline })), offBg: st.offline ? '#16a34a' : '#cbd5e1', offJust: st.offline ? 'flex-end' : 'flex-start',
+      toggleFresh: () => this.setState(x => ({ fresh: !x.fresh })), freshBg: st.fresh ? '#16a34a' : '#cbd5e1', freshJust: st.fresh ? 'flex-end' : 'flex-start',
+      ringMe: () => this.setState({ incoming: true }),
+      home: () => this.setState({ screen: 'home', stack: [] }), homeCards: homeCards, rail: rail, railToday: railToday, todayRow: todayRowX,
+      spotDots: spotDots, spotLines: homeLines[st.space], openHer: () => this.go(st.space),
+      spotNext: () => this.setState({ space: order[(idx + 1) % 3] }), spotPrev: () => this.setState({ space: order[(idx + 2) % 3] }),
+      chatList: chatList, spaceBubbles: spaceBubbles, isDonnaSpace: st.space === 'donna', isMpSpace: st.space === 'mp',
+      notCallView: !(sc === 'call' || sc === 'transcript'), notSub: !s.sub,
+      designs: designs.map((d, i) => Object.assign({}, d, { href: ['Spotlight', 'Thread', 'Desk'][i] + '-' + DEVICE + '.dc.html' }))
+    };
+    return Object.assign({
+      s: s, nav: nav, open: open, back: () => this.back(), call: call, chat: chat,
+      sa: sa, ca: ca, cha: cha, tt: tt, phase: phases[st.phase], ring: [4, 6, 18, 10, 26][st.phase],
+      showMini: showMini, padCls: showMini ? 'pt' : '', chatTop: showMini ? '12px' : '52px',
+      cyclePhase: () => this.setState(x => ({ phase: (x.phase + 1) % 5 })),
+      toggleMute: () => this.setState(x => ({ muted: !x.muted })), muteLabel: st.muted ? 'Muted: she can’t hear you' : 'Mute',
+      muteBg: st.muted ? '#fef3c7' : '#ffffff', muteFg: st.muted ? '#78350f' : '#0f172a',
+      askHang: () => this.setState({ confirmHang: true }), stayOn: () => this.setState({ confirmHang: false }),
+      hangUp: () => this.setState(x => { const stack = x.stack.slice(); const prev = stack.length ? stack.pop() : 'home'; return { onCall: false, confirmHang: false, screen: prev, stack: stack }; }),
+      confirmHang: st.confirmHang,
+      tLines: tLines, askOpen: st.callAgent === 'donna' && !st.yes,
+      sayYes: () => this.setState({ yes: 'yes' }), sayNo: () => this.setState({ yes: 'no' }),
+      muteShort: st.muted ? 'Muted' : 'Mute',
+      hangFromT: () => this.setState(x => { const stack = x.stack.slice(); stack.pop(); return { screen: 'call', stack: stack, confirmHang: true }; }),
+      textChips: textChips, todayRow: todayRow, nudges: nudges, nudgeCount: nudgeCount, spaceRows: spaceRows, bubbles: bubbles,
+      owner: ownerOut, title: titles[sc] || '', agenda: agenda, appt: appt,
+      apptMarked: !!st.apptMark, apptMarkText: st.apptMark === 'done' ? 'Marked as done' : 'Marked: didn’t happen as planned', apptMarkColor: st.apptMark === 'done' ? '#15803d' : '#475569',
+      markDone: () => this.setState(x => ({ apptMark: x.apptMark === 'done' ? null : 'done' })), markMissed: () => this.setState(x => ({ apptMark: x.apptMark === 'missed' ? null : 'missed' })),
+      toggleBell: () => this.setState(x => ({ bell: !x.bell })), bellBg: st.bell ? '#16a34a' : '#cbd5e1', bellJust: st.bell ? 'flex-end' : 'flex-start',
+      boxes: boxes, item: item, itemDeco: st.itemDone ? 'line-through' : 'none', tickLabel: st.itemDone ? 'Back on the list' : 'Tick it off',
+      tickItem: () => this.setState(x => ({ itemDone: !x.itemDone })),
+      lists: lists, listTabs: listTabs, lt: lt, groceries: groceries, bucket: bucket, wish: wish, subs: subs2,
+      myNotes: myNotes, herNotes: herNotes, pastCalls: pastCalls, logBubbles: logBubbles, layers: layers,
+      walkToggle: () => this.setState(x => ({ walk: !x.walk })), walkLabel: st.walk ? 'Done' : 'Not yet', walkBg: st.walk ? '#c2410c' : '#f1f5f9', walkFg: st.walk ? '#ffffff' : '#0f172a',
+      pages: st.pages, pagesUp: () => this.setState(x => ({ pages: x.pages + 1 })), pagesDown: () => this.setState(x => ({ pages: Math.max(0, x.pages - 1) })),
+      grid: grid, handovers: handovers, working: working, planning: planning, sessionRows: sessionRows, routines: routines,
+      designs: designs, hours: hours, toggleRain: () => this.setState(x => ({ rain: !x.rain })), rainBg: st.rain ? '#16a34a' : '#cbd5e1', rainJust: st.rain ? 'flex-end' : 'flex-start',
+      pieces: pieces
+    }, extra);
+  }
+}
+</script>
+</body>
+</html>

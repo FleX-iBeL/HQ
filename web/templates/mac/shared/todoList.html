@@ -1,0 +1,10 @@
+<sc-if value="{{ s.todoList }}">
+<sc-if value="{{ listOpen }}"><div role="group" aria-label="Show" style="display: flex; gap: 6px"><sc-for list="{{ todoFilters }}" as="f"><button class="chip" aria-pressed="{{ f.on }}" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></sc-if>
+<div class="list"><sc-for list="{{ todoRows }}" as="r"><div class="row" style="cursor: default; gap: 10px">
+<sc-if value="{{ listOpen }}"><span aria-hidden="true" style="display: flex; flex-direction: column; gap: 3px; padding: 4px 2px; cursor: grab"><span style="width: 12px; height: 2px; background: #cbd5e1"></span><span style="width: 12px; height: 2px; background: #cbd5e1"></span><span style="width: 12px; height: 2px; background: #cbd5e1"></span></span></sc-if>
+<button onClick="{{ r.open }}" class="grow col" style="border: none; background: transparent; padding: 0; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 15px; font-weight: 600">{{ r.title }}</span><span style="font-size: 13px; color: {{ r.mc }}">{{ r.meta }}</span></button>
+<sc-if value="{{ listOpen }}"><button aria-label="Tick off {{ r.title }}" onClick="{{ r.tick }}" style="width: 28px; height: 28px; flex-shrink: 0; border-radius: 14px; border: 2px solid #cbd5e1; background: transparent; cursor: pointer"></button></sc-if>
+<sc-if value="{{ listClosed }}"><button class="small" onClick="{{ r.back }}">Back on a list</button></sc-if>
+</div></sc-for></div>
+<sc-if value="{{ listOpen }}"><div class="tbox"><label for="dk-list-add" class="sr">Add to this list</label><input id="dk-list-add" placeholder="Add several, one per line"></div><span class="muted" style="font-size: 12px; text-align: center">Drag the grip to reorder</span></sc-if>
+</sc-if>

@@ -1,0 +1,7 @@
+<sc-if value="{{ s.agendaFilter }}">
+<h2 class="lab" style="margin: 0 4px">Calendars</h2>
+<div class="list"><sc-for list="{{ calRows }}" as="c"><button class="row" onClick="{{ c.toggle }}"><span class="grow" style="font-size: 15px">{{ c.name }}</span><span style="width: 48px; height: 28px; flex-shrink: 0; border-radius: 14px; background: {{ c.bg }}; display: flex; align-items: center; justify-content: {{ c.just }}; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 11px; background: #ffffff"></span></span></button></sc-for></div>
+<h2 class="lab" style="margin: 0 4px">Kinds of time</h2>
+<div class="list"><sc-for list="{{ kindRows }}" as="k"><div class="row" style="cursor: default"><span style="width: 12px; height: 12px; border-radius: 6px; background: {{ k.c }}; flex-shrink: 0"></span><span class="grow" style="font-size: 15px">{{ k.name }}</span></div></sc-for></div>
+<button class="pill" onClick="{{ nav.kinds }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Rename or recolour the kinds</button>
+</sc-if>

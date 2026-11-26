@@ -1,0 +1,22 @@
+<sc-if value="{{ s.chat }}">
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column">
+<div class="top" style="padding: {{ chatTop }} 16px 12px; background: #ffffff; border-bottom: 1px solid #e2e8f0">
+<button class="iconbtn" aria-label="Back" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></button>
+<span class="face" style="width: 40px; height: 40px; background: {{ cha.color }}; color: {{ cha.ink }}; font-size: 16px">{{ cha.initial }}</span>
+<div class="grow col"><h1 class="h" style="font-size: 17px; letter-spacing: -0.01em">{{ cha.name }}</h1><span class="muted" style="font-size: 12px">{{ cha.role }}</span></div>
+<button class="iconbtn" aria-label="{{ bellAria }}" onClick="{{ toggleTexts }}" style="background: {{ bellBtnBg }}; color: {{ bellBtnFg }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button>
+<button class="iconbtn" aria-label="Call {{ cha.name }}" onClick="{{ call.chat }}" style="background: {{ cha.color }}; color: {{ cha.ink }}; box-shadow: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
+</div>
+<sc-if value="{{ textsOff }}"><div style="padding: 10px 16px; background: #f1f5f9; font-size: 13px; line-height: 18px; color: #475569">Her texts don’t reach your phone yet. Tap the bell to turn them on.</div></sc-if>
+<div style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 8px">
+<span style="align-self: center; padding: 4px 10px; border-radius: 10px; background: #e2e8f0; font-size: 12px; font-weight: 600; color: #475569">Texts · today</span>
+<sc-for list="{{ bubbles }}" as="b">
+<div style="align-self: {{ b.align }}; max-width: 280px; padding: 10px 14px; border-radius: {{ b.radius }}; background: {{ b.bg }}; color: {{ b.fg }}; font-size: 15px; line-height: 21px">{{ b.t }}</div>
+</sc-for>
+<sc-if value="{{ showFailed }}"><div style="align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px"><div style="max-width: 280px; padding: 10px 14px; border-radius: 20px 20px 6px 20px; background: #dcfce7; color: #14532d; font-size: 15px; line-height: 21px">Can you book the car wash too?</div><button onClick="{{ retry }}" style="border: none; background: transparent; padding: 4px 0; font: 600 12px Inter, sans-serif; color: #b42318; cursor: pointer">Didn’t send · Try again</button></div></sc-if>
+</div>
+<div style="padding: 8px 12px 30px; background: #ffffff; border-top: 1px solid #e2e8f0">
+<div class="tbox"><label for="dk-chat-text" class="sr">Text {{ cha.name }}</label><input id="dk-chat-text" placeholder="Text {{ cha.name }}"><button aria-label="Send" style="width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 22px; background: #0f172a; color: #ffffff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>
+</div>
+</div>
+</sc-if>

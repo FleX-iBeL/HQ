@@ -1,0 +1,7 @@
+<sc-if value="{{ s.callLog }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 16px; background: {{ sa.tint }}; box-shadow: none">
+<span class="lab">Call transcript · 4 minutes</span>
+<sc-for list="{{ logBubbles }}" as="l"><div class="col" style="gap: 2px"><span style="font-size: 12px; font-weight: 700; color: {{ l.nc }}">{{ l.who }}</span><span style="font-size: {{ l.fs }}; line-height: 23px; color: {{ l.fc }}; font-weight: {{ l.fw }}">{{ l.t }}</span></div></sc-for>
+</div>
+<button class="pill" onClick="{{ call.space }}" style="background: {{ sa.color }}; color: {{ sa.ink }}">Continue this call with {{ sa.name }}</button>
+</sc-if>

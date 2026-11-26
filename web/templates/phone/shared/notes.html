@@ -1,0 +1,15 @@
+<sc-if value="{{ s.notes }}">
+<h2 class="lab" style="margin: 0 4px">Your quick notes</h2>
+<div class="tbox"><label for="dk-note" class="sr">Write a note</label><input id="dk-note" placeholder="Write a note, the next call can read it"></div>
+<div class="list"><sc-for list="{{ myNotes }}" as="n"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span><button class="small">Clear</button></div></sc-for></div>
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: {{ sa.accent }}">{{ sa.name }}’s notes</h2>
+<div class="list"><sc-for list="{{ herNotes }}" as="n"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span></div></sc-for></div>
+<sc-if value="{{ isDonnaNotes }}">
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: #6d28d9">She nudges you until it’s done</h2>
+<div class="list"><sc-for list="{{ nudgeRows }}" as="n"><div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></span><button class="iconbtn" aria-label="{{ n.bellAria }}" onClick="{{ n.bell }}" style="background: {{ n.bellBg }}; color: {{ n.bellFg }}; box-shadow: none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button><button class="small" onClick="{{ n.done }}">{{ n.doneLabel }}</button></div></sc-for></div>
+<h2 style="margin: 6px 4px 0; font-size: 13px; font-weight: 600; color: #6d28d9">She keeps an eye out</h2>
+<div class="list"><sc-for list="{{ eyeRows }}" as="n"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px">{{ n.t }}</span><span class="muted" style="font-size: 13px">{{ n.when }}</span></div></sc-for></div>
+</sc-if>
+<button onClick="{{ toggleCleared }}" style="align-self: center; border: none; background: transparent; font: 600 13px Inter, sans-serif; color: #475569; padding: 10px; cursor: pointer">{{ clearedLabel }}</button>
+<sc-if value="{{ clearedOpen }}"><div class="list"><sc-for list="{{ clearedRows }}" as="n"><div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; color: #94a3b8; text-decoration: line-through">{{ n.t }}</span><span class="muted" style="font-size: 12px">{{ n.when }}</span></div></sc-for></div></sc-if>
+</sc-if>
