@@ -2,13 +2,14 @@
 <div style="position: relative; flex-grow: 1; box-sizing: border-box; padding: 56px 20px 36px; display: flex; flex-direction: column; align-items: center; gap: 16px; background: {{ callBg }}">
 <div class="top" style="width: 100%">
 <button class="iconbtn" aria-label="Back to HQ, the call keeps going" onClick="{{ back }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
-<span class="grow" style="text-align: center; font-size: 14px; font-weight: 600">On a call · 00:42</span>
+<span class="grow" style="text-align: center; font-size: 14px; font-weight: 600">On a call · {{ cl.elapsed }}</span>
 <button class="iconbtn" aria-label="What was said" onClick="{{ chat.call }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></button>
 </div>
 <sc-if value="{{ demoOn }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 14px; background: #ffffff; font-size: 13px; font-weight: 600; text-align: center">Demo call · nothing is saved or changed</div></sc-if>
-<sc-if value="{{ callErr }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 10px 10px 14px; border-radius: 14px; background: #fef2f2; color: #991b1b; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 13px; line-height: 18px">The call line doesn’t answer. HQ keeps trying.</span><button class="small" onClick="{{ goOnline }}" style="background: #ffffff">Try now</button></div></sc-if>
+<sc-if value="{{ callErr }}"><div style="width: 100%; box-sizing: border-box; padding: 10px 10px 10px 14px; border-radius: 14px; background: #fef2f2; color: #991b1b; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 13px; line-height: 18px">The call line doesn’t answer. HQ keeps trying.</span><button class="small" onClick="{{ cl.retry }}" style="background: #ffffff">Try now</button></div></sc-if>
+<sc-if value="{{ cl.msgOn }}"><div role="status" style="width: 100%; box-sizing: border-box; padding: 10px 10px 10px 14px; border-radius: 14px; background: #fef2f2; color: #991b1b; display: flex; align-items: center; gap: 10px"><span class="grow" style="font-size: 13px; line-height: 18px">{{ cl.msg }}</span><sc-if value="{{ cl.againOn }}"><button class="small" onClick="{{ cl.again }}" style="background: #ffffff">Try again</button></sc-if></div></sc-if>
 <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px">
-<button onClick="{{ cyclePhase }}" aria-label="{{ ca.name }}: {{ phase }}. Tap to see the next state" style="width: 200px; height: 200px; border: none; border-radius: 100px; background: {{ ca.color }}; color: {{ ca.ink }}; box-shadow: 0 0 0 {{ ring }}px {{ ca.ring }}; font: 600 72px 'DM Sans', sans-serif; cursor: pointer">{{ ca.initial }}</button>
+<button onClick="{{ cyclePhase }}" aria-label="{{ ca.name }}: {{ phase }}{{ cl.orbHint }}" style="width: 200px; height: 200px; border: none; border-radius: 100px; background: {{ ca.color }}; color: {{ ca.ink }}; box-shadow: 0 0 0 {{ ring }}px {{ ca.ring }}; font: 600 72px 'DM Sans', sans-serif; cursor: pointer">{{ ca.initial }}</button>
 <div class="col" style="align-items: center; gap: 4px"><h1 class="h" style="font-size: 30px">{{ callTitle }}</h1><span style="font-size: 16px; font-weight: 600; color: {{ ca.accent }}">{{ phase }}</span><sc-if value="{{ hasSecond }}"><span style="font-size: 13px; font-weight: 600; color: {{ sec.accent }}">{{ sec.name }} is on the line too</span></sc-if></div>
 <div class="card" style="width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px; line-height: 22px">{{ ca.line }}</div>
 <div style="width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
@@ -19,10 +20,10 @@
 </div>
 </div>
 <div style="width: 100%; display: flex; gap: 10px">
-<button class="pill grow" onClick="{{ toggleMute }}" style="height: 60px; border-radius: 30px; background: {{ muteBg }}; color: {{ muteFg }}; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ muteLabel }}</button>
+<button class="pill grow" onClick="{{ toggleMute }}" onPointerDown="{{ cl.press }}" onContextMenu="{{ cl.noMenu }}" style="height: 60px; border-radius: 30px; background: {{ muteBg }}; color: {{ muteFg }}; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ muteLabel }}</button>
 <button class="pill grow" onClick="{{ askHang }}" style="height: 60px; border-radius: 30px; background: #d9392b; color: #ffffff">Hang up</button>
 </div>
-<span class="muted" style="font-size: 13px">Hold Mute to talk · tap the circle to see her states</span>
+<span class="muted" style="font-size: 13px">{{ cl.hint }}</span>
 
 <sc-if value="{{ confirmHang }}">
 <div style="position: absolute; inset: 0; background: rgba(15,23,42,0.45); display: flex; align-items: flex-end; padding: 16px 16px 36px; box-sizing: border-box">

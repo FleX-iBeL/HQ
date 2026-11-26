@@ -1,7 +1,9 @@
 <!-- The groceries tab of the lists screen: the to-do area's (see WIRING.md) -->
 <sc-if value="{{ lt.groceries }}">
-<div class="list"><sc-for list="{{ groceries }}" as="g"><button class="row" onClick="{{ g.toggle }}"><span style="width: 24px; height: 24px; border-radius: 12px; flex-shrink: 0; box-sizing: border-box; border: 2px solid {{ g.ring }}; background: {{ g.fill }}"></span><span class="grow" style="font-size: 15px; text-decoration: {{ g.deco }}; color: {{ g.fc }}">{{ g.name }}</span></button></sc-for></div>
-<div class="tbox"><label for="dk-gro" class="sr">Add groceries</label><input id="dk-gro" placeholder="Add groceries, commas work too"></div>
+<sc-if value="{{ todoX.groNote }}"><div class="card muted" style="padding: 16px 18px; font-size: 15px">{{ todoX.groNote }}</div></sc-if>
+<sc-if value="{{ todoX.hasGroceries }}"><div class="list"><sc-for list="{{ groceries }}" as="g"><button class="row" key="{{ g.id }}" onClick="{{ g.toggle }}"><span style="width: 24px; height: 24px; border-radius: 12px; flex-shrink: 0; box-sizing: border-box; border: 2px solid {{ g.ring }}; background: {{ g.fill }}"></span><span class="grow" style="font-size: 15px; text-decoration: {{ g.deco }}; color: {{ g.fc }}">{{ g.name }}</span></button></sc-for></div></sc-if>
+<div class="tbox"><label for="dk-gro" class="sr">Add groceries</label><input id="dk-gro" placeholder="Add groceries, commas work too" maxlength="2000" enterkeyhint="done" value="{{ drafts.todoGro }}" onInput="{{ typed.todoGro }}" onKeyDown="{{ enter.todoGro }}"></div>
 <h2 class="lab" style="margin: 6px 4px 0">Ticked off · tap to put back</h2>
-<div class="list"><sc-for list="{{ groTicked }}" as="g"><button class="row" onClick="{{ g.back }}"><span class="grow" style="font-size: 15px; color: #475569">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.when }}</span></button></sc-for></div>
+<sc-if value="{{ todoX.groTickedNote }}"><span class="muted" style="font-size: 13px; margin: 0 4px">{{ todoX.groTickedNote }}</span></sc-if>
+<sc-if value="{{ todoX.hasGroTicked }}"><div class="list"><sc-for list="{{ groTicked }}" as="g"><button class="row" key="{{ g.id }}" onClick="{{ g.back }}"><span class="grow" style="font-size: 15px; color: #475569">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.when }}</span></button></sc-for></div></sc-if>
 </sc-if>

@@ -1,17 +1,338 @@
 // The to-do area (Donna): the four boxes, the full list behind a box, an item (plan it in,
-// comes back, move, let go, tick off), the done and let-go lists, the undo line, groceries
-// and ticked-off groceries (the groceries tab of the lists screen).
-// Conventions: see ../WIRING.md. vals(st, ctx, D): D is the demo module or the real data.
+// comes back, move, let go, tick off, rename), the done and let-go lists, the undo line,
+// groceries and ticked-off groceries (the groceries tab of the lists screen).
+// Conventions: see ../WIRING.md. vals(st, ctx, D): D is the demo module or the real data
+// (GET api/todo as the server gives it; changes go to POST api/todo with x-hq: todo).
 import * as demo from './demo/todo.js';
 import { chip, flip, tick } from './util.js';
 
 export const NAME = 'todo';
-export const WIRED = false;
+export const WIRED = true;
+export const LOADING_OK = true;
 export { demo };
 
-export const start = { item: null, itemDone: false, bought: {}, todoBox: 'Important, not urgent', listKind: 'box', todoFilter: 'all', planned: null, repeat: 'Doesn’t repeat' };
+// tdList / tdItem: the real list key and item id that are open; tdErr: the first load failed;
+// tdAdd: what's typed in a list's add box.
+export const start = { item: null, itemDone: false, bought: {}, todoBox: 'Important, not urgent', listKind: 'box', todoFilter: 'all', planned: null, repeat: 'Doesn’t repeat',
+  tdList: null, tdItem: null, tdErr: false, tdAdd: '' };
+
+const FILTER_KEY = 'hq-todo-filter';
+const REPEATS = [['off', 'Doesn’t repeat'], ['every week', 'Every week'], ['every month', 'Every month'], ['every quarter', 'Every quarter'], ['every year', 'Every year']];
+// The four boxes in the design's order, and how each one looks.
+const QUADS = [
+  { kind: 'q1', name: 'Urgent and important', cc: '#b42318', shadow: '0 0 0 1px #e2e8f0 inset', op: 1 },
+  { kind: 'q2', name: 'Important, not urgent', cc: '#0f172a', shadow: '0 0 0 2px #0f172a inset', op: 1 },
+  { kind: 'q3', name: 'Urgent, not important', cc: '#0f172a', shadow: '0 0 0 1px #e2e8f0 inset', op: 1 },
+  { kind: 'q4', name: 'Neither', cc: '#0f172a', shadow: '0 0 0 1px #e2e8f0 inset', op: 0.6 }
+];
+const OPEN_KINDS = ['commit', 'q1', 'q2', 'q3', 'q4'];
+
+// ---- talking to the server -------------------------------------------------------------
+
+export async function load(app) {
+  try {
+    const d = await app.api.get('api/todo');
+    app.setData('todo', d);
+    if (app.state.tdErr) app.setState({ tdErr: false });
+  } catch (err) {
+    if (!app.state.data.todo) app.setState({ tdErr: true });
+    throw err;
+  }
+}
+
+// The filter of a list (all, planned, not planned), remembered on this device as the old page does.
+function savedFilter() {
+  try { const v = localStorage.getItem(FILTER_KEY); return ['all', 'planned', 'open'].includes(v) ? v : 'all'; } catch (e) { return 'all'; }
+}
+
+export const enter = {
+  todo: (app) => load(app),
+  todoList: (app) => { app.setState({ todoFilter: savedFilter() }); return load(app); },
+  lists: (app) => load(app)
+};
+
+// A change: shown at once (patch), then the list as the server has it, with its words and
+// its Undo (undone: what to do once the undo went through). A refusal puts the server's list
+// back and says why.
+async function send(app, body, patch, undone) {
+  if (patch) app.setData('todo', (d) => (d && Array.isArray(d.lists) ? patch(JSON.parse(JSON.stringify(d))) || d : d));
+  try {
+    const d = await app.api.post('api/todo', body, 'todo');
+    if (d && Array.isArray(d.lists)) app.setData('todo', d);
+    const undo = d && d.undo ? () => send(app, { undo: true }).then((r) => { if (r && undone) undone(r); }) : null;
+    if (d && d.said) app.say(d.said, undo);
+    return d;
+  } catch (err) {
+    app.say(err && err.status === 0 ? 'Couldn’t reach HQ. Try again.' : ((err && err.message) || 'Couldn’t change the list. Try again.'));
+    load(app).catch(() => {});
+    return null;
+  }
+}
+
+// ---- reading the real data -------------------------------------------------------------
+
+const listsOf = (d) => (d && Array.isArray(d.lists) ? d.lists : []);
+const byKind = (d, k) => listsOf(d).filter((l) => l.kind === k);
+const byKey = (d, k) => listsOf(d).find((l) => l.key === k) || null;
+function findItem(d, id) {
+  for (const l of listsOf(d)) { const it = l.items.find((x) => x.id === id); if (it) return [l, it]; }
+  return [null, null];
+}
+const without = (d, id) => { for (const l of listsOf(d)) l.items = l.items.filter((x) => x.id !== id); return d; };
+
+// A deadline date within the next week shows in red (as the old page does).
+function soon(dl) {
+  const m = /(\d{4}-\d\d-\d\d)/.exec(dl || ''); if (!m) return false;
+  return Date.parse(m[1] + 'T23:59:00') - Date.now() < 7 * 864e5;
+}
+const planWords = (pl) => (pl ? 'Planned ' + pl.short + (pl.past ? ' (gone by)' : '') : '');
+function metaOf(it, closed, kind) {
+  const at = it.at ? (kind === 'done' ? 'Done ' : kind === 'letgo' ? 'Let go ' : '') + it.at : '';
+  const p = [it.for ? 'For ' + it.for : '', it.deadline ? 'Deadline ' + it.deadline : '', it.status && it.status !== 'open' ? it.status : '',
+    it.calendar ? 'In the calendar: ' + it.calendar : '', at, it.often];
+  if (!closed && it.repeats) p.push('Repeats ' + it.repeats);
+  if (!closed && it.planned) p.push(planWords(it.planned) + ' · ' + it.planned.title);
+  return p.filter(Boolean).join(' · ');
+}
+function shortDate(s) {
+  const m = /(\d{4})-(\d\d)-(\d\d)/.exec(s || ''); if (!m) return s || '';
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+function blockWhen(b) {
+  const s = new Date(b.start), e = new Date(b.end);
+  const t = (x) => x.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return s.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + t(s) + ' to ' + t(e) + (b.calendar && b.calendar !== 'Main' ? ' · ' + b.calendar : '');
+}
+
+// ---- the drag that changes the order (the grip) ----------------------------------------
+
+function scroller(node) {
+  for (let n = node.parentElement; n; n = n.parentElement) {
+    const o = getComputedStyle(n).overflowY;
+    if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n;
+  }
+  return document.scrollingElement;
+}
+// A finger or the mouse on the grip drags its row; the others make room. done(from, to)
+// gets the places in the rows as shown. Near the screen's top or bottom the list scrolls along.
+function startDrag(e, done) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const grip = e.currentTarget, row = grip.closest('.row'), box = row && row.parentNode;
+  if (!box) return;
+  const rows = [...box.children].filter((r) => r.classList.contains('row'));
+  const from = rows.indexOf(row); if (from < 0) return;
+  try { grip.setPointerCapture(e.pointerId); } catch (_) { /* not supported */ }
+  const sc = scroller(box), tops = rows.map((r) => r.offsetTop), hs = rows.map((r) => r.offsetHeight);
+  const d = { y: e.clientY, y0: e.clientY, s0: sc.scrollTop, to: from, raf: 0 };
+  row.style.position = 'relative'; row.style.zIndex = '2'; row.style.background = '#f8fafc';
+  for (const r of rows) if (r !== row) r.style.transition = 'transform .15s ease-out';
+  const layout = () => {
+    const dy = d.y - d.y0 + (sc.scrollTop - d.s0), mid = tops[from] + dy + hs[from] / 2;
+    let to = from;
+    for (let i = 0; i < rows.length; i++) {
+      if (i < from && mid < tops[i] + hs[i] / 2) { to = i; break; }
+      if (i > from && mid > tops[i] + hs[i] / 2) to = i;
+    }
+    d.to = to;
+    row.style.transform = 'translateY(' + dy + 'px)';
+    rows.forEach((r, i) => {
+      if (r === row) return;
+      const sh = (i > from && i <= to) ? -hs[from] : (i < from && i >= to) ? hs[from] : 0;
+      r.style.transform = sh ? 'translateY(' + sh + 'px)' : '';
+    });
+  };
+  const edge = () => {
+    const vh = window.innerHeight, zone = 56;
+    const v = d.y < zone ? -Math.ceil((zone - d.y) / 6) : d.y > vh - zone ? Math.ceil((d.y - vh + zone) / 6) : 0;
+    if (v) { sc.scrollTop += v; layout(); }
+    d.raf = requestAnimationFrame(edge);
+  };
+  d.raf = requestAnimationFrame(edge);
+  const move = (ev) => { d.y = ev.clientY; layout(); };
+  const stop = (ev) => {
+    grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', stop); grip.removeEventListener('pointercancel', stop);
+    cancelAnimationFrame(d.raf);
+    for (const r of rows) { r.style.transition = ''; r.style.transform = ''; }
+    row.style.position = ''; row.style.zIndex = ''; row.style.background = '';
+    const to = ev.type === 'pointercancel' ? from : d.to;
+    if (to !== from) done(from, to);
+  };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', stop); grip.addEventListener('pointercancel', stop);
+}
+
+// ---- the values ------------------------------------------------------------------------
 
 export function vals(st, ctx, D) {
+  return D === demo ? demoVals(st, ctx, D) : realVals(st, ctx, D);
+}
+
+// Real data, shaped for the design's screens.
+function realVals(st, ctx, D) {
+  const { app } = ctx;
+  const d = D && Array.isArray(D.lists) ? D : null;
+  const off = !!(D && D.off);
+  const loading = !d && !off && !st.tdErr;
+  const retry = () => { app.setState({ tdErr: false }); load(app).catch(() => {}); };
+  const openItem = (l, it) => () => app.go('todoItem', { tdItem: it.id, tdList: l.key });
+  const openList = (key) => () => app.go('todoList', { tdList: key, listKind: 'box', todoFilter: savedFilter() });
+
+  // Overview: what's promised to others, the four boxes, the other lists' counts
+  const commit = byKind(d, 'commit');
+  const cItems = commit.flatMap((l) => l.items);
+  const boxes = QUADS.map((q) => {
+    const ls = byKind(d, q.kind), items = ls.flatMap((l) => l.items.map((it) => [l, it]));
+    return {
+      name: ls.length ? ls.map((l) => l.name).join(' + ') : q.name, count: items.length, cc: q.cc, shadow: q.shadow, op: q.op,
+      openAll: ls.length ? openList(ls[0].key) : () => {},
+      more: items.length > 2 ? '+ ' + (items.length - 2) + ' more' : 'See the list',
+      items: items.slice(0, 2).map(([l, it]) => ({ title: it.title, open: openItem(l, it) }))
+    };
+  });
+  const openCount = listsOf(d).filter((l) => OPEN_KINDS.includes(l.kind)).reduce((n, l) => n + l.items.length, 0);
+  const groceriesL = byKind(d, 'groceries')[0] || null, tickedL = byKind(d, 'grocoff')[0] || null;
+  const doneL = byKind(d, 'done')[0] || null, letgoL = byKind(d, 'letgo')[0] || null;
+  const empty = !!d && !openCount && !(groceriesL && groceriesL.items.length);
+
+  // The list behind a box, or Done, or Let go
+  let l = d ? byKey(d, st.tdList) : null;
+  if (st.listKind === 'done') l = doneL; else if (st.listKind === 'letgo') l = letgoL;
+  const closed = !!l && (l.kind === 'done' || l.kind === 'letgo');
+  const canFilter = !!l && !closed && l.kind !== 'groceries' && l.kind !== 'grocoff' && l.items.length > 0;
+  const show = canFilter ? st.todoFilter : 'all';
+  const all = l ? l.items : [];
+  const nPl = all.filter((x) => x.planned).length;
+  const shown = all.filter((x) => show === 'all' || (show === 'planned' ? x.planned : !x.planned));
+  const sortable = !!l && !closed && l.kind !== 'grocoff' && all.length > 1 && show === 'all';
+  const place = (it, n) => send(app, { order: it.id, place: n }, (x) => {
+    const ll = byKey(x, l.key); const i = ll ? ll.items.findIndex((y) => y.id === it.id) : -1;
+    if (i >= 0) { const [m] = ll.items.splice(i, 1); ll.items.splice(n - 1, 0, m); }
+    return x;
+  });
+  const todoRows = shown.map((it, i) => ({
+    id: it.id, title: it.title, meta: metaOf(it, closed, l.kind),
+    mc: !closed && soon(it.deadline) ? '#b42318' : '#475569',
+    open: openItem(l, it),
+    tick: () => send(app, l.kind === 'groceries' ? { tick: it.id } : { done: it.id }, (x) => without(x, it.id)),
+    back: () => app.setState({ tdItem: it.id, sheet: 'move' }),
+    grip: (e) => startDrag(e, (from, to) => place(it, to + 1)),
+    gripKey: (e) => {
+      if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); place(it, i); }
+      else if (e.key === 'ArrowDown' && i < shown.length - 1) { e.preventDefault(); place(it, i + 2); }
+    }
+  }));
+  const todoFilters = canFilter ? [['all', 'All', all.length], ['planned', 'Planned', nPl], ['open', 'Not planned', all.length - nPl]].map((f) => {
+    const on = show === f[0];
+    return Object.assign({ name: f[1] + ' ' + f[2], on: on ? 'true' : 'false', pick: () => { try { localStorage.setItem(FILTER_KEY, f[0]); } catch (e) { /* only for now */ } app.setState({ todoFilter: f[0] }); } }, chip(on));
+  }) : [];
+  let listNote = '';
+  if (!d) listNote = loading ? 'Getting your list…' : 'Your list didn’t load. Go back and try again.';
+  else if (!l) listNote = 'This list isn’t there anymore.';
+  else if (!all.length) listNote = 'Nothing here right now.';
+  else if (!shown.length) listNote = show === 'planned' ? 'Nothing here is planned in the calendar yet.' : 'Everything here is planned.';
+  // The add box takes several at once, one per line: Enter adds, Shift+Enter starts a new line
+  const addKey = (e) => {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    const t = (e.target.value || '').trim(); if (!t || !l) return;
+    e.target.value = ''; e.target.style.height = '';
+    app.setState({ tdAdd: '' });
+    send(app, { add: t, list: l.key });
+  };
+  const addInput = (e) => { const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; app.setState({ tdAdd: ta.value }); };
+
+  // One item
+  const [il, it] = findItem(d, st.tdItem);
+  const iClosed = !!il && (il.kind === 'done' || il.kind === 'letgo');
+  const iGro = !!il && (il.kind === 'groceries' || il.kind === 'grocoff');
+  const item = it ? { box: il.name, title: it.title } : { box: '', title: '' };
+  const fields = it ? (it.fields || []).filter((f) => !/^(for|deadline)$/i.test(f[0])).map((f) => ({ k: f[0], v: f[1] })) : [];
+  const details = it ? (it.details || []).map((t) => ({ t })) : [];
+  const after = (r) => { if (r && r.id && r.id !== st.tdItem) app.setState({ tdItem: r.id }); };
+  const rename = (e) => {
+    const t = (e.target.value || '').trim().replace(/\s+/g, ' ');
+    if (!it) return;
+    if (!t) { e.target.value = it.title; return; }
+    const was = it.id;  // an undo gives the item its old name, and with it its old id
+    const box = e.target, old = it.title;
+    if (t !== it.title) send(app, { rename: it.id, title: t }, null, () => app.setState({ tdItem: was })).then((r) => { if (r) after(r); else box.value = old; });
+  };
+  const renameKey = (e) => {
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.target.blur(); }
+    else if (e.key === 'Escape' && it) { e.target.value = it.title; e.target.blur(); }
+  };
+  const blocks = (d && d.blocks) || [];
+  const planRows = [];
+  if (it && it.planned) planRows.push({ a: 'Unplan', b: planWords(it.planned) + ' · ' + it.planned.title, pick: () => { app.setState({ sheet: null }); send(app, { unplan: it.id }).then(after); } });
+  for (const b of blocks.filter((x) => !x.past)) {
+    planRows.push({ a: b.title, b: blockWhen(b) + (it && it.planned && it.planned.id === b.id ? ' · now' : ''), pick: () => { app.setState({ sheet: null }); if (it) send(app, { plan: it.id, block: b.id }).then(after); } });
+  }
+  if (!planRows.length) planRows.push({ a: 'No blocks in the calendar in the next two weeks', b: '', pick: () => app.setState({ sheet: null }) });
+  const rep = (it && it.repeats) || '';
+  const repRows = REPEATS.filter((r) => !(rep && r[0] === rep)).map((r) => ({ a: r[1], b: (r[0] === 'off' && !rep) ? 'Chosen' : '', pick: () => { app.setState({ sheet: null }); if (it) send(app, { repeat: it.id, rule: r[0] }).then(after); } }));
+  if (rep) repRows.unshift({ a: rep[0].toUpperCase() + rep.slice(1), b: 'Chosen', pick: () => app.setState({ sheet: null }) });
+  const moveRows = listsOf(d).filter((x) => (!il || x.key !== il.key) && !['done', 'letgo', 'grocoff'].includes(x.kind)).map((x) => ({
+    a: x.name, b: '',
+    pick: () => { app.setState({ sheet: null }); if (it) send(app, { move: it.id, to: x.key }).then((r) => { if (r) app.setState({ tdList: x.key, tdItem: r.id || it.id }); }); }
+  }));
+  const sheets = {
+    plan: { title: 'Plan it in a block', rows: planRows },
+    repeat: { title: 'Comes back', rows: repRows },
+    move: { title: iClosed ? 'Back on a list' : 'Move to another list', rows: moveRows }
+  };
+
+  // Groceries: in the list's own order; ticked off A to Z, and a tap puts one back
+  const gItems = groceriesL ? groceriesL.items : [];
+  const groceries = gItems.map((g) => Object.assign({ id: g.id, name: g.title, toggle: () => send(app, { tick: g.id }, (x) => without(x, g.id)) }, tick(false)));
+  const tItems = tickedL ? tickedL.items.slice().sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })) : [];
+  const groTicked = tItems.map((g) => ({ id: g.id, name: g.title, when: g.at ? 'Last bought ' + shortDate(g.at) : '', back: () => send(app, { untick: g.id }, (x) => without(x, g.id)) }));
+  const addGro = (text) => send(app, { add: text, list: groceriesL ? groceriesL.key : 'groceries' });
+
+  const rows = { todo: ['To-do', d ? openCount + ' open' : (loading ? '…' : ''), 'todo'] };
+  const homeLines = d ? { todo: { t: openCount === 1 ? '1 to-do open' : openCount + ' to-dos open', c: '#0f172a', w: '400' } } : {};
+  const listTitle = st.listKind === 'done' ? 'Done' : st.listKind === 'letgo' ? 'Let go' : (l ? l.name : 'To-do');
+
+  return {
+    agent: { donna: { rows, homeLines } },
+    sheets,
+    titles: { todoList: listTitle },
+    submit: { todoGro: addGro },
+    values: {
+      boxes, item, itemDeco: 'none', tickLabel: 'Tick it off',
+      tickItem: () => { if (!it) return; send(app, iGro ? { tick: it.id } : { done: it.id }, (x) => without(x, it.id)); app.back(); },
+      letGo: () => { if (!it) return; send(app, { letgo: it.id, why: '' }, (x) => without(x, it.id)); app.back(); },
+      todoRows, todoFilters, listClosed: closed, listOpen: !!l && !closed,
+      openDone: () => app.go('todoList', { listKind: 'done', tdList: doneL ? doneL.key : null }),
+      openLetgo: () => app.go('todoList', { listKind: 'letgo', tdList: letgoL ? letgoL.key : null }),
+      plannedText: it && it.planned ? planWords(it.planned) + ' · ' + it.planned.title : 'Not planned',
+      itemDead: (it && it.deadline) || 'None', itemDeadC: it && it.deadline && soon(it.deadline) ? '#b42318' : '#0f172a',
+      repeatText: rep ? 'Repeats ' + rep : 'Doesn’t repeat',
+      sheetPlan: () => app.setState({ sheet: 'plan' }), sheetRepeat: () => app.setState({ sheet: 'repeat' }), sheetMove: () => app.setState({ sheet: 'move' }),
+      groceries, groTicked,
+      todoX: {
+        loading, failed: !d && !off && !!st.tdErr, retry,
+        hasCommit: commit.length > 0, commitName: commit.map((x) => x.name).join(' + '),
+        commitLine: cItems.length ? cItems.slice(0, 3).map((x) => x.title).join(' · ') + (cItems.length > 3 ? ' …' : '') : 'Nothing promised right now',
+        openCommit: commit.length ? openList(commit[0].key) : () => {},
+        empty: off || empty, full: !!d && !empty,
+        nGroceries: groceriesL ? groceriesL.items.length : '', nDone: doneL ? doneL.items.length : '', nLetGo: letgoL ? letgoL.items.length : '',
+        listNote, hasRows: todoRows.length > 0, sortable,
+        addDraft: st.tdAdd, addInput, addKey,
+        itemHere: !!it, itemGone: !!d && !it, plainTitle: false, renamable: !!it, nameValue: it ? it.title : '', rename, renameKey,
+        forWho: (it && it.for) || 'You',
+        canPlan: !!it && !iClosed && !iGro, canRepeat: !!it && !iClosed && !iGro, canTick: !!it && !iClosed && il.kind !== 'grocoff',
+        canLetGo: !!it && !iClosed && !!letgoL, moveLabel: iClosed ? 'Back on a list' : 'Move to a list',
+        fields, details,
+        groNote: !d ? (loading ? 'Getting your groceries…' : 'Your groceries didn’t load.') : (gItems.length ? '' : 'Nothing on the groceries right now.'),
+        hasGroceries: gItems.length > 0, hasGroTicked: tItems.length > 0,
+        groTickedNote: d && !tItems.length ? 'What you tick off lands here, A to Z. Tap one to put it back on the list.' : ''
+      }
+    }
+  };
+}
+
+// The prototypes' made-up content, as the design shows it (demo mode).
+function demoVals(st, ctx, D) {
   const { app } = ctx;
   const go = (k, extra) => () => app.go(k, extra);
   const say = (t) => app.say(t);
@@ -58,7 +379,16 @@ export function vals(st, ctx, D) {
       openDone: go('todoList', { listKind: 'done' }), openLetgo: go('todoList', { listKind: 'letgo' }),
       plannedText: st.planned || 'Not planned', itemDead: D.deadlines[item.title] || 'None', itemDeadC: D.deadlines[item.title] ? '#b42318' : '#0f172a', repeatText: st.repeat,
       sheetPlan: () => app.setState({ sheet: 'plan' }), sheetRepeat: () => app.setState({ sheet: 'repeat' }), sheetMove: () => app.setState({ sheet: 'move' }),
-      groceries, groTicked
+      groceries, groTicked,
+      // What the wired templates read beyond the prototype's values, filled from the made-up content
+      todoX: {
+        loading: false, failed: false, hasCommit: true, commitName: 'Commitments to others', commitLine: 'Send Alex the photos · Call the plumber back',
+        empty: !!st.fresh, full: !st.fresh, nGroceries: D.groceries.length, nDone: D.done.length, nLetGo: D.letGo.length,
+        listNote: '', hasRows: true, sortable: !closedL,
+        itemHere: true, itemGone: false, plainTitle: true, renamable: false, forWho: 'You',
+        canPlan: true, canRepeat: true, canTick: true, canLetGo: true, moveLabel: 'Move to a list', fields: [], details: [],
+        groNote: '', hasGroceries: true, hasGroTicked: true, groTickedNote: ''
+      }
     }
   };
 }

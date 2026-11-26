@@ -1,5 +1,9 @@
 <sc-if value="{{ s.games }}">
-<button class="card" onClick="{{ openGame }}" style="border: none; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #c2410c">Playing · day 12 of 42</span><span class="h" style="font-size: 20px">Mornings</span><span class="muted" style="font-size: 14px; line-height: 20px">Walk every morning and read 20 pages, five days a week.</span><span style="font-size: 13px; font-weight: 600; color: #15803d">On track</span></button>
+<sc-if value="{{ pp.gs.note }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">{{ pp.gs.note }}</span></sc-if>
+<sc-if value="{{ pp.gs.retryOn }}"><button class="pill" onClick="{{ pp.retry }}" style="align-self: flex-start; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Try again</button></sc-if>
+<sc-for list="{{ pp.gs.live }}" as="g"><button key="{{ g.key }}" class="card" onClick="{{ g.open }}" style="border: none; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: #0f172a; cursor: pointer"><span style="font-size: 12px; font-weight: 700; color: #c2410c">{{ g.kicker }}</span><span class="h" style="font-size: 20px">{{ g.name }}</span><span class="muted" style="font-size: 14px; line-height: 20px">{{ g.sentence }}</span><span style="font-size: 13px; font-weight: 600; color: {{ g.standC }}">{{ g.stand }}</span></button></sc-for>
+<sc-if value="{{ pp.gs.hasPast }}">
 <h2 class="lab" style="margin: 0 4px">Past games</h2>
-<div class="list"><sc-for list="{{ pastGames }}" as="g"><button class="row" onClick="{{ g.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.meta }}</span></span></button></sc-for></div>
+<div class="list"><sc-for list="{{ pp.gs.past }}" as="g"><button key="{{ g.key }}" class="row" onClick="{{ g.open }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ g.name }}</span><span class="muted" style="font-size: 13px">{{ g.meta }}</span></span></button></sc-for></div>
+</sc-if>
 </sc-if>

@@ -1,7 +1,9 @@
 <sc-if value="{{ s.todo }}">
-<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px"><span class="lab">Commitments to others</span><span style="font-size: 15px">Send Alex the photos · Call the plumber back</span></div>
-<sc-if value="{{ fresh }}"><div class="card" style="padding: 20px; font-size: 15px; line-height: 22px">Nothing on your list yet. Tell Donna what’s on your mind, on a call or in a text, and it gets sorted in here.</div></sc-if>
-<sc-if value="{{ notFresh }}">
+<sc-if value="{{ todoX.loading }}"><div class="card muted" style="padding: 16px 18px; font-size: 15px">Getting your list…</div></sc-if>
+<sc-if value="{{ todoX.failed }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 15px"><span>Your list didn’t load.</span><button class="small" onClick="{{ todoX.retry }}" style="align-self: flex-start">Try again</button></div></sc-if>
+<sc-if value="{{ todoX.hasCommit }}"><div class="card" onClick="{{ todoX.openCommit }}" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; cursor: pointer"><span class="lab">{{ todoX.commitName }}</span><span style="font-size: 15px">{{ todoX.commitLine }}</span></div></sc-if>
+<sc-if value="{{ todoX.empty }}"><div class="card" style="padding: 20px; font-size: 15px; line-height: 22px">Nothing on your list yet. Tell Donna what’s on your mind, on a call or in a text, and it gets sorted in here.</div></sc-if>
+<sc-if value="{{ todoX.full }}">
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
 <sc-for list="{{ boxes }}" as="b">
 <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 20px; background: #ffffff; box-shadow: {{ b.shadow }}; opacity: {{ b.op }}">
@@ -12,6 +14,6 @@
 </sc-for>
 </div>
 </sc-if>
-<div style="display: flex; flex-wrap: wrap; gap: 6px"><button class="chip" onClick="{{ lists.groceries }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Groceries 6</button><button class="chip" onClick="{{ lists.bucket }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Bucketlist 3</button><button class="chip" onClick="{{ lists.wish }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Wishlist 2</button><button class="chip" onClick="{{ openDone }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Done 6</button><button class="chip" onClick="{{ openLetgo }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Let go 2</button></div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px"><button class="chip" onClick="{{ lists.groceries }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Groceries {{ todoX.nGroceries }}</button><button class="chip" onClick="{{ lists.bucket }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Bucketlist {{ listX.nBucket }}</button><button class="chip" onClick="{{ lists.wish }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Wishlist {{ listX.nWish }}</button><button class="chip" onClick="{{ openDone }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Done {{ todoX.nDone }}</button><button class="chip" onClick="{{ openLetgo }}" style="background: #ffffff; color: #475569; box-shadow: 0 0 0 1px #e2e8f0 inset">Let go {{ todoX.nLetGo }}</button></div>
 <div class="tbox"><label for="dk-todo-add" class="sr">Add to your list</label><input id="dk-todo-add" placeholder="Add something, one per line"></div>
 </sc-if>

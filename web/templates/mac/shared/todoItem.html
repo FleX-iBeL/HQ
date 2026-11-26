@@ -1,16 +1,21 @@
 <sc-if value="{{ s.todoItem }}">
-<div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 6px"><span class="lab">{{ item.box }}</span><span class="h" style="font-size: 24px; text-decoration: {{ itemDeco }}">{{ item.title }}</span></div>
+<sc-if value="{{ todoX.itemGone }}"><div class="card muted" style="padding: 16px 18px; font-size: 15px">This one isn’t on your list anymore.</div></sc-if>
+<sc-if value="{{ todoX.itemHere }}">
+<div class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 6px"><span class="lab">{{ item.box }}</span><sc-if value="{{ todoX.plainTitle }}"><span class="h" style="font-size: 24px; text-decoration: {{ itemDeco }}">{{ item.title }}</span></sc-if><sc-if value="{{ todoX.renamable }}"><label for="dk-todo-name" class="sr">Its name</label><input id="dk-todo-name" class="h" maxlength="300" enterkeyhint="done" value="{{ todoX.nameValue }}" onChange="{{ todoX.rename }}" onKeyDown="{{ todoX.renameKey }}" style="font-size: 24px; border: none; outline: none; background: transparent; padding: 0; margin: 0; width: 100%; min-width: 0; color: inherit; text-decoration: {{ itemDeco }}"></sc-if></div>
 <div class="list">
-<div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">For</span><span style="font-size: 15px">You</span></div>
+<div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">For</span><span style="font-size: 15px">{{ todoX.forWho }}</span></div>
 <div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Deadline</span><span style="font-size: 15px; color: {{ itemDeadC }}; font-weight: 600">{{ itemDead }}</span></div>
-<button class="row" onClick="{{ sheetPlan }}"><span class="grow muted" style="font-size: 14px">In the calendar</span><span style="font-size: 15px">{{ plannedText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
-<button class="row" onClick="{{ sheetRepeat }}"><span class="grow muted" style="font-size: 14px">Comes back</span><span style="font-size: 15px">{{ repeatText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<sc-if value="{{ todoX.canPlan }}"><button class="row" onClick="{{ sheetPlan }}"><span class="grow muted" style="font-size: 14px">In the calendar</span><span style="font-size: 15px">{{ plannedText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-if>
+<sc-if value="{{ todoX.canRepeat }}"><button class="row" onClick="{{ sheetRepeat }}"><span class="grow muted" style="font-size: 14px">Comes back</span><span style="font-size: 15px">{{ repeatText }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-if>
+<sc-for list="{{ todoX.fields }}" as="f"><div class="row" style="cursor: default; align-items: flex-start"><span class="grow muted" style="font-size: 14px; flex-shrink: 0">{{ f.k }}</span><span style="font-size: 15px; text-align: right; overflow-wrap: anywhere">{{ f.v }}</span></div></sc-for>
 </div>
+<sc-for list="{{ todoX.details }}" as="d"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 6px"><span class="lab">In your own words</span><span style="font-size: 15px; line-height: 22px; white-space: pre-wrap">{{ d.t }}</span></div></sc-for>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
-<button class="pill" onClick="{{ tickItem }}" style="background: #dcfce7; color: #14532d">{{ tickLabel }}</button>
-<button class="pill" onClick="{{ sheetPlan }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Plan it in</button>
-<button class="pill" onClick="{{ sheetMove }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Move to a list</button>
-<button class="pill" onClick="{{ letGo }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Let it go</button>
+<sc-if value="{{ todoX.canTick }}"><button class="pill" onClick="{{ tickItem }}" style="background: #dcfce7; color: #14532d">{{ tickLabel }}</button></sc-if>
+<sc-if value="{{ todoX.canPlan }}"><button class="pill" onClick="{{ sheetPlan }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Plan it in</button></sc-if>
+<button class="pill" onClick="{{ sheetMove }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ todoX.moveLabel }}</button>
+<sc-if value="{{ todoX.canLetGo }}"><button class="pill" onClick="{{ letGo }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Let it go</button></sc-if>
 </div>
 <button class="row card" onClick="{{ call.donna }}" style="border-radius: 20px"><span class="grow" style="font-size: 15px; font-weight: 600">Call Donna about this</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+</sc-if>
 </sc-if>

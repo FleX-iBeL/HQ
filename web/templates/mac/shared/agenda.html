@@ -1,8 +1,10 @@
 <sc-if value="{{ s.agenda }}">
-<div class="top" style="padding: 0 4px"><span class="muted grow" style="font-size: 13px">All calendars · all kinds of time</span><button class="small" onClick="{{ nav.agendaFilter }}" style="background: #ffffff; box-shadow: 0 0 0 1px #e2e8f0 inset">Filter</button></div>
+<div class="top" style="padding: 0 4px"><span class="muted grow" style="font-size: 13px">{{ agendaHead }}</span><button class="small" onClick="{{ nav.agendaFilter }}" style="background: #ffffff; box-shadow: 0 0 0 1px #e2e8f0 inset">Filter</button></div>
 <sc-for list="{{ agenda }}" as="d">
 <div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ d.day }}</h2>
-<div class="list"><sc-for list="{{ d.items }}" as="i"><button class="row" onClick="{{ i.open }}"><span style="width: 44px; font-size: 14px; font-weight: 600; color: {{ i.tc }}">{{ i.t }}</span><span style="width: 8px; height: 8px; border-radius: 4px; flex-shrink: 0; background: {{ i.kind }}"></span><span class="grow" style="font-size: 15px; color: {{ i.fc }}; text-decoration: {{ i.deco }}">{{ i.title }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div></div>
+<div class="list"><sc-for list="{{ d.items }}" as="i"><button class="row" onClick="{{ i.open }}"><span style="width: 44px; flex-shrink: 0; font-size: 14px; font-weight: 600; color: {{ i.tc }}">{{ i.t }}</span><span style="width: 8px; height: 8px; border-radius: 4px; flex-shrink: 0; background: {{ i.kind }}"></span><span class="grow" style="font-size: 15px; color: {{ i.fc }}; text-decoration: {{ i.deco }}">{{ i.title }}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button></sc-for></div></div>
 </sc-for>
-<span class="muted" style="font-size: 12px; text-align: center">Read from your calendar 2 minutes ago</span>
+<sc-if value="{{ agendaEmpty }}"><div class="card" style="padding: 16px 18px; font-size: 15px; line-height: 22px; color: #475569">{{ agendaEmptyText }}</div></sc-if>
+<sc-if value="{{ agendaFailed }}"><div class="top" style="padding: 0 4px"><span class="muted grow" style="font-size: 13px">Your calendar didn’t load.</span><button class="small" onClick="{{ agendaRetry }}" style="background: #ffffff; box-shadow: 0 0 0 1px #e2e8f0 inset">Try again</button></div></sc-if>
+<span class="muted" style="font-size: 12px; text-align: center">{{ agendaLooked }}</span>
 </sc-if>

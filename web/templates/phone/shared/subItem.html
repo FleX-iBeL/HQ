@@ -1,5 +1,5 @@
 <sc-if value="{{ s.subItem }}">
-<span class="muted" style="font-size: 13px">Bucketlist › Trip to Japan › Ryokan, 3 nights</span>
-<div class="list"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Kind</span><span style="font-size: 15px">Experience</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Price</span><span style="font-size: 15px">€1,200 once</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Goal</span><span style="font-size: 15px">Spring 2027</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Score</span><span style="font-size: 15px; font-weight: 700">4 of 5</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">Notes</span><span style="font-size: 15px">The one in the mountains</span></div></div>
-<div class="list"><div class="row" style="cursor: default; color: #475569; font-size: 14px">Nothing under it yet · + Add something under it</div></div>
+<span class="muted" style="font-size: 13px">{{ listX.sub.crumb }}</span>
+<div class="list"><sc-for list="{{ listX.sub.rows }}" as="r"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">{{ r.k }}</span><span style="font-size: 15px; font-weight: {{ r.w }}">{{ r.v }}</span></div></sc-for></div>
+<div class="list"><button class="row" onClick="{{ listX.sub.open }}" style="color: #475569; font-size: 14px">{{ listX.sub.under }}</button></div>
 </sc-if>

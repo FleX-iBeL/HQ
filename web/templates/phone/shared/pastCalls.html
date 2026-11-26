@@ -1,4 +1,5 @@
 <sc-if value="{{ s.pastCalls }}">
+<sc-if value="{{ txCallsLineOn }}"><span class="muted" style="font-size: 14px; padding: 4px">{{ txCallsLine }}</span></sc-if>
 <sc-for list="{{ pastCalls }}" as="d">
 <div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ d.day }}</h2><div class="list"><sc-for list="{{ d.items }}" as="c"><button class="row" onClick="{{ c.open }}"><span style="width: 44px; font-size: 14px; font-weight: 600; color: #475569">{{ c.time }}</span><span class="grow" style="font-size: 15px">{{ c.about }}</span><span class="muted" style="font-size: 13px">{{ c.lines }} lines</span></button></sc-for></div></div>
 </sc-for>

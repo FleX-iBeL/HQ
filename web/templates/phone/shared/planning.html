@@ -1,6 +1,8 @@
 <sc-if value="{{ s.planning }}">
 <span class="muted" style="font-size: 14px; margin: 0 4px">To look at. You and Claude Code change it.</span>
-<sc-for list="{{ planning }}" as="p">
-<div class="col" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ p.phase }}</h2><div class="list"><sc-for list="{{ p.items }}" as="i"><div class="row" style="cursor: default"><span style="width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: {{ i.c }}"></span><span class="grow" style="font-size: 15px">{{ i.t }}</span><span class="muted" style="font-size: 13px">{{ i.s }}</span></div></sc-for></div></div>
+<sc-if value="{{ mpv.planningWait }}"><span class="muted" style="font-size: 14px; margin: 0 4px">{{ mpv.planningWord }}</span><sc-if value="{{ mpv.planningFailed }}"><button class="small" onClick="{{ mpv.retry }}" style="align-self: flex-start">Try again</button></sc-if></sc-if>
+<sc-if value="{{ mpv.planningEmpty }}"><div class="card" style="padding: 20px; font-size: 15px; line-height: 22px">Nothing on the planning right now.</div></sc-if>
+<sc-for list="{{ mpv.planning }}" as="p">
+<div class="col" key="{{ p.key }}" style="gap: 8px"><h2 class="lab" style="margin: 0 4px">{{ p.phase }}</h2><div class="list"><sc-for list="{{ p.items }}" as="i"><div class="row" key="{{ i.key }}" style="cursor: default"><span style="width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: {{ i.c }}"></span><span class="grow" style="font-size: 15px">{{ i.t }}</span><span class="muted" style="font-size: 13px; flex-shrink: 0">{{ i.s }}</span></div></sc-for></div></div>
 </sc-for>
 </sc-if>

@@ -1,21 +1,67 @@
 <sc-if value="{{ s.game }}">
-<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px"><span class="lab">Day 12 of 42 · playing</span><span style="font-size: 16px; line-height: 23px; font-weight: 600">Walk every morning and read 20 pages, five days a week.</span>
-<div style="position: relative; height: 10px; border-radius: 5px; background: #f1f5f9"><div style="width: 34%; height: 10px; border-radius: 5px; background: #c2410c"></div><div style="position: absolute; left: 28%; top: -4px; width: 2px; height: 18px; background: #0f172a"></div></div>
-<span style="font-size: 13px; font-weight: 600; color: #15803d">On track: a little ahead of what it takes</span></div>
-<h2 class="lab" style="margin: 0 4px">Today</h2>
+<sc-if value="{{ pp.game.note }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">{{ pp.game.note }}</span></sc-if>
+<sc-if value="{{ pp.game.retryOn }}"><button class="pill" onClick="{{ pp.retry }}" style="align-self: flex-start; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Try again</button></sc-if>
+<sc-if value="{{ pp.game.on }}">
+<div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px"><span class="lab">{{ pp.game.g.where }}</span><span style="font-size: 16px; line-height: 23px; font-weight: 600">{{ pp.game.g.sentence }}</span>
+<sc-if value="{{ pp.game.g.hasBar }}"><div style="position: relative; height: 10px; border-radius: 5px; background: #f1f5f9"><div style="width: {{ pp.game.g.fill }}%; height: 10px; border-radius: 5px; background: #c2410c"></div><sc-if value="{{ pp.game.g.hasNeed }}"><div style="position: absolute; left: {{ pp.game.g.need }}%; top: -4px; width: 2px; height: 18px; background: #0f172a"></div></sc-if></div></sc-if>
+<sc-if value="{{ pp.game.g.hasStand }}"><span style="font-size: 13px; font-weight: 600; color: {{ pp.game.g.standC }}">{{ pp.game.g.stand }}</span></sc-if>
+<sc-if value="{{ pp.game.g.hasWin }}"><span class="muted" style="font-size: 13px; line-height: 18px">{{ pp.game.g.winWords }}</span></sc-if>
+<sc-if value="{{ pp.game.g.setupLine }}"><span class="muted" style="font-size: 13px; line-height: 18px">{{ pp.game.g.setupLine }}</span></sc-if>
+<sc-if value="{{ pp.game.g.undoOn }}"><button class="small" onClick="{{ pp.game.g.undo }}" style="align-self: flex-start">Undo</button></sc-if>
+</div>
+<sc-if value="{{ pp.game.g.hasToday }}">
+<h2 class="lab" style="margin: 0 4px">{{ pp.game.g.todayTitle }}</h2>
 <div class="list">
-<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Morning walk</span><button class="small" onClick="{{ walkToggle }}" style="background: {{ walkBg }}; color: {{ walkFg }}">{{ walkLabel }}</button></div>
-<div class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">Pages read</span><button class="small" aria-label="One less" onClick="{{ pagesDown }}">−</button><span style="width: 32px; text-align: center; font-family: var(--hq-display); font-weight: 700">{{ pages }}</span><button class="small" aria-label="One more" onClick="{{ pagesUp }}">+</button></div>
+<sc-for list="{{ pp.game.g.todayRows }}" as="t"><div key="{{ t.key }}" class="row" style="cursor: default"><span class="grow" style="font-size: 15px; font-weight: 600">{{ t.name }}</span>
+<sc-if value="{{ t.isTick }}"><button class="small" onClick="{{ t.tapDone }}" style="background: {{ t.done.bg }}; color: {{ t.done.fg }}">Done</button><button class="small" onClick="{{ t.tapDidnt }}" style="background: {{ t.didnt.bg }}; color: {{ t.didnt.fg }}">Didn’t</button></sc-if>
+<sc-if value="{{ t.isCount }}"><button class="small" aria-label="One less" onClick="{{ t.less }}">−</button><span style="width: 32px; text-align: center; font-family: var(--hq-display); font-weight: 700">{{ t.n }}</span><button class="small" aria-label="One more" onClick="{{ t.more }}">+</button></sc-if>
+</div></sc-for>
+<div class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 8px"><sc-if value="{{ pp.game.g.hasNoted }}"><span class="muted" style="font-size: 13px; line-height: 18px">Noted: {{ pp.game.g.noted }}</span></sc-if><div class="tbox"><input aria-label="A note for today" placeholder="A note for today" value="{{ pp.game.g.noteBox.value }}" onInput="{{ pp.game.g.noteBox.input }}" onKeyDown="{{ pp.game.g.noteBox.key }}"><button class="small" onClick="{{ pp.game.g.noteBox.keep }}">Save</button></div></div>
 </div>
-<h2 class="lab" style="margin: 0 4px">The last two weeks</h2>
+</sc-if>
+<sc-for list="{{ pp.game.g.grids }}" as="gr"><div style="display: contents">
+<h2 class="lab" style="margin: 0 4px">{{ gr.label }} · {{ gr.line }}</h2>
 <div class="card" style="padding: 14px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px">
-<sc-for list="{{ grid }}" as="g"><span style="height: 34px; border-radius: 10px; background: {{ g.bg }}; color: {{ g.fg }}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; box-shadow: {{ g.ring }}">{{ g.d }}</span></sc-for>
+<sc-for list="{{ gr.head }}" as="h"><span style="text-align: center; font-size: 11px; font-weight: 700; color: #475569">{{ h.w }}</span></sc-for>
+<sc-for list="{{ gr.cells }}" as="c"><button key="{{ c.key }}" onClick="{{ c.tap }}" disabled="{{ c.off }}" title="{{ c.tip }}" aria-label="{{ c.tip }}" style="height: 34px; padding: 0; border: none; border-radius: 10px; background: {{ c.bg }}; color: {{ c.fg }}; text-decoration: {{ c.deco }}; display: flex; align-items: center; justify-content: center; font: 600 12px Inter, sans-serif; box-shadow: {{ c.ring }}; cursor: pointer">{{ c.d }}</button></sc-for>
 </div>
+<sc-if value="{{ gr.todayLine }}"><span class="muted" style="font-size: 13px; margin: 0 4px">{{ gr.todayLine }}</span></sc-if>
+</div></sc-for>
+<sc-for list="{{ pp.game.g.graphs }}" as="gr"><div style="display: contents">
+<h2 class="lab" style="margin: 0 4px">{{ gr.title }}</h2>
+<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px"><div style="position: relative; height: 90px; display: flex; align-items: flex-end; gap: 2px"><sc-for list="{{ gr.bars }}" as="b"><span style="flex: 1; height: {{ b.h }}%; background: #c2410c; border-radius: 2px"></span></sc-for><sc-if value="{{ gr.hasLine }}"><span style="position: absolute; left: 0; right: 0; bottom: {{ gr.lineAt }}%; border-top: 1px dashed #0f172a; opacity: 0.5"></span></sc-if></div><span class="muted" style="font-size: 13px">{{ gr.words }}</span></div>
+</div></sc-for>
+<sc-if value="{{ pp.game.g.counts.length }}"><div class="list"><sc-for list="{{ pp.game.g.counts }}" as="c"><div key="{{ c.key }}" class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">{{ c.name }}</span><span style="font-size: 15px">{{ c.line }}</span></div></sc-for></div></sc-if>
+<sc-if value="{{ pp.game.g.hasCard }}">
 <h2 class="lab" style="margin: 0 4px">The game card</h2>
-<div class="list"><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What it’s for</span><span style="font-size: 15px">Steady mornings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">The rules</span><span style="font-size: 15px">5 of 7 days</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">At my best</span><span style="font-size: 15px">Up before 7</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What could get in the way</span><span style="font-size: 15px">Late evenings</span></div><div class="row" style="cursor: default"><span class="grow muted" style="font-size: 14px">What keeps me honest</span><span style="font-size: 15px">Friday with Pepper</span></div></div>
+<div class="list"><sc-for list="{{ pp.game.g.cardRows }}" as="r"><div key="{{ r.key }}" class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 2px"><span class="muted" style="font-size: 14px">{{ r.label }}</span><span style="font-size: 15px; line-height: 21px">{{ r.text }}</span></div></sc-for></div>
+</sc-if>
+<sc-for list="{{ pp.game.g.diaries }}" as="d"><div style="display: contents">
 <h2 class="lab" style="margin: 0 4px">Diary</h2>
-<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px"><div class="tbox"><label for="dk-diary" class="sr">How was today?</label><input id="dk-diary" placeholder="How was today?"></div><div style="display: flex; gap: 6px"><sc-for list="{{ feelChips }}" as="f"><button class="chip" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></div>
-<h2 class="lab" style="margin: 0 4px">This week’s look back</h2>
-<sc-if value="{{ notKept }}"><div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span style="font-size: 15px; line-height: 22px">What made this week easier than the last?</span><div class="tbox"><label for="dk-look" class="sr">Your answer</label><input id="dk-look" placeholder="A line or two"></div><button class="pill" onClick="{{ keepIt }}" style="align-self: flex-start; background: #c2410c; color: #ffffff">Keep it</button></div></sc-if>
-<sc-if value="{{ kept }}"><div class="card" style="padding: 16px 18px; font-size: 15px">Kept. Pepper reads it at Friday’s check-in.</div></sc-if>
+<div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{ d.canAdd }}"><div class="tbox"><input aria-label="{{ d.name }}" placeholder="{{ d.name }}" value="{{ d.box.value }}" onInput="{{ d.box.input }}" onKeyDown="{{ d.box.key }}"></div><div style="display: flex; gap: 6px; flex-wrap: wrap"><sc-for list="{{ d.feels }}" as="f"><button class="chip" onClick="{{ f.pick }}" style="background: {{ f.bg }}; color: {{ f.fg }}; box-shadow: {{ f.shadow }}">{{ f.name }}</button></sc-for></div></sc-if>
+<sc-for list="{{ d.entries }}" as="e"><div key="{{ e.key }}" style="display: flex; flex-direction: column; gap: 2px"><span class="muted" style="font-size: 12px; font-weight: 600">{{ e.when }}</span><span style="font-size: 15px; line-height: 21px">{{ e.text }}</span></div></sc-for>
+<sc-if value="{{ d.none }}"><span class="muted" style="font-size: 13px">Nothing written yet.</span></sc-if>
+</div>
+</div></sc-for>
+<sc-if value="{{ pp.game.g.hasNotes }}">
+<h2 class="lab" style="margin: 0 4px">Notes</h2>
+<div class="list"><sc-for list="{{ pp.game.g.notes }}" as="n"><div key="{{ n.key }}" class="row" style="cursor: default; flex-direction: column; align-items: stretch; gap: 2px"><span class="muted" style="font-size: 12px; font-weight: 600">{{ n.when }}</span><span style="font-size: 15px; line-height: 21px">{{ n.text }}</span></div></sc-for></div>
+</sc-if>
+<sc-if value="{{ pp.game.g.hasWeeks }}">
+<h2 class="lab" style="margin: 0 4px">Each week, looking back</h2>
+<sc-for list="{{ pp.game.g.weeks }}" as="w"><div key="{{ w.key }}" class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px"><span class="muted" style="font-size: 13px; font-weight: 600">{{ w.title }}</span>
+<sc-if value="{{ w.hasLook }}"><span style="font-size: 15px; line-height: 22px">{{ w.look }}</span></sc-if>
+<sc-if value="{{ w.canWrite }}"><span style="font-size: 15px; line-height: 22px">How did it go: what worked, what got in the way, what changes next week?</span><div class="tbox"><input aria-label="{{ w.title }}, looking back" placeholder="A line or two" value="{{ w.box.value }}" onInput="{{ w.box.input }}" onKeyDown="{{ w.box.key }}"></div><button class="pill" onClick="{{ w.box.keep }}" style="align-self: flex-start; background: #c2410c; color: #ffffff">Keep it</button></sc-if>
+<sc-if value="{{ w.notLooked }}"><span class="muted" style="font-size: 14px">Not looked back on.</span></sc-if>
+</div></sc-for>
+</sc-if>
+<sc-if value="{{ pp.game.g.showDebrief }}">
+<h2 class="lab" style="margin: 0 4px">The debrief</h2>
+<div class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<sc-if value="{{ pp.game.g.hasDebrief }}"><span style="font-size: 15px; line-height: 22px">{{ pp.game.g.debrief }}</span></sc-if>
+<sc-if value="{{ pp.game.g.writeDebrief }}"><span style="font-size: 15px; line-height: 22px">Was it fun, was it useful, what did you learn? What do you keep, change or drop for the next game?</span><div class="tbox"><input aria-label="The debrief" placeholder="A line or two" value="{{ pp.game.g.debriefBox.value }}" onInput="{{ pp.game.g.debriefBox.input }}" onKeyDown="{{ pp.game.g.debriefBox.key }}"></div><button class="pill" onClick="{{ pp.game.g.debriefBox.keep }}" style="align-self: flex-start; background: #c2410c; color: #ffffff">Keep it</button></sc-if>
+</div>
+</sc-if>
+</sc-if>
 </sc-if>
