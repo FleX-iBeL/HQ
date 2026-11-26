@@ -7,3 +7,5 @@ __pycache__/
 .DS_Store
 models/
 node_modules/
+.venv
+models

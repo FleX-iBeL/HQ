@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HQ</title>
+<!-- H27: the top strip of the Mac app: the watchdog dog, the overall light, the tabs (Status, Call) and
+     the button that turns everything on. The app (HQ.swift) fills it with hq.update(...) every few seconds;
+     the buttons talk back through webkit.messageHandlers.hq. The colours are the status page's own. -->
+<style>
+  :root {
+    color-scheme: light dark;
+    --page: #f6f7f9; --card: #ffffff; --tint: #f9fafb; --ink: #1b1f24; --soft: #57606a; --rule: #d5d9df;
+    --blue: #0b5fbf; --green: #1a7f37; --yellow: #b39a00; --amber: #bf8700; --red: #b42318; --grey: #6b7785;
+    --fur: #c98a4b; --fur-dark: #8f5a2b; --nose: #2b2118;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #16181c; --card: #1f2227; --tint: #262a30; --ink: #e8eaed; --soft: #a4abb5; --rule: #3a3f47;
+      --blue: #6aa9f0; --green: #56b870; --yellow: #e6cc45; --amber: #d9a520; --red: #f0766a; --grey: #8a94a0;
+      --fur: #d39a5e; --fur-dark: #9b6635; --nose: #120d09;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--page); color: var(--ink);
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-user-select: none; user-select: none; overflow: hidden; }
+  .bar { display: flex; align-items: center; gap: 14px; height: 88px; padding: 0 16px 0 78px;
+    border-bottom: 1px solid var(--rule); -webkit-app-region: drag; }
+  .dog { width: 92px; height: 72px; flex: none; cursor: pointer; -webkit-app-region: no-drag; }
+  .who { flex: 1; min-width: 0; }
+  .who b { font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .who .where { font-size: 11px; font-weight: 600; color: var(--soft); letter-spacing: .02em; margin-top: 1px; }
+  .who .where:empty { display: none; }
+  /* H118: which computer is main, a pill after it: green on the main, grey on the backup. */
+  .who .where .role { margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-weight: 700; }
+  .who .where .role.main { background: var(--green); color: #fff; }
+  .who .where .role.backup { background: color-mix(in srgb, var(--grey) 25%, transparent); color: var(--ink); }
+  .who .head { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .who .said { color: var(--soft); font-size: 12px; margin-top: 2px; min-height: 16px; }
+  .light { width: 11px; height: 11px; border-radius: 50%; background: var(--grey); display: inline-block; }
+  .light.ok { background: var(--green); }
+  .light.running { background: repeating-linear-gradient(135deg, var(--green) 0 3px, color-mix(in srgb, var(--green) 55%, transparent) 3px 6px); }
+  .light.waiting, .light.warm { background: var(--yellow); }
+  .light.down { background: var(--red); }
+  .tabs { display: flex; gap: 4px; background: var(--tint); border: 1px solid var(--rule); border-radius: 9px; padding: 3px;
+    -webkit-app-region: no-drag; }
+  .tabs button, .fix { font: inherit; border: 0; border-radius: 6px; padding: 6px 14px; background: transparent; color: var(--ink); cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.15); font-weight: 600; }
+  .fix { background: var(--blue); color: #fff; font-weight: 600; -webkit-app-region: no-drag; }
+  .fix[disabled] { opacity: .45; cursor: default; }
+  .panel { display: none; padding: 8px 16px 12px 78px; border-bottom: 1px solid var(--rule); background: var(--card); }
+  body.open .panel { display: block; }
+  .row { display: grid; grid-template-columns: 14px 160px 1fr; gap: 8px; align-items: center; padding: 3px 0; }
+  .row .text { color: var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .panel .note { color: var(--soft); font-size: 12px; margin-top: 6px; }
+  /* H46 (11 October 2026), in the user's words: "the dog only on the status page." On Call the strip keeps
+     only the tabs, in the middle; the dog, the light and Turn everything on are back on Status. */
+  body.call .dog, body.call .who, body.call .fix, body.call .panel { display: none !important; }
+  body.call .bar { justify-content: center; }
+  /* H47 (11 October 2026), in the user's words: "a plus and minus button to make the status page bigger or
+     smaller. and also the shortcut 'cmd'+ '+' and 'cmd'+ '-' to do the same". Only on Status. */
+  .zoom { display: flex; align-items: center; gap: 2px; background: var(--tint); border: 1px solid var(--rule); border-radius: 9px;
+    padding: 3px; -webkit-app-region: no-drag; }
+  .zoom button { font: 600 15px/1 inherit; width: 30px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
+  .zoom button:hover { background: var(--card); }
+  .zoom span { min-width: 40px; text-align: center; color: var(--soft); font-size: 12px; cursor: pointer; }
+  body.call .zoom { display: none; }
+  /* H145 (15 October 2026), in the user's words: "and i do miss donna's texts here on the laptop so i want those as
+     well." A third tab with her chat (the same thread as the phone), a red dot on a new text; the app shows her
+     texts as Mac notifications. The strip on her tab is as on Call: only the tabs. */
+  .tabs button { position: relative; }
+  .tabs button[hidden] { display: none; }  /* H205 */
+  .tabs .dot { position: absolute; top: 2px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 2px var(--tint); display: none; }
+  .tabs .dot.show { display: block; }
+
+  /* The dog. Claude's choice: a small drawn dog, its mood follows the light. */
+  .dog .tail { transform-origin: 22px 40px; }
+  .dog .head-g { transform-origin: 66px 32px; }
+  .dog .ear { transform-origin: 70px 20px; }
+  .dog .leg { transform-box: fill-box; transform-origin: top center; }
+  .dog .zz, .dog .woof, .dog .lines, .dog .eye-shut, .dog .mouth-open { opacity: 0; }
+  .dog .whole { transform-origin: 46px 60px; }
+  @keyframes wag { from { transform: rotate(-28deg); } to { transform: rotate(22deg); } }
+  @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+  @keyframes sniff { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(9deg) translateY(2px); } }
+  @keyframes jump { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-7px); } }
+  @keyframes pop { 0%, 100% { opacity: 0; transform: scale(.7); } 30%, 70% { opacity: 1; transform: scale(1); } }
+  @keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.02, 1.04); } }
+  @keyframes float { 0% { opacity: 0; transform: translate(0, 4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(6px, -10px); } }
+  @keyframes run { from { transform: rotate(-30deg); } to { transform: rotate(30deg); } }
+  @keyframes dash { from { opacity: .9; transform: translateX(0); } to { opacity: 0; transform: translateX(-8px); } }
+
+  .dog.happy .tail { animation: wag .28s ease-in-out infinite alternate; }
+  .dog.happy .whole { animation: bounce 1.2s ease-in-out infinite; }
+  .dog.alert .tail { animation: wag 1.1s ease-in-out infinite alternate; }
+  .dog.alert .head-g { animation: sniff 1.4s ease-in-out infinite; }
+  .dog.alert .ear { transform: rotate(-18deg); }
+  .dog.bark .whole { animation: jump .6s ease-in-out infinite; }
+  .dog.bark .mouth-open { opacity: 1; }
+  .dog.bark .woof { animation: pop .6s ease-in-out infinite; transform-origin: 82px 10px; }
+  .dog.bark .ear { transform: rotate(-30deg); }
+  .dog.bark .tail { transform: rotate(-35deg); }
+  .dog.run .whole { animation: bounce .25s ease-in-out infinite; }
+  .dog.run .leg.a { animation: run .25s ease-in-out infinite alternate; }
+  .dog.run .leg.b { animation: run .25s ease-in-out infinite alternate-reverse; }
+  .dog.run .lines { opacity: 1; animation: dash .4s linear infinite; }
+  .dog.run .tail { transform: rotate(-40deg); }
+  .dog.sleep .whole { animation: breathe 3s ease-in-out infinite; }
+  .dog.sleep .eye-open { opacity: 0; }
+  .dog.sleep .eye-shut { opacity: 1; }
+  .dog.sleep .ear { transform: rotate(14deg); }
+  .dog.sleep .zz { animation: float 2.4s ease-in infinite; }
+  .dog.sleep .zz.two { animation-delay: 1.2s; }
+  /* H98 (12 October 2026), in the user's words: "it can just sit in front of a bowl for his food and it just says
+     update in green, just like the woof says in red, but then update in green. And it can bark. But it sits.
+     Wagging and still waiting in front of... A bowl of his, just like a dog bowl of food. But it's empty."
+     So when a newer version is out (H59): the dog sits by its empty bowl, wags, looks from the bowl to you, and
+     now and then barks Update! in green. [Claude's choice: a red bark or sleep still wins, they matter more.] */
+  .dog .sit, .dog .bowl, .dog .feed { opacity: 0; }
+  .dog .body { transform-origin: 60px 46px; }
+  @keyframes look { 0%, 40% { transform: rotate(12deg); } 55%, 90% { transform: rotate(-4deg); } 100% { transform: rotate(12deg); } }
+  @keyframes now-and-then { 0%, 68%, 100% { opacity: 0; transform: scale(.7); } 74%, 94% { opacity: 1; transform: scale(1); } }
+  @keyframes open-now-and-then { 0%, 70%, 96%, 100% { opacity: 0; } 74%, 92% { opacity: 1; } }
+  .dog.hungry .body { transform: rotate(-14deg); }
+  .dog.hungry .tail-spot { transform: translate(0, 9px); }
+  .dog.hungry .leg.rear { opacity: 0; }
+  .dog.hungry .sit, .dog.hungry .bowl { opacity: 1; }
+  .dog.hungry .tail { animation: wag .3s ease-in-out infinite alternate; }
+  .dog.hungry .head-g { animation: look 4s ease-in-out infinite; }
+  .dog.hungry .ear { transform: rotate(-10deg); }
+  .dog.hungry .feed { animation: now-and-then 4s ease-in-out infinite; transform-origin: 80px 7px; }
+  .dog.hungry .mouth-open { animation: open-now-and-then 4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .dog * { animation: none !important; } .dog.hungry .feed { opacity: 1; } }
+  /* H59: the small grey version next to HQ (a click shows the changelog), and a pill when a new one is out. */
+  .ver { font: 400 11px/1.2 inherit; color: var(--grey); background: none; border: 0; padding: 0 2px; cursor: pointer; -webkit-app-region: no-drag; }
+  .ver:hover { text-decoration: underline; }
+  .newver { display: none; font: 600 11px/1 inherit; color: #fff; background: var(--blue); border: 0; border-radius: 999px; padding: 4px 9px;
+    cursor: pointer; -webkit-app-region: no-drag; }
+  .newver.show { display: inline-block; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <svg class="dog sleep" id="dog" viewBox="0 0 100 76" role="img" aria-label="The watchdog">
+      <title id="dogtitle">The watchdog</title>
+      <g class="lines" stroke="var(--soft)" stroke-width="2" stroke-linecap="round">
+        <path d="M2 40h8M0 48h10M4 56h8" />
+      </g>
+      <g class="whole">
+        <g class="tail-spot"><g class="tail"><path d="M22 40 C12 34 10 24 14 18" fill="none" stroke="var(--fur-dark)" stroke-width="5" stroke-linecap="round" /></g></g>
+        <rect class="leg b rear" x="27" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
+        <rect class="leg a" x="53" y="50" width="6" height="16" rx="3" fill="var(--fur-dark)" />
+        <g class="sit"><ellipse cx="31" cy="57" rx="10" ry="8" fill="var(--fur)" />
+          <rect x="30" y="61" width="12" height="6" rx="3" fill="var(--fur-dark)" /></g>
+        <ellipse class="body" cx="42" cy="46" rx="22" ry="12" fill="var(--fur)" />
+        <rect class="leg a rear" x="33" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
+        <rect class="leg b" x="59" y="50" width="6" height="17" rx="3" fill="var(--fur)" />
+        <g class="head-g">
+          <path d="M58 40 C56 32 60 26 66 32" fill="var(--fur)" />
+          <circle cx="68" cy="30" r="12" fill="var(--fur)" />
+          <ellipse cx="80" cy="34" rx="8" ry="6" fill="var(--fur)" />
+          <circle cx="87" cy="32" r="2.6" fill="var(--nose)" />
+          <path class="mouth-open" d="M78 38 Q83 44 88 37 Z" fill="var(--nose)" />
+          <circle class="eye-open" cx="72" cy="27" r="2" fill="var(--nose)" />
+          <path class="eye-shut" d="M69.5 27.5 q2.5 2 5 0" fill="none" stroke="var(--nose)" stroke-width="1.6" stroke-linecap="round" />
+          <path class="ear" d="M64 20 C58 22 56 32 60 36 C64 32 68 26 70 20 Z" fill="var(--fur-dark)" />
+          <path d="M57 41 h20" stroke="var(--blue)" stroke-width="3" stroke-linecap="round" />
+        </g>
+      </g>
+      <g class="bowl"><path d="M73 64 h25 l-3.5 8 h-18 Z" fill="var(--blue)" />
+        <ellipse cx="85.5" cy="64" rx="12.5" ry="2.6" fill="var(--rule)" stroke="var(--blue)" stroke-width="1.4" /></g>
+      <g class="feed"><rect x="64" y="0" width="34" height="13" rx="6" fill="var(--green)" />
+        <text x="81" y="9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">Update!</text></g>
+      <g class="woof"><rect x="70" y="0" width="28" height="13" rx="6" fill="var(--red)" />
+        <text x="84" y="9.5" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">Woof!</text></g>
+      <text class="zz" x="82" y="16" font-size="9" font-weight="700" fill="var(--soft)">z</text>
+      <text class="zz two" x="88" y="10" font-size="7" font-weight="700" fill="var(--soft)">z</text>
+    </svg>
+    <div class="who">
+      <b>HQ <i class="light" id="light"></i> <button class="ver" id="ver" type="button" title="What changed in each version"></button>
+        <button class="newver" id="newver" type="button" title="A new version of HQ: update"></button></b>
+      <div class="where" id="where"></div>
+      <div class="head" id="head">Looking…</div>
+      <div class="said" id="said"></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button id="tab-call" aria-pressed="true" data-tab="call">Call</button>
+      <button id="tab-status" aria-pressed="false" data-tab="status">Status</button>
+      <button id="tab-direct" aria-pressed="false" data-tab="direct" title="Her direct line: the same chat as on the phone"><span id="direct-name">Texts</span><i class="dot" id="direct-dot"></i></button>
+    </div>
+    <div class="zoom" role="group" aria-label="Status page size">
+      <button id="zoom-out" type="button" aria-label="Smaller (Cmd -)" title="Smaller (⌘−)">−</button>
+      <span id="zoom-level" title="Back to 100% (⌘0)">100%</span>
+      <button id="zoom-in" type="button" aria-label="Bigger (Cmd +)" title="Bigger (⌘+)">+</button>
+    </div>
+    <button class="fix" id="fix" disabled title="Turns on what's off: the status page, the helper, the watchdog, the call line">Turn everything on</button>
+  </div>
+  <div class="panel" id="panel">
+    <div id="rows"></div>
+    <div class="note">The routines keep running in the background when this app is closed. The button only turns on what's off; it never stops or restarts what runs.</div>
+  </div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const send = (m) => { try { webkit.messageHandlers.hq.postMessage(m); } catch { console.log('hq', JSON.stringify(m)); } };
+  const WORDS = { happy: 'All good: tail going', alert: 'Keeping an eye on something', bark: 'Something is off', run: 'Turning things on…', sleep: 'Asleep: the status page doesn’t answer', hungry: 'A new version is out: waiting by the empty bowl for the update' };
+  let fixing = false;
+  let last = null;
+  let lastDrag = '';
+  const hq = window.hq = {
+    state: () => ({ mood: $('dog').getAttribute('class').replace('dog ', ''), light: $('light').className.replace('light ', ''), head: $('head').textContent, tab: document.querySelector('.tabs [aria-pressed="true"]').dataset.tab, open: document.body.classList.contains('open'), fix: !$('fix').disabled, direct: $('direct-name').textContent, dot: $('direct-dot').classList.contains('show') }),
+    update(h) {
+      last = h;
+      const u = h.update || {};
+      // H98: a newer version makes the dog sit by its empty bowl, unless something is off or it's asleep.
+      const hungry = !!u.available && !u.updating && (h.mood === 'happy' || h.mood === 'alert');
+      const mood = fixing ? 'run' : hungry ? 'hungry' : h.mood;
+      $('dog').setAttribute('class', `dog ${mood}`);
+      $('dogtitle').textContent = `The watchdog: ${WORDS[mood]}`;
+      $('light').className = `light ${h.light}`;
+      $('head').textContent = h.headline;
+      $('where').textContent = h.where || '';  // H83: which HQ this is (VPS, or Local · macOS)
+      if (h.role && h.role.text) {  // H118: and which computer is main, as a pill after it
+        const pill = document.createElement('span');
+        pill.className = `role ${h.role.acting === 'main' ? 'main' : 'backup'}`;
+        pill.textContent = h.role.text;
+        $('where').append(pill);
+      }
+      $('fix').disabled = fixing || !(h.off && h.off.length);
+      // H205: a tab whose part of HQ is switched off goes (What HQ helps you with); on it, the app moves to Call.
+      const gone = h.tabs_off || [];
+      for (const b of document.querySelectorAll('.tabs button')) b.hidden = gone.includes(b.dataset.tab);
+      const at = document.querySelector('.tabs [aria-pressed="true"]');
+      if (at && at.hidden) { hq.tab('call'); send({ do: 'tab', tab: 'call' }); }
+      // H59: the version from update.py (through hq_control.py health)
+      $('ver').textContent = u.version ? `v${u.version}` + (u.updating ? ' · updating…' : u.available ? '' : u.latest && !u.offline ? ' · the latest version' : '') : '';
+      $('newver').textContent = u.available ? `v${u.latest} is out · Update` : '';
+      $('newver').classList.toggle('show', !!u.available && !u.updating);
+      const rows = $('rows');
+      rows.replaceChildren(...(h.routines || []).map((r) => {
+        const d = document.createElement('div');
+        d.className = 'row';
+        d.innerHTML = `<i class="light ${r.state === 'off' ? '' : r.state === 'low' ? 'warm' : r.state}"></i><span></span><span class="text"></span>`;
+        d.children[1].textContent = r.name;
+        d.children[2].textContent = r.text;
+        return d;
+      }));
+      if (document.body.classList.contains('open')) send({ do: 'height', px: document.body.scrollHeight });
+      hq.dragMap();
+    },
+    fixing(on, said) {
+      fixing = on;
+      if (said !== undefined) $('said').textContent = said;
+      if (last) hq.update(last);
+    },
+    // F15: the buttons' places, sent to the app whenever they move, so a click anywhere else in the bar moves the window.
+    dragMap() {
+      const bar = document.querySelector('.bar').getBoundingClientRect();
+      const nodrag = [...document.querySelectorAll('.bar .dog, .bar .tabs, .bar .zoom, .bar .fix, .bar .ver, .bar .newver')]
+        .map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+        .map((r) => [r.left, r.top, r.width, r.height].map((n) => Math.round(n)));
+      const m = { do: 'drag', bar: Math.round(bar.bottom), nodrag };
+      const key = JSON.stringify(m);
+      if (key !== lastDrag) { lastDrag = key; send(m); }
+      return m;
+    },
+    // H145: the app hands over her thread (/direct.json) and what it remembers: `seen`, the newest text he had in
+    // front of him, `told`, the newest text a notification was shown for (null the first time: everything already
+    // there counts as read). Back: her name, how many of her texts are unread (the dot), the new ones to show as a
+    // notification (each text once, never while he's looking at her chat) and the two marks to keep.
+    inbox(d, seen, told, looking) {
+      const msgs = (d && d.messages) || [];
+      const agent = (d && d.agent) || {};
+      const newest = msgs.reduce((a, m) => Math.max(a, +m.at || 0), 0);
+      if (seen == null || told == null) { seen = told = newest; }
+      if (looking) seen = Math.max(seen, newest);
+      const hers = msgs.filter((m) => m.from !== 'me' && !m.quiet);  // F79: her note for herself never reaches him
+      const notify = looking ? [] : hers.filter((m) => (+m.at || 0) > told).slice(-3).map((m) => ({ at: m.at, text: m.text }));
+      told = Math.max(told, newest);
+      const unread = hers.filter((m) => (+m.at || 0) > seen).length;
+      if (agent.name) $('direct-name').textContent = agent.name;
+      $('direct-dot').classList.toggle('show', unread > 0);
+      $('tab-direct').title = unread ? `${unread} new from ${agent.name || 'her'}` : `${agent.name || 'Her'} direct line: the same chat as on the phone`;
+      hq.dragMap();
+      return { name: agent.name || '', unread, notify, seen, told };
+    },
+    zoom(pct) { $('zoom-level').textContent = `${pct}%`; hq.dragMap(); },
+    tab(t) {
+      for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
+      document.body.classList.toggle('call', t !== 'status');  // H145: her tab, like Call, shows only the tabs
+      if (t === 'call' && document.body.classList.contains('open')) { document.body.classList.remove('open'); send({ do: 'height', px: 89 }); }
+      hq.dragMap();
+    },
+  };
+  for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => { hq.tab(b.dataset.tab); send({ do: 'tab', tab: b.dataset.tab }); });
+  $('zoom-in').addEventListener('click', () => send({ do: 'zoom', by: 1 }));
+  $('zoom-out').addEventListener('click', () => send({ do: 'zoom', by: -1 }));
+  $('zoom-level').addEventListener('click', () => send({ do: 'zoom', by: 0 }));
+  $('ver').addEventListener('click', () => send({ do: 'changelog' }));
+  $('newver').addEventListener('click', () => send({ do: 'update' }));
+  $('fix').addEventListener('click', () => { hq.fixing(true, 'Turning on what’s off…'); send({ do: 'fix' }); });
+  $('dog').addEventListener('click', () => {
+    if (document.body.classList.contains('call')) return;
+    document.body.classList.toggle('open');
+    send({ do: 'height', px: document.body.classList.contains('open') ? document.body.scrollHeight : 89 });
+  });
+  new ResizeObserver(() => hq.dragMap()).observe(document.querySelector('.bar'));
+  send({ do: 'ready' });
+</script>
+</body>
+</html>

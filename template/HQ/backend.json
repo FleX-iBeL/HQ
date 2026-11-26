@@ -1,0 +1,8 @@
+{
+  "on": [
+    "briefing",
+    "open_line",
+    "one_way_sync",
+    "handover"
+  ]
+}

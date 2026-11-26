@@ -1,0 +1,1583 @@
+"""H80: Donna texts me on HQ's own direct line, and I can text her back.
+
+12 October 2026, in the user's words: "I want the Telegram just to be Donna. If there is an important email as
+well that I need to be aware of, Donna should send me a message. ... I want those messages to be super humanised
+and personality-wise, as if it's a real person texting me." And: "when things crash and things are not good, not
+to go into technical details, but to be human and keep me up to date". And: "If it's a personal direct line, almost
+as if it's receiving a text message, as in SMS, but then we don't have to pay for those services because we build
+it ourselves". And: "is it possible that, if the VPS is the main and that one fails, the laptop pops up as a backup
+and texts me the main failed?"
+
+No Telegram, no paid service: a chat with only her at /direct on the status server (the HQ page on the phone's home
+screen, tailnet only), and Web Push for the lock screen (allowed once from inside the home-screen app; iOS 16.4 and
+later). The push goes through Apple's or the browser's own push service, so it arrives without Tailscale; opening
+the chat to answer needs Tailscale.
+
+Kept in the workspace's HQ/direct-line/, so both computers have it through the sync:
+  thread.jsonl          the chat, one message per line: {"at", "from": "agent"|"me", "text", "why", "id"}
+  subscriptions.json    the phones (and browsers) that allowed her notifications
+  state.json            the very important mails she already texted about, a question waiting for his yes
+And per computer, in .status/direct-page.json (F102): what the phone itself reported, shown by `direct_line.py info`;
+and in .status/direct-line.json: what she saw last minute (jobs, incidents), so she texts only on
+a change; in HQ's own folder, push-keys.json (F102, mode 600, never synced): the VAPID key pair the subscriptions
+were made with. keys() signs with it and public_key() gives the page the same one.
+
+Donna texts first (H124, routine/pings.py): when an appointment he picked starts (why appt), a reminder he asked
+for (why remind), and now and then on her own about something on her own notes list (initiative).
+Her watch list (H125, routine/pings.py): a mail or the weather he asked her to keep an eye out for (why watch), and
+when a watch ends: its time is up, or he stopped it (why watch-end).
+H238: an agent calls him at a time they agreed (routine/pings.py call): `ring N` pushes "<agent> is calling" with
+its own tag and the call's number, not in the chat; a tap opens the call page and starts that call. Not picked up,
+she says so in the chat (why missed-call).
+
+The weather (H120, weather.py): every three hours in the day she texts when there's sun, rain coming or a rainy
+day (why sun, rain, cosy), quiet otherwise. H212: asleep nothing; on waking one text (why morning): will it rain
+when he's out today; before he goes out, only when it rains then (why out).
+
+She texts (watch(), every minute from tick.py): when the job list is finished (nothing running or waiting, after
+there was), when a very important mail lands in inbox.md, when something stays down (an incident open for three
+minutes; the backup taking over at once) and again when it's back. H234: Tailscale off on this computer gets its own
+text (the other one is cut off from here, it hasn't gone down), and one when it's on again. In her own character, through Claude; without
+Claude (or HQ_DIRECT_PLAIN=1) a plain line in the same spirit. He texts back on /direct: she answers as on a call,
+with the same workspace and the same limits (policy.py), one text at a time.
+
+The coaching line (H225, coaching.py) is this same code on another folder, with the Life coaching agent and her rules
+(HQ_DIRECT_DIR, HQ_DIRECT_AGENT, HQ_DIRECT_COACHING=1); nothing subscribes there, so it never pushes.
+
+H266: Moneypenny's own line, the team line. Same code on the workspace's HQ/team-line/ with her (HQ_DIRECT_TEAM=1).
+The user's words (25 October 2026): "we need to make sure donna then stops texting updates right, and that becomes
+moneypenny", and (28 October 2026): "I want you to also proactively tell me things. Right now I have to call you up
+each time." A text of one of the team's kinds (TEAM_KINDS: the team done, a job paused, the night's check, the
+Friday estimates, a failed QA, a held release, her own) goes there, from her, whoever sends it (text() routes it);
+everything else stays Donna's. It pushes to the same phones as Donna's line (HQ_DIRECT_PUSH_DIR: her folder's
+subscriptions and keys, so nothing to allow again), titled with her name, and a tap opens /direct?line=team. His
+texts there are answered by her (reply() with this folder). Without Moneypenny in the agents, or HQ_TEAM_LINE=0,
+it all stays with Donna as before.
+
+Off: HQ_DIRECT=0 in switches.env. Tests: HQ_DIRECT_DRY=1 (her reply is canned, nothing is pushed out).
+
+  python3 app/direct_line.py info                       her name and colour, the public key, the phones, and what the
+                                                        phone itself last reported (JSON; F102: `page`)
+  python3 app/direct_line.py report                     the page's or the service worker's report, as JSON on stdin (F102)
+  .venv/bin/python app/direct_line.py text WHY "FACTS"  write and push one text (WHY: jobs, mail, down, back, hello)
+  .venv/bin/python app/direct_line.py team "FACTS"      Moneypenny texts him on her own line (H266)
+  python3 app/direct_line.py note WHY "FACTS"           a note for her on her line, never pushed (F79: a slip of the estimates)
+  ... --team                                            any of these on her line (info, reply): what the page uses
+  .venv/bin/python app/direct_line.py reply             answer his newest texts
+  .venv/bin/python app/direct_line.py initiative        her own look at her notes: a text, or quiet (H124)
+  .venv/bin/python app/direct_line.py test              push a hello to every phone
+  python3 app/direct_line.py watch --dry                what she would text now, without texting
+"""
+from __future__ import annotations
+
+import base64
+import fcntl
+import hashlib
+import json
+import os
+import re
+import secrets
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT / "routine"))
+import hqpaths  # noqa: E402
+import agents as _agents  # noqa: E402  stdlib only
+
+VENV_PY = ROOT / ".venv" / "bin" / "python"
+AGENT_ID = os.environ.get("HQ_DIRECT_AGENT", "donna")  # at import; agent() reads the variable each time (H266)
+TEAM_AGENT = "moneypenny"  # H266: the team line is hers
+# Moneypenny's own texts, and HQ's own messages (HQ acting up and back, the heads-up before the call lines restart, and what of
+# them waited through the night). Without her (switched off or not set up) line_for gives them to Donna.
+TEAM_KINDS = ("team", "down", "back", "restart", "team-night-summary")
+DOWN_AFTER = 180  # an incident open this long gets a text; a takeover or a refused pull or push (F31) gets one at once
+KEEP = 400  # messages kept in the thread
+TRIM_AT = 2 * KEEP  # F197: trimmed back to KEEP only past this, in one go: a full thread trimmed one by one swapped its oldest text
+# for each new one, so it never grew and a text landing there looked like none (her test of the one text in the line's first minute)
+SYNC_CONFLICT = "Both sides changed"  # F58: routine/sync.py's CONFLICT_WHY, an incident she never texts about
+SUBJECT = "https://github.com/FleX-iBeL/HQ"  # the VAPID contact the push services ask for
+
+
+def folder() -> Path:
+    return Path(os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line"))
+
+
+def push_folder() -> Path:
+    """Where the phones that allowed notifications and the push keys are: Donna's folder, also for the team line
+    (H266); the coaching line sets nothing, so it reads its own (empty) list and never pushes."""
+    return Path(os.environ.get("HQ_DIRECT_PUSH_DIR") or folder())
+
+
+def team_folder(donna: str | Path | None = None) -> Path:
+    """Her thread: next to Donna's (HQ/team-line in the workspace; a test's next to its own)."""
+    if os.environ.get("HQ_TEAM_LINE_DIR"):
+        return Path(os.environ["HQ_TEAM_LINE_DIR"])
+    return Path(donna or os.environ.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line")).parent / "team-line"
+
+
+def on_team_line() -> bool:
+    return os.environ.get("HQ_DIRECT_TEAM") == "1"
+
+
+def team_on() -> bool:
+    """H266: Moneypenny has her own line when she's one of the agents and it isn't switched off (HQ_TEAM_LINE=0)."""
+    if os.environ.get("HQ_TEAM_LINE", "1") == "0":
+        return False
+    try:
+        return any(a["id"] == TEAM_AGENT for a in _agents.load(Path(hqpaths.FOLDER)))
+    except Exception:
+        return False
+
+
+def team_env(base: dict | None = None) -> dict:
+    """The environment for the team line: her folder, her, and Donna's phones to push to."""
+    base = dict(os.environ if base is None else base)
+    donna = base.get("HQ_DIRECT_PUSH_DIR") or base.get("HQ_DIRECT_DIR") or os.path.join(hqpaths.DATA, "direct-line")
+    if base.get("HQ_DIRECT_TEAM") == "1":
+        return base
+    return {**base, "HQ_DIRECT_DIR": str(team_folder(donna)), "HQ_DIRECT_AGENT": TEAM_AGENT, "HQ_DIRECT_TEAM": "1",
+            "HQ_DIRECT_PUSH_DIR": str(donna)}
+
+
+class _Env:
+    """Run a piece with some environment variables set, then put them back."""
+
+    def __init__(self, env: dict):
+        self.new = {k: v for k, v in env.items() if os.environ.get(k) != v}
+
+    def __enter__(self):
+        self.old = {k: os.environ.get(k) for k in self.new}
+        os.environ.update(self.new)
+        return self
+
+    def __exit__(self, *a):
+        for k, v in self.old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def line_for(why: str) -> str:
+    """Which line a text of this kind goes on: team (Moneypenny's) or direct (Donna's)."""
+    return "team" if why in TEAM_KINDS and team_on() else "direct"
+
+
+def local_state_file() -> Path:
+    return Path(os.environ.get("HQ_DIRECT_LOCAL") or ROOT / ".status" / "direct-line.json")
+
+
+def on() -> bool:
+    return os.environ.get("HQ_DIRECT", "1") != "0" and _feature("texts")
+
+
+def _feature(fid: str) -> bool:
+    """H205: the user's own switch in Settings, What HQ helps you with (app/features.py); on when it can't be read."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import features
+        return features.is_on(fid)
+    except Exception:
+        return True
+
+
+def agent() -> dict:
+    return _agents.find(Path(hqpaths.FOLDER), os.environ.get("HQ_DIRECT_AGENT", "donna"))
+
+
+def user() -> str:
+    try:
+        import me as _me
+        return _me.load(Path(hqpaths.FOLDER))["name"] or "you"
+    except Exception:
+        return "you"
+
+
+def _read(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf8"))
+    except (OSError, ValueError):
+        return default
+
+
+def _write(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf8")
+    os.replace(tmp, path)
+
+
+class _Lock:
+    """One writer at a time for the thread (a reply and a routine text can meet)."""
+
+    def __init__(self, name: str = "thread", where: Path | None = None):
+        where = where or folder()
+        where.mkdir(parents=True, exist_ok=True)
+        self.f = open(where / f".{name}.lock", "a")  # H152: "a", so taking the lock is no change for the sync
+
+    def __enter__(self):
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+# -- the thread -----------------------------------------------------------------------------------
+
+# F58 (job 453, 29 October 2026): both computers wrote this thread (an incident's down and back texts run on both, his
+# texts reach whichever one the phone opens), so the sync kept two versions about once a day. Now only the main
+# writes it: on the backup a new line goes to the main by hand-over (role.hand, the H203 way: `put`), and until it
+# comes back through the sync the backup keeps it in thread.here.jsonl next to the thread, which never syncs (the
+# workspace's .stignore and git exclude, routine/sync.py) and is read over the thread (read_lines), so the backup's
+# own page and her reply there see it at once. The main can't be reached: the hand-over is kept and goes on by
+# itself (or runs here when this one takes over). An older main that refuses `put`: written here as before.
+HERE_FILE = "thread.here.jsonl"
+LINE_NAMES = ("direct-line", "team-line", "coaching-line")
+
+
+def _lines(path: Path) -> list[dict]:
+    try:
+        raw = path.read_text(encoding="utf8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in raw:
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(m, dict) and m.get("text"):
+            out.append(m)
+    return out
+
+
+def _at(m: dict) -> float:
+    try:
+        return float(m.get("at") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _key(m: dict) -> tuple:
+    """What makes a line one line. F108: its own id, given when it's written, so a hand-over sent again stays once while two
+    texts with the same words in the same millisecond are two: two "down" texts without Claude can be word for word the same,
+    and the time, the sender and the words alone took them for a hand-over sent again and dropped one. A line from before
+    has no id."""
+    return (m["id"],) if m.get("id") else (round(_at(m), 3), m.get("from"), m.get("text"))
+
+
+def read_lines(where: Path) -> list[dict]:
+    """The thread in the folder `where`, with (on the backup) its own lines the main hasn't sent back yet, in time
+    order (F58)."""
+    out = _lines(where / "thread.jsonl")
+    mine = _lines(where / HERE_FILE)
+    if mine:
+        have = {_key(m) for m in out}
+        extra = [m for m in mine if _key(m) not in have]
+        if extra:
+            out = sorted(out + extra, key=_at)
+    return out
+
+
+def thread(last: int | None = None) -> list[dict]:
+    out = read_lines(folder())
+    return out[-last:] if last else out
+
+
+def _backup() -> bool:
+    """This HQ is the backup of a pair (role.py); a lone HQ, a test or a run handed over by the backup is the main."""
+    if os.environ.get("HQ_ROLE_HERE"):
+        return False
+    try:
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+
+
+def _write_lines(path: Path, msgs: list[dict]) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in msgs), encoding="utf8")
+    os.replace(tmp, path)
+
+
+def _prune_here(where: Path, have: set | None = None) -> None:
+    """Drop the backup's own lines that are in the thread by now (under the thread's lock)."""
+    here = where / HERE_FILE
+    if not here.exists():
+        return
+    have = have if have is not None else {_key(m) for m in _lines(where / "thread.jsonl")}
+    left = [m for m in _lines(here) if _key(m) not in have]
+    if left:
+        _write_lines(here, left)
+    else:
+        try:
+            here.unlink()
+        except OSError:
+            pass
+
+
+def put(where: Path, m: dict) -> bool:
+    """Write one line into the thread in `where`, in time order, once (a hand-over sent again changes nothing).
+    The main's way in for a line the backup handed over, and for every line written here. True when it was new."""
+    where.mkdir(parents=True, exist_ok=True)
+    with _Lock(where=where):
+        msgs = _lines(where / "thread.jsonl")
+        have = {_key(x) for x in msgs}
+        new = _key(m) not in have
+        if new:
+            i = len(msgs)
+            while i and _at(msgs[i - 1]) > _at(m):
+                i -= 1
+            msgs.insert(i, m)
+            _write_lines(where / "thread.jsonl", msgs[-KEEP:] if len(msgs) > TRIM_AT else msgs)
+            have.add(_key(m))
+        _prune_here(where, have)
+    return new
+
+
+def _keep_here(where: Path, m: dict) -> None:
+    """On the backup: the line in its own file next to the thread, until the main's thread brings it back."""
+    where.mkdir(parents=True, exist_ok=True)
+    with _Lock(where=where):
+        _prune_here(where)
+        with open(where / HERE_FILE, "a", encoding="utf8") as f:
+            f.write(json.dumps(m, ensure_ascii=False) + "\n")
+
+
+def line_dir(name: str) -> Path | None:
+    """A line's folder from its name, as this HQ has it (the main resolving a hand-over)."""
+    for d in (folder(), team_folder(), Path(os.environ.get("HQ_COACHING_LINE") or "")):
+        if str(d) not in ("", ".") and d.name == name:
+            return d
+    if name in LINE_NAMES:
+        return Path(hqpaths.DATA) / name
+    return None
+
+
+_LABEL = re.compile(r"(?<![\w.])[FHL]\d+(?:\.\d+)?(?![\w.])")  # F186: an item's label (F186, H340)
+
+
+def with_label(text: str, item: str = "", sender: str = "") -> str:
+    """F186: a text of hers about one item (F103's item, its label) that names no item gets the label in front, the way she'd write it, so he
+    always knows which one and his answer right after it counts for it (sprint.his_on). A text about two items, or about something with no
+    label yet (a job's id), goes as it is."""
+    text = text.strip()
+    if sender == "me" or not text or not _LABEL.fullmatch(str(item or "").strip()) or _LABEL.search(text):
+        return text
+    return f"{str(item).strip()}: {text}"
+
+
+def add(sender: str, text: str, why: str = "", item: str = "", mid: str = "", quiet: bool = False) -> dict:
+    about = item
+    m = {"at": round(time.time(), 3), "from": sender, "text": with_label(text, about, sender), "why": why, "id": mid or secrets.token_hex(8),
+         **({"item": item} if item else {}), **({"quiet": True} if quiet else {})}  # F103: the id of the work it's about, carried as an argument
+    import outbox  # H338: the style filter, the claim check, no question already answered, one text per topic, her batches
+    m = outbox.check(m, folder(), read_lines(folder()), agent()["id"])
+    if not written(m):
+        return m
+    where = folder()
+    if _backup():
+        try:
+            import role
+            code, _out, _err, how = role.hand("direct_line", ["put", where.name, json.dumps(m, ensure_ascii=False)],
+                                              timeout=15)
+        except Exception:
+            code, how = 1, "failed"
+        if how == "kept" or (how == "main" and code == 0):
+            _keep_here(where, m)
+            return m
+    put(where, m)
+    return m
+
+
+def written(m: dict) -> bool:
+    """H338: the outbox let this line through (not refused, not the same topic again, not kept for her batch)."""
+    return not any(k in m for k in ("refused", "same", "queued"))
+
+
+def wrote_calendar(what: str = "") -> None:
+    """H338: a calendar write that really happened, so the claim check lets her "it's in your calendar" through."""
+    import outbox
+    outbox.wrote_calendar(folder(), what)
+
+
+def unanswered() -> list[dict]:
+    """His texts after her last one."""
+    out = []
+    for m in reversed(thread()):
+        if m["from"] != "me":
+            if m.get("quiet"):  # F79: a note for her own eyes isn't an answer to him
+                continue
+            break
+        out.insert(0, m)
+    return out
+
+
+# -- Web Push (RFC 8291, aes128gcm; VAPID, RFC 8292) ----------------------------------------------------
+
+def _b64(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _unb64(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def _keys_path() -> Path:
+    """F102: the push key lives in HQ's own folder, mode 600, never in the synced workspace, also when the team line
+    pushes to Donna's phones from her folder (HQ_DIRECT_PUSH_DIR). A line elsewhere, a test's, keeps its own."""
+    if os.path.realpath(push_folder()) != os.path.realpath(os.path.join(hqpaths.DATA, "direct-line")):
+        return push_folder() / "keys.json"
+    return Path(hqpaths.SUPPORT) / "push-keys.json"
+
+
+def _keep_key(path: Path, k: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(k, f)
+    os.replace(tmp, path)
+
+
+def _kept_keys() -> dict | None:
+    """The VAPID key pair that's here, or None; never makes one. F102: moved here from the workspace the first time it's
+    asked for; the file that was there goes, so the sync carries the key no further."""
+    path = _keys_path()
+    k = _read(path, None)
+    if isinstance(k, dict) and k.get("private") and k.get("public"):
+        return k
+    old = push_folder() / "keys.json"
+    k = _read(old, None) if old != path else None
+    if isinstance(k, dict) and k.get("private") and k.get("public"):
+        _keep_key(path, k)
+        old.unlink(missing_ok=True)
+        return k
+    return None
+
+
+def keys() -> dict:
+    """The VAPID key pair, made once."""
+    k = _kept_keys()
+    if k:
+        return k
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    priv = ec.generate_private_key(ec.SECP256R1())
+    raw = priv.private_numbers().private_value.to_bytes(32, "big")
+    pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    k = {"private": _b64(raw), "public": _b64(pub), "made": time.strftime("%Y-%m-%d %H:%M")}
+    path = _keys_path()
+    with _Lock("keys", push_folder()):
+        again = _read(path, None)
+        if isinstance(again, dict) and again.get("public"):
+            return again
+        _keep_key(path, k)
+    return k
+
+
+def public_key() -> str:
+    """What the page subscribes a phone with: the public half of the key keys() signs with, or "" when there's none yet."""
+    k = _kept_keys()
+    return k["public"] if k else ""
+
+
+def _private(k: dict):
+    from cryptography.hazmat.primitives.asymmetric import ec
+    return ec.derive_private_key(int.from_bytes(_unb64(k["private"]), "big"), ec.SECP256R1())
+
+
+def vapid_header(endpoint: str, k: dict, now: float | None = None) -> str:
+    from urllib.parse import urlsplit
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    u = urlsplit(endpoint)
+    head = _b64(json.dumps({"typ": "JWT", "alg": "ES256"}, separators=(",", ":")).encode())
+    claims = {"aud": f"{u.scheme}://{u.netloc}", "exp": int((now or time.time()) + 12 * 3600), "sub": SUBJECT}
+    body = _b64(json.dumps(claims, separators=(",", ":")).encode())
+    der = _private(k).sign(f"{head}.{body}".encode(), ec.ECDSA(hashes.SHA256()))
+    r, s = decode_dss_signature(der)
+    sig = _b64(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+    return f"vapid t={head}.{body}.{sig}, k={k['public']}"
+
+
+def _hkdf(salt: bytes, ikm: bytes, info: bytes, n: int) -> bytes:
+    import hmac
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:n]
+
+
+def encrypt(payload: bytes, p256dh: str, auth: str, salt: bytes | None = None, eph=None) -> bytes:
+    """The body of one push message, aes128gcm with a single record."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    ua_pub = _unb64(p256dh)
+    secret = _unb64(auth)
+    eph = eph or ec.generate_private_key(ec.SECP256R1())
+    as_pub = eph.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    shared = eph.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_pub))
+    ikm = _hkdf(secret, shared, b"WebPush: info\x00" + ua_pub + as_pub, 32)
+    salt = salt or os.urandom(16)
+    cek = _hkdf(salt, ikm, b"Content-Encoding: aes128gcm\x00", 16)
+    nonce = _hkdf(salt, ikm, b"Content-Encoding: nonce\x00", 12)
+    ct = AESGCM(cek).encrypt(nonce, payload + b"\x02", None)
+    return salt + (4096).to_bytes(4, "big") + bytes([len(as_pub)]) + as_pub + ct
+
+
+def decrypt(body: bytes, ua_private, auth: str) -> bytes:
+    """The phone's side, for the detailed flow: what a browser does with a push message."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    salt, idlen = body[:16], body[20]
+    as_pub = body[21:21 + idlen]
+    ua_pub = ua_private.public_key().public_bytes(serialization.Encoding.X962,
+                                                  serialization.PublicFormat.UncompressedPoint)
+    shared = ua_private.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), as_pub))
+    ikm = _hkdf(_unb64(auth), shared, b"WebPush: info\x00" + ua_pub + as_pub, 32)
+    cek = _hkdf(salt, ikm, b"Content-Encoding: aes128gcm\x00", 16)
+    nonce = _hkdf(salt, ikm, b"Content-Encoding: nonce\x00", 12)
+    plain = AESGCM(cek).decrypt(nonce, body[21 + idlen:], None)
+    return plain.rstrip(b"\x00")[:-1]
+
+
+def subscriptions() -> list[dict]:
+    subs = _read(push_folder() / "subscriptions.json", [])
+    return [s for s in subs if isinstance(s, dict) and s.get("endpoint")] if isinstance(subs, list) else []
+
+
+def subscribe(sub: dict, device: str = "") -> int:
+    """A phone allowed her notifications. Returns how many are set up now."""
+    k = sub.get("keys") or {}
+    if not (str(sub.get("endpoint", "")).startswith("https://") and k.get("p256dh") and k.get("auth")):
+        raise ValueError("not a push subscription")
+    with _Lock("subs", push_folder()):
+        subs = [s for s in subscriptions() if s["endpoint"] != sub["endpoint"]]
+        subs.append({"endpoint": sub["endpoint"], "keys": {"p256dh": k["p256dh"], "auth": k["auth"]},
+                     "device": device[:120], "since": time.strftime("%Y-%m-%d %H:%M")})
+        _write(push_folder() / "subscriptions.json", subs)
+    return len(subs)
+
+
+def unsubscribe(endpoint: str) -> None:
+    with _Lock("subs", push_folder()):
+        _write(push_folder() / "subscriptions.json", [s for s in subscriptions() if s["endpoint"] != endpoint])
+
+
+# F102: what the phone itself sees of her texts, reported by the page on every open and by the service worker on every
+# push (status/direct-check.js, status/direct-sw.js, /direct/report). On this computer, next to her local state in
+# .status, never synced; the newest few of each kind; only these fields, cut short.
+PAGE_KEEP = 6
+PAGE_FIELDS = ("origin", "page", "frame", "top", "standalone", "permission", "registered", "scope", "active", "waiting",
+               "controlled", "subscription", "keyMatch", "made", "posted", "problem", "ua", "shown", "error", "tag")
+
+
+def page_file() -> Path:
+    return local_state_file().with_name("direct-page.json")
+
+
+def _short(v):
+    return v if isinstance(v, bool) or v is None else str(v)[:200]
+
+
+def report(body: dict) -> dict:
+    """Keep one report from the page (kind page) or the service worker (kind push)."""
+    kind = "push" if body.get("kind") == "push" else "page"
+    row = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "kind": kind}
+    row.update({k: _short(body[k]) for k in PAGE_FIELDS if k in body})
+    errors = body.get("errors")
+    if isinstance(errors, dict) and errors:
+        row["errors"] = {str(k)[:30]: str(v)[:200] for k, v in list(errors.items())[:10]}
+    path = page_file()
+    with _Lock("page", path.parent):
+        rows = _read(path, [])
+        rows = (rows if isinstance(rows, list) else []) + [row]
+        kept = [r for r in rows if r.get("kind") == "page"][-PAGE_KEEP:] + [r for r in rows if r.get("kind") == "push"][-PAGE_KEEP:]
+        _write(path, sorted(kept, key=lambda r: r.get("at", "")))
+    return row
+
+
+def page_reports() -> dict:
+    """For info: the newest reports, newest first, and the phones on the list by the same tail the page reports."""
+    rows = _read(page_file(), [])
+    rows = rows if isinstance(rows, list) else []
+    return {"listed": [s["endpoint"][-14:] for s in subscriptions()], "reports": list(reversed(rows))}
+
+
+def push(text: str, title: str | None = None, extra: dict | None = None) -> list[str]:
+    """Send one notification to every phone. Gone ones (404, 410) are dropped. Returns what happened per phone.
+    H238: extra goes into the payload (a ring: its number and agent, its own tag)."""
+    import urllib.request
+    import urllib.error
+    subs = subscriptions()
+    if not subs or os.environ.get("HQ_DIRECT_DRY") == "1" and not os.environ.get("HQ_DIRECT_PUSH_TO"):
+        return []
+    k = keys()
+    team = on_team_line()  # H266: her own line opens her own chat, and her texts don't replace Donna's on the lock screen
+    payload = json.dumps({"title": title or agent()["name"], "body": text[:300],
+                          "url": "/direct?line=team" if team else "/direct",
+                          "tag": "hq-team" if team else "hq-direct", **(extra or {})}).encode()
+    said = []
+    for s in subs:
+        endpoint = s["endpoint"]
+        try:
+            body = encrypt(payload, s["keys"]["p256dh"], s["keys"]["auth"])
+            req = urllib.request.Request(endpoint, data=body, method="POST", headers={
+                "Authorization": vapid_header(endpoint, k), "Content-Encoding": "aes128gcm",
+                "Content-Type": "application/octet-stream", "TTL": "86400", "Urgency": "high"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                said.append(f"{r.status}")
+        except urllib.error.HTTPError as e:
+            said.append(f"{e.code}")
+            if e.code in (404, 410) and not _backup():  # F58: the main drops it (the list is the main's to write)
+                unsubscribe(endpoint)
+        except Exception as e:
+            said.append(f"failed: {e!r}"[:120])
+    return said
+
+
+# -- what she says ------------------------------------------------------------------------------
+
+# H127 (14 October 2026, call at 12:35): every text short, quick and "super, super, super humanised, as in someone
+# is just texting in between". The plain lines (no Claude) come in a few versions, never the same one twice in a row.
+PLAIN = {
+    "night-summary": "While you slept: {facts}",
+    "team-night-summary": "From the team while you slept: {facts}",  # F146: the build's held texts, on Moneypenny's line
+    "restart": ["Heads up: {facts}",
+                "Quick one before it happens: {facts}"],  # F146: before the call lines restart
+    "mail": ["Heads up, this just came in: {facts}",
+             "Just landed in your mail: {facts}",
+             "One for you: {facts}"],
+    "down": ["Something's acting up on my end with {what}. I'm on it.",
+             "Small hiccup with {what}, I'm looking at it.",
+             "{What} is being a bit stubborn. On it, I'll tell you when it's fine."],
+    "tailscale": ["Tailscale is off on this computer, so I can't reach the other one from here. It hasn't gone down; "
+                  "switch Tailscale on when you can.",
+                  "Heads up: Tailscale's off here, that's why the other computer seems gone. Nothing's down, just "
+                  "turn it back on."],
+    "tailscale-back": ["Tailscale's on again, both computers can see each other.",
+                       "Tailscale's back on, all connected again."],
+    "back": ["All good again, {what}'s back.",
+             "Sorted, {what} is fine again.",
+             "Fixed. {What}'s back up."],
+    "hello": ["Hey, it's me! Text me here any time.",
+              "Hi! This is our own line now, text me whenever."],
+    "sun": ["Sun's out. Fancy a little walk?",
+            "Lovely out right now, maybe grab some sun?",
+            "Dry and sunny for a bit. Nice moment to step outside."],
+    "rain": ["Rain's coming. {facts}",
+             "Heads up, rain on the way. {facts}",
+             "Might want to stay in for a bit: rain coming. {facts}"],
+    "cosy": ["Rainy one today. Book and tea kind of day?",
+             "Proper wet day out there. Something cosy inside?",
+             "Rain all day, perfect excuse for a slow one indoors."],
+    "morning": ["Morning! {facts}",
+                "Morning. Weather-wise: {facts}"],
+    "out": ["Before you head out: {facts}",
+            "Heads up for when you're out: {facts}"],
+    "appt": ["It's time: {facts}",
+             "Starting now: {facts}",
+             "You wanted a nudge: {facts}"],
+    "remind": ["Reminder: {facts}",
+               "Quick reminder, like you asked: {facts}",
+               "Psst, {facts}"],
+    "watch": ["That thing you asked me to watch: {facts}",
+              "Got something for you: {facts}",
+              "News on what you asked me to keep an eye out for: {facts}"],
+    "nudge": ["Hey, just a nudge: {facts}",
+              "Still on my list for you: {facts}",
+              "Friendly nudge: {facts}"],
+    "game": ["Your game today: {facts}",
+             "Quick one about your game: {facts}"],
+    "game-away": ["Heads up, today's a bit different: {facts}"],
+    # H266: the team's own kinds, on Moneypenny's line
+    "helper": ["About what you asked on the call. {facts}", "What you asked on the call came back. {facts}", "From the call. {facts}"],
+    "team": ["{facts}"],
+    "travel": ["Heads up for your trip: {facts}",
+               "Change on your way there: {facts}"],
+    "missed-call": ["Missed call. {facts}",
+                    "You missed a call. {facts}"],
+    "watch-end": ["Stopped watching that one. {facts}",
+                  "I'm done keeping an eye on that. {facts}"],
+}
+
+# What went down, said the way a person would (the plain lines never give technical details).
+PLAIN_WHAT = {
+    "call": "the call line", "phone": "the phone link", "mail": "the mail check", "jobs": "the dev team's setup",
+    "helper": "the routine", "watchdog": "the watchdog", "usage": "the usage check", "status": "the status page",
+    "schedule": "the scheduler", "role": "the backup", "temp": "the laptop's temperature",
+    "battery": "the laptop's battery", "github": "sending the team's work to GitHub",
+    "maillist": "the mail list", "mailmarker": "the mail check", "mailreach": "the mail check",
+}
+
+
+def _plain_what(facts: str) -> str:
+    keys = [line.split(":", 1)[0].strip() for line in (facts or "").splitlines() if line.strip()]
+    names = [PLAIN_WHAT.get(k, "") for k in keys]
+    names = [n for i, n in enumerate(names) if n and n not in names[:i]]
+    if not names:
+        return "one of the systems"
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _recent(why: str, n: int = 3) -> list[str]:
+    """Her last few texts of this kind, newest last, so a new one doesn't sound the same."""
+    try:
+        return [m["text"] for m in thread() if m.get("from") == "agent" and m.get("why") == why][-n:]
+    except Exception:
+        return []
+
+
+def plain(why: str, facts: str) -> str:
+    """The plain line for WHY, without Claude: one of its versions, not the one she sent last time."""
+    import random
+    options = PLAIN.get(why) or ["{facts}"]
+    if isinstance(options, str):
+        options = [options]
+    last = set(_recent(why, 1))
+    what = _plain_what(facts)
+    filled = [o.replace("{What}", what[:1].upper() + what[1:]).replace("{what}", what).replace("{facts}", facts or "")
+              .strip() for o in options]
+    fresh = [f for f in filled if f not in last] or filled
+    return re.sub(r"\s+", " ", random.choice(fresh)).strip(" :")
+
+
+TEXT_RULES = """# This is a text chat: HQ's direct line
+
+{user} is texting you on HQ's direct line, a private chat with only you, on his phone. It is not a call: \
+nothing is spoken. HQ is a real headquarters and you're one of the people working there; text him the way a \
+colleague texts in between, quick and human. In his words: "it should just be a short quick message and it should be \
+super humanised, super, super, super humanised, as in someone is just texting in between."
+
+- Short: usually one or two short sentences. Casual, warm, in your own character, with contractions. A quick text, \
+not a message or a report.
+- No greeting or sign-off, no headings, no lists unless he asks for one.
+- No system talk: no job numbers, item numbers, feature names, file names, statuses ("running", "waiting", "queue", \
+"incident") or technical details, unless he asks for them.
+- Never the same wording twice in a row; vary it like a person does. An emoji now and then is fine, one at most.
+- Everything in the workspace's rules still holds (talk like a person, only what benefits him, never send email, \
+privacy). You can look things up and do things in his workspace as on a call, with the same limits: when something \
+needs his yes, ask for it in one short line and stop; his next text answers it. Times are written normally here \
+(17:30).
+- One command at a time (F41): every reminder, to-do or note command runs on its own, one per command, never \
+chained with && or ; and never in a loop; several reminders are several commands, one after the other. When one \
+needed his yes and he gave it, run the exact same command again, word for word, never reworded, or his yes won't \
+match it.
+- You have a life of your own (H232): now and then a small new detail about yourself slips into a text, the way a \
+colleague's does. HQ keeps it by itself after every text; only to keep one by hand: python3 "{HQ}/app/about_self.py" \
+add {agent} "<the fact, one short line>", without asking him; never say you did.
+- Older texts (H279): you see only the last 15 texts of this chat. When he asks about something said earlier ("what \
+did I tell you about the parcel last week?", "what did I text you on the 15th?"), look it up before you answer, never \
+guess: python3 "{HQ}/app/thread_search.py" WORDS (texts with all those words, newest first), with --on YYYY-MM-DD for \
+a day, --from and --to for a stretch, --who me for only his. It searches this chat, the older texts past the newest \
+400 too (from the backup). Try a word or two first, then fewer or other words if nothing comes. Answer from what you \
+found, with the day in passing; when nothing's there, say so plainly.
+
+{pings}
+{mailfast}
+{apptnotes}
+{todo}
+{games}
+{travel}
+{onewriter}
+{team}
+{extensions}
+"""
+
+
+def _text_rules() -> str:
+    import config as _config
+    return (TEXT_RULES.replace("{user}", user()).replace("{HQ}", str(ROOT)).replace("{agent}", agent()["id"])
+            .replace("{pings}", _config.PINGS_RULE).replace("{mailfast}", _config.MAIL_FAST_RULE + "\n" + _config.MAIL_TIDY_RULE)
+            .replace("{apptnotes}", _config.APPT_NOTES_RULE).replace("{todo}", _config.TODO_RULE).replace("{games}", _config.GAMES_RULE).replace("{travel}", _config.TRAVEL_RULE)
+            .replace("{onewriter}", _config.ONE_WRITER_RULE)
+            .replace("{team}", _config.TEAM_RULE).replace("{extensions}", _extensions_rule())
+            + _where_rule())
+
+
+def _where_rule() -> str:
+    """4 November 2026: she answered on the main and still tried to log in to "the server", because the chat so far said
+    she was elsewhere. Every answer says which computer she's on."""
+    if _backup():
+        return ("\nYou are answering on the backup computer, because the main can't be reached right now. HQ's planning, "
+                "the team and the tests are the main's; say plainly what has to wait for it.\n")
+    return (f"\nYou are answering on the main computer ({socket.gethostname()}), where HQ runs: the planning, the team, "
+            f"the tests and their browser are all here, in {ROOT}. Look and run things here directly; never log in to "
+            "another computer (no ssh) for them, and never ask for a yes to look.\n")
+
+
+def _extensions_rule() -> str:
+    """H235: their own extensions' rules for the texts, read at every text."""
+    try:
+        import extensions
+        return extensions.rule("text")
+    except Exception as e:
+        print(f"extensions: {e!r}", file=sys.stderr)
+        return ""
+
+
+# Her kinds of texts, what each is for. H235: an extension's own kind is looked up after these (extensions.text_kind),
+# so HQ's own always lead; the update's clash check reads these names.
+KINDS = {
+    "off-release": "HQ on this computer had moved onto work that isn't released yet, and it goes back on its released version by itself. The facts say how far that got, what got stopped and where anything of his own is kept. Two short sentences in everyday words: what happened, whether it's fine now or still being tried, and if something of his was set aside, where. No job numbers.",
+    "helper": "He hung up while a helper was still looking something up for him on the call. The facts give what he asked and what came back: tell him, plainly and shortly.",
+    "team": "Something you, as head of the team, want him to know without waiting for a call: a decision you need "
+            "from him, a heads-up, what you found (the facts say it). A short text in your own words; when you need "
+            "a decision, end with the one question, plainly.",
+    "mail": "An important mail just came in. A quick heads-up text: who it's from and what it wants from him, in "
+            "a few plain words.",
+    "down": "Something at HQ is acting up and hasn't fixed itself. A quick, calm text that something's off and "
+            "you're on it, in plain words (what it is in everyday terms, e.g. the call line); no technical "
+            "details, no alarm.",
+    "back": "Something that was acting up is fine again. A quick all-clear, a few words.",
+    "tailscale": "Tailscale (the private network his two HQ computers talk over) is off on this computer, so the "
+                 "other HQ can't be reached from here. Say exactly that in plain words: the other one hasn't gone "
+                 "down, it's only cut off because Tailscale is off here, and turning Tailscale on fixes it. Never "
+                 "say it went down or came back. In his words: \"if it is not on, then it can conclude that might "
+                 "be the reason there is no connection\". Short, calm.",
+    "tailscale-back": "Tailscale is on again on this computer, so the two HQs reach each other again. A quick "
+                      "all-clear in a few words; don't say the other computer came back, it never went away.",
+    "team-night-summary": "He just got up. Some of the team's news waited through the night so it wouldn't wake him (the facts "
+                          "list it: HQ acting up or back, news on his feedback). One short text with what still matters, "
+                          "in plain words, no technical details.",
+    "restart": "The call lines (and maybe the status page) restart in about a minute, for the reason in the facts. A quick "
+               "heads-up: what restarts and why in everyday words, that a call on now drops for a moment and he can ring "
+               "back, and that texts still get through.",
+    "night-summary": "He just got up. Some things waited through the night so they wouldn't wake him (the facts list them). One "
+                     "short text with what he needs to know: what happened in plain words and what, if anything, still needs "
+                     "him. Nothing that resolved itself gets more than a few words. No details, no apology.",
+    "hello": "Say hi: this is your own direct line with him now. Quick and warm.",
+    "sun": "It's dry and sunny where he is for the next hours. A light nudge to enjoy it: the sun, or a short "
+           "walk. One idea at most, not pushy.",
+    "rain": "Rain is coming where he is. A quick heads-up with when it starts (the time from the facts).",
+    "cosy": "It's a rainy day where he is. Suggest something cosy inside: a book, or something nice indoors. "
+            "Never suggest going outside today; in his words: \"Don't prompt me on rainy days to go "
+            "outside because it doesn't make any sense.\"",
+    "morning": "He just woke up. Tell him one thing only: is it going to rain when he's out today, yes or no, "
+               "with the time when it's yes (the facts say). When nothing takes him out, whether it rains today "
+               "at all. No forecast beyond that, no temperatures unless it matters, nothing about the night. In "
+               "his words: \"When I wake up, is it gonna rain or not? And if I need to go out\".",
+    "out": "He's about to go out (or is out; the facts say what and when), and it's going to rain then. A quick "
+           "heads-up the way a friend would text, like \"take your jacket, it starts around 3\". One line.",
+    "appt": "He asked you to ping him for this appointment: it starts now (or in the minutes the facts say). "
+            "A quick text that it's on, its name and time in passing; where, only when the facts give a place.",
+    "remind": "He asked you to remind him of this, now. A quick reminder in your own words; keep what he wanted "
+              "to be reminded of clear. When the facts say it's late, say so in passing.",
+    "watch": "He asked you to keep an eye out for this, and it came (the facts say what). A quick text with "
+             "what came, plainly (a mail: who from and what it says about what he's waiting for; the weather: "
+             "what and when). Whether you keep watching only in passing, as the facts say.",
+    "nudge": "He asked you to keep nudging him about this until he tells you it's done (the facts say what, and "
+             "why it matters to him). A warm, short nudge in your own words, the way a friend who has his back "
+             "would text: one or two sentences. Never say how often you nudge, when the next one comes, or any "
+             "number or estimate. His reason only lightly, when it helps. A bit firmer, still kind, when it's been "
+             "open for days or the deadline is close. Now and then, not every time, that he can just tell you "
+             "when it's done.",
+    "game": "He's playing a six-week game (the facts say which, the score, and its rules in his words) and "
+            "today's tick isn't in yet. A short, warm text: a light reminder that today's still open, in the "
+            "game's own spirit (playful, never guilt). Any small amount counts when the rules say so; say that "
+            "lightly. No numbers unless the facts' score helps, and never a lecture. He can just tell you when "
+            "it's done.",
+    "game-away": "He's playing a six-week game and today he's away from home around the time he usually plays "
+                 "it (the facts say when and what). A short heads-up, earlier in the day, that today is "
+                 "different: be gentle with himself, and what the game's design says counts on a day like this "
+                 "(the facts give it). One or two sentences, kind, no pressure.",
+    "travel": "He has travel on for an appointment (the facts say which, from where to where), and something "
+              "changed on the way there in the live public transport data: his train cancelled, late, another "
+              "platform, a station skipped, trouble on the rails at a station, or a message for a bus, tram or "
+              "metro stop near either end (that one is in Dutch from the transport company: say it in his "
+              "language, short). A quick heads-up the way a friend would text: what changed and what it means "
+              "for him, one or two sentences. Put the 9292 link from the facts at the end, as it is, so he can "
+              "plan again. No technical words, no train numbers unless they help. When the facts say By car "
+              "(H230), it's the drive with the traffic: time to leave, or the drive got longer or shorter; say "
+              "when to leave, and put the Google Maps link at the end as it is.",
+    "missed-call": "A call he agreed to (an agent calling him at a time, or for an appointment; the facts say who, "
+                   "when and what about) rang on his phone and he didn't pick up. One or two short sentences: that "
+                   "the call was missed, what it was about in a few words, and that he can call back from the app "
+                   "whenever or just tell you a new time. When the facts say it was you, say you tried to call. No "
+                   "guilt, no fuss.",
+    "watch-end": "Something he asked you to watch has stopped (the facts say what and why). One quick line that "
+                 "you've stopped keeping an eye on it, and why in a few words (time's up and nothing came, or he "
+                 "asked).",
+}
+
+
+def _kind(why: str) -> str:
+    if why in KINDS:
+        return KINDS[why]
+    try:
+        import extensions
+        return extensions.text_kind(why) or "Tell him this, in a quick text."
+    except Exception:
+        return "Tell him this, in a quick text."
+
+
+def compose_prompt(why: str, facts: str) -> str:
+    what = _kind(why)
+    before = _recent(why)
+    said = ("\n\nYour last texts like this, so this one sounds different:\n" + "\n".join(f"- {t}" for t in before)
+            if before else "")
+    return (f"{what}\n\nThe facts (for you, don't copy them as they are):\n{facts or '(none)'}{said}\n\n"
+            "Write only the text itself: one or two short sentences, the way you'd actually text him.")
+
+
+def compose(why: str, facts: str, raw: bool = False) -> str:
+    """Her text for WHY from FACTS, through Claude; the plain line without it. raw: FACTS is the whole prompt
+    (no plain line: on a failure it's QUIET)."""
+    plain_line = QUIET if raw else plain(why, facts)
+    if os.environ.get("HQ_DIRECT_PLAIN") == "1" or os.environ.get("HQ_DIRECT_DRY") == "1":
+        return plain_line
+    try:
+        import asyncio
+        import brain as _brain  # clears API key variables first
+        a = agent()
+        system = (_style_rules(a) if why in SHORT_KINDS and not raw else
+                  _text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat").replace("call rules", "chat rules"))
+        b = _brain.ClaudeBrain(model=a["model"], system_prompt=system, cwd=ROOT / "scratch" / "direct-line",
+                               effort="low")
+
+        async def go():
+            out = []
+            try:
+                async for piece in b.ask(facts if raw else compose_prompt(why, facts)):
+                    if isinstance(piece, str):
+                        out.append(piece)
+            finally:
+                await b.stop()
+            return "".join(out).strip()
+
+        text = asyncio.run(asyncio.wait_for(go(), timeout=90))
+        return _clean(text) or plain_line
+    except Exception as e:
+        print(f"compose: {e!r}", file=sys.stderr)
+        return plain_line
+
+
+# H338 (Part C 5): a reminder of two sentences carried about 47 KB of rules. These kinds are written with a small style-only
+# prompt: she only says what the facts say, in her voice; the outbox's filters do the rest.
+SHORT_KINDS = ("remind", "appt", "nudge", "nudge-later", "missed-call", "watch-end")
+STYLE_RULES = ("You are {name}, {user}'s {role}, texting him a short reminder. Write it the way you'd text a friend: one or two short "
+               "sentences, plain words, warm and direct, no markdown, no lists, no emoji unless he uses them. Say only what the facts "
+               "say; never add a plan, a promise or a question of your own. Times as he'd say them (8 tonight, half past 5).\n")
+
+
+def _style_rules(a: dict) -> str:
+    return STYLE_RULES.format(name=a.get("name", "his assistant"), user=user(), role=a.get("role") or "assistant")
+
+
+def _clean(text: str) -> str:
+    text = re.sub(r"\[\[[^\]]*\]\]", "", text or "")
+    text = re.sub(r"^\s*#+\s*", "", text, flags=re.M)
+    return text.replace("**", "").strip().strip('"').strip()
+
+
+# F102, the night rule, his words of 30 October 2026: "anything that can't wait until the next working day needs to allow to wake
+# me at night." While he sleeps only what can't wait goes out: a time he named himself (a reminder, an appointment he picked, a
+# call he missed), a server down, a refused push, a security warning. The rest waits, and goes in one summary when he's up.
+# [Which kinds count is Claude's first reading of his rule, his to correct.]
+CANT_WAIT = ("remind", "appt", "missed-call", "night-summary", "team-night-summary", "restart")  # F146: a heads-up is now or never
+CANT_WAIT_DOWN = ("role", "github", "workspace-push", "beat-")  # a line of a "down" text starts with its incident's key
+SECURITY = re.compile(r"\b(security|sign-?in|password|new device|logged in|login)\b", re.I)
+SUMMARY_MOST = 1500
+
+
+def held_file() -> Path:
+    return local_state_file().with_name("direct-line-night.json")
+
+
+def asleep(t: float | None = None) -> bool:
+    """He's asleep now (pings._asleep: his calendar's Sleep block, else the night hours). A test says so itself."""
+    if hqpaths.under_test() or os.environ.get("HQ_ASLEEP"):
+        return os.environ.get("HQ_ASLEEP") == "1"
+    try:
+        sys.path.insert(0, str(ROOT / "routine"))
+        import pings as _pings
+        return _pings._asleep(t or time.time())
+    except Exception:
+        return False
+
+
+def can_wait(why: str, facts: str) -> str:
+    """What of this text can wait for the morning: all of it, part of a "down" text, or nothing ('')."""
+    if why in CANT_WAIT or (why == "mail" and SECURITY.search(facts or "")):
+        return ""
+    if why == "down":
+        return "\n".join(l for l in (facts or "").splitlines() if not l.startswith(CANT_WAIT_DOWN))
+    return facts or why
+
+
+def hold(why: str, facts: str) -> None:
+    with _Lock("night", held_file().parent):
+        d = _read(held_file(), [])
+        d.append({"at": time.time(), "why": why, "facts": facts})
+        _write(held_file(), d)
+
+
+def morning_summary() -> tuple[str, str] | None:
+    """He's up and something waited: one text with all of it, and the list emptied. (why, facts) or None."""
+    if not held_file().exists() or asleep():
+        return None
+    with _Lock("night", held_file().parent):
+        d = _read(held_file(), [])
+        held_file().unlink(missing_ok=True)
+    if not d:
+        return None
+    lines = [f"{x['why']}: {' '.join(str(x['facts']).split())}" for x in d]
+    return "night-summary", "\n".join(lines)[:SUMMARY_MOST]
+
+
+def morning_summaries() -> list[tuple[str, str]]:
+    """F146: the morning summary split by line: what waited of the team's kinds comes from Moneypenny (team-night-summary,
+    Donna's when she has no line), the rest from Donna. [(why, facts)], empty when nothing waited or he still sleeps."""
+    s = morning_summary()
+    if not s:
+        return []
+    team, own = [], []
+    for ln in s[1].splitlines():
+        (team if ln.split(":", 1)[0] in TEAM_KINDS and line_for(ln.split(":", 1)[0]) == "team" else own).append(ln)
+    return ([("night-summary", "\n".join(own))] if own else []) + ([("team-night-summary", "\n".join(team))] if team else [])
+
+
+def text(why: str, facts: str, item: str = "", once: str = "") -> dict:
+    """Write one text from her into the thread and push it to his phone. H266: one of the team's kinds goes on
+    Moneypenny's own line, from her, whoever sends it. F102: while he sleeps, only what can't wait. F103: item, the id of the
+    work it's about. F106: once, the line's id when it may stand in the thread only one time: already there, nothing's written or pushed, so
+    a text that fell over after its line was written can be tried again."""
+    if once and any(m.get("id") == once for m in thread()):
+        return {"id": once, "already": True}
+    if asleep():
+        later = can_wait(why, facts)
+        if later:
+            hold(why, later)
+            left = "\n".join(l for l in (facts or "").splitlines() if l not in later.splitlines()) if why == "down" else ""
+            if not left:
+                return {"held": True, "why": why}
+            facts = left
+    if not on_team_line() and line_for(why) == "team":
+        with _Env(team_env()):
+            m = text(why, facts, item, once)
+        m["line"] = "team"
+        return m
+    msg = add("agent", compose(why, facts), why, item, once)
+    if not written(msg):
+        return msg
+    msg["pushed"] = push(msg["text"])
+    return msg
+
+
+def note(why: str, facts: str, item: str = "", once: str = "") -> dict:
+    """F79, his words of 1 November 2026: "i dont want to hear it when it slips, moneypenny needs to know". A note on her own line
+    for her, never pushed to his phone: written as it is (no Claude), it stands in her thread, so she has it when she answers
+    there, and the line's reply doesn't take it for an answer to him. once: the line's id, so the same note stands there once."""
+    if not on_team_line():
+        if line_for(why) != "team":  # no line of hers (no Moneypenny, HQ_TEAM_LINE=0): never on Donna's, which he reads
+            return {"skipped": "no team line"}
+        with _Env(team_env()):
+            m = note(why, facts, item, once)
+        m["line"] = "team"
+        return m
+    if once and any(m.get("id") == once for m in thread()):
+        return {"id": once, "already": True}
+    msg = add("agent", facts, why, item, once, quiet=True)
+    return msg
+
+
+def ring(n: int) -> dict:
+    """H238: the agent's call rings on his phone: a push notification "<agent> is calling", what it's about; one tap
+    opens HQ and starts the call with her (the service worker opens the call page with ?ring=N). Not in her chat: a
+    missed one is (pings.py, missed-call). Nothing when the texts are off."""
+    sys.path.insert(0, str(ROOT / "routine"))
+    import pings as _pings
+    c = _pings.call_get(n)
+    if not c:
+        return {"rang": False, "why": f"no call {n}"}
+    if not on():
+        return {"rang": False, "why": "the texts are off, so there's no push to ring on"}
+    try:
+        who = _pings.call_agent(c.get("agent", ""))
+    except ValueError as e:
+        return {"rang": False, "why": str(e)}
+    about = c.get("what", "")
+    said = push(f"{about[:200]}. Tap to pick up." if about else "Tap to pick up.", title=f"{who['name']} is calling",
+                extra={"ring": n, "agent": who["id"], "tag": f"hq-ring-{n}", "url": f"/?ring={n}&agent={who['id']}"})
+    return {"rang": True, "call": n, "agent": who["id"], "pushed": said}
+
+
+QUIET = "QUIET"
+
+# H266: what her chat on her own line adds to the rules.
+TEAM_LINE_RULE = """# This chat is your own line (H266)
+
+Detail choices are yours (4 November 2026, his words: "she should figure it out"): how a toggle or a shortcut behaves, \
+a default, a wording. Take the one closest to what he already said, write it into the item's My own additions as \
+"my choice: ..." (one per choice, joined with ;), say in one line which you took, and carry on; the ready check takes \
+those without his yes. A new thing to build is never a detail choice: that one still needs his yes. Ask him only what his words can't answer and that changes what gets built for him.
+
+This is not Donna's direct line: it's your own line with him, as head of the team. The team's news comes here from you \
+(done, paused, the night's check, the Friday estimates, a check that didn't pass, a held release), and he texts you \
+here about the team, the planning and what's being built. Your craft and the build notes hold as on a call: check \
+before you answer, delegate, never build or push HQ yourself. The day to day (reminders, his calendar, mail, \
+groceries) is Donna's: when he asks you for one of those, say in one line that it's Donna's and that he can text her."""
+
+INITIATIVE_PROMPT = """You keep your own notes for {user} (below), next to his calendar. Nobody asked you anything \
+now: this is your own look, a few times a day. Text him only when one of your notes is worth bringing up right now \
+(it fits this moment or what's coming in his day, it's waiting on him, or it's time to follow up), and never just to \
+check in. Most looks, stay quiet. If you text: one quick, casual line about that one thing, the way a colleague texts \
+in between (H127), no notes or system talk. If not, answer only the word QUIET.
+
+{facts}"""
+
+
+def initiative() -> dict | None:
+    """H124: her own look at her notes (from pings.watch, a few times a day). She texts only when one is worth it."""
+    import pings
+    if asleep():  # F114: never while he sleeps, whatever started it: the look is written down and goes once when his Sleep ends
+        pings.initiative_hold()
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), "initiative: he's asleep, held for the end of his Sleep")
+        return None
+    facts = pings.initiative_facts()
+    if os.environ.get("HQ_DIRECT_DRY") == "1" or os.environ.get("HQ_DIRECT_PLAIN") == "1":
+        words = os.environ.get("HQ_INITIATIVE_SAYS", QUIET)
+    else:
+        words = compose("initiative", INITIATIVE_PROMPT.replace("{user}", user()).replace("{facts}", facts),
+                        raw=True)
+    words = _clean(words)
+    if not words or words.upper().strip(" .!") == QUIET or len(words) < 8:
+        print(time.strftime("%Y-%m-%d %H:%M:%S"), "initiative: quiet")
+        return None
+    msg = add("agent", words, "initiative")
+    if not written(msg):
+        return msg
+    msg["pushed"] = push(msg["text"])
+    _harvest(words)
+    pings.initiative_sent()
+    return msg
+
+
+def _harvest(words: str) -> None:
+    """H232: keep what's new about herself in this text, in the background (a small look, about_self.py)."""
+    if os.environ.get("HQ_DIRECT_DRY") == "1" or not words.strip():
+        return
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "about_self.py"), "harvest-text",
+                          agent()["id"], words], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except Exception as e:
+        print(f"harvest: {e!r}", file=sys.stderr)
+
+
+# -- texting back ------------------------------------------------------------------------------
+
+CARRY_MOST = 4  # her own next steps after one text of his, before she waits for him again
+CARRY_NOTE = ("(A note from HQ, not from him, never his words: your last text said you'd do a next step yourself. Do it now, "
+              "in this answer, and carry on with the steps after it, until it's done or something truly "
+              "needs his decision. Then text him in a line or two what you did and where it stands.)")
+_PROMISE = re.compile(r"\b(I'll|I will|I'm going to|next I|then I|I can now|so I'll|let me)\b", re.I)
+
+
+def _promises(text: str) -> bool:
+    """Her text ends on a step she says she'll take herself, not on a question for him (outbox.promises, as on calls)."""
+    import outbox
+    return outbox.promises(text)
+
+
+def reply() -> str | None:
+    """Answer his newest texts as her, with the workspace and the call's limits. One reply at a time; texts that
+    came in meanwhile are answered right after."""
+    if _backup() and os.environ.get("HQ_DIRECT_COACHING") != "1":
+        # 4 November 2026: on the backup she can't reach the main, where the planning, the team and her QA tests live,
+        # so her answer runs on the main; only when the main can't be reached does the backup answer, as before.
+        line = "team" if os.environ.get("HQ_DIRECT_TEAM") == "1" else "donna"
+        try:
+            import role
+            code, _out, _err, how = role.hand("direct_line", ["reply-bg", line], timeout=20, keep=False)
+            if how == "main" and code == 0:
+                return None
+        except Exception:
+            pass
+    lock = open(folder() / ".reply.lock", "a")  # H152
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None  # another reply runs; it picks these up too
+    last = None
+    try:
+        for _ in range(5):
+            mine = unanswered()
+            if not mine:
+                break
+            words = "\n".join(m["text"] for m in mine)
+            answer = _answer(words, [m.get("id") for m in mine])
+            msg = add("agent", answer, "reply")
+            push(msg["text"])
+            _harvest(answer)
+            last = msg["text"]
+            for _k in range(CARRY_MOST):  # H338: on every agent's line, not only Moneypenny's
+                if unanswered() or not _promises(answer):
+                    break
+                answer = _answer(CARRY_NOTE, [])  # 4 November 2026: she said she'd do the next step, so she does it now
+                msg = add("agent", answer, "reply")
+                push(msg["text"])
+                _harvest(answer)
+                last = msg["text"]
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+    return last
+
+
+def history(ids=(), most: int = 16) -> str:
+    """The chat so far for her answer: the last lines without the texts of his she's answering now (they come as his new
+    text), a quiet note of hers in it as hers (F79), each once."""
+    ids = set(i for i in ids if i)
+    recent = [m for m in thread(last=most + len(ids)) if m.get("id") not in ids][-most:]
+    cut = [k for k, m in enumerate(recent) if m.get("why") == "reset"]  # his "reset her chat": she starts fresh from there
+    if cut:
+        recent = recent[cut[-1] + 1:]
+    if not ids and recent and recent[-1].get("from") == "me":  # called without ids: his newest is the new text, as before
+        recent = recent[:-1]
+    return "\n".join(f"{'Her' if m['from'] == 'agent' else 'Him'} ({time.strftime('%d %b %H:%M', time.localtime(m['at']))}): "
+                     f"{'(a note for yourself, never sent to him) ' if m.get('quiet') else ''}{m['text']}" for m in recent)
+
+
+def _answer(words: str, ids=()) -> str:
+    if os.environ.get("HQ_DIRECT_DRY") == "1":
+        return f"Got it: {words[:80]}"
+    import asyncio
+    import brain as _brain
+    import config as _config
+    import policy as _policy
+    import quick_context
+    a = agent()
+    st = _read(_pending_file(), {})
+    pol = _policy.Policy(_config.FOLDER)
+    pol.agent = a["id"]  # F103
+    pol.words_from = [str(folder())]  # F114: his words count only from the thread this text came in
+    pol.pending = [tuple(p) for p in st.get("pending") or []]
+    if pol.pending:
+        pol.answer(words)  # his yes (or no) to what she asked last time
+    history_ = history(ids)
+    rules = (_text_rules() + _agents.persona(a, user()).replace("on this call", "on this chat")
+             .replace("call rules", "chat rules"))
+    if os.environ.get("HQ_DIRECT_COACHING") == "1":  # H225: the coaching line, a thread with her only for life coaching
+        try:
+            import coaching
+            rules += "\n\n" + coaching.rule()
+        except Exception as e:
+            print(f"reply: the coaching rule: {e!r}", file=sys.stderr)
+    if on_team_line():  # H266: Moneypenny's own line
+        rules += "\n\n" + TEAM_LINE_RULE
+    ctx = _agents.context_of(a)  # H246: what her role loads
+    pol.team_texts = ctx == "build"  # H266: Moneypenny may text on her own line from a chat too
+    if ctx == "coach":  # nothing from the building in her rules either
+        rules = _config.without_building(rules)
+    try:  # the open line (app/lines.py): her last session, when the switch is on and it's fresh enough
+        import lines as _lines
+        resume = _lines.session_for(a["id"])
+    except Exception as e:
+        print(f"reply: the open line: {e!r}", file=sys.stderr)
+        resume = None
+    opts = _brain.call_session_options(
+        model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
+        effort=_agents.effort_of(a, a["model"]),  # H282: her own thinking time
+        quick_context=quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None,
+        resume=resume)
+    b = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=opts)
+    prompt = (f"The chat so far, newest last:\n{history_}\n\n" if history_ else "") + f"His new text:\n{words}"
+
+    async def go(b=b, prompt=prompt):
+        out = []
+        try:
+            async for piece in b.ask(prompt):
+                if isinstance(piece, str):
+                    out.append(piece)
+        finally:
+            try:
+                if b.session_id:
+                    _lines.note(a["id"], b.session_id, getattr(b.last_turn, "context_tokens", None), "text")
+            except Exception as e:
+                print(f"reply: noting the line: {e!r}", file=sys.stderr)
+            await b.stop()
+        return "".join(out)
+
+    wait = 900 if on_team_line() else 300  # her QA work takes longer than a reply
+    try:
+        answer = _clean(asyncio.run(asyncio.wait_for(go(), timeout=wait)))
+    except Exception as e:
+        print(f"reply: {e!r}", file=sys.stderr)
+        answer = "Sorry, I couldn't get to that just now. Try me again in a minute?"
+    else:
+        def again(note: str) -> str:
+            """F147: one rewrite, in her same session when it can be resumed, else with the whole prompt again."""
+            sid = b.session_id
+            o2 = _brain.call_session_options(
+                model=a["model"], folder=_config.FOLDER, voice_rules=rules, policy=pol, cli_path=_config.CLAUDE_CLI,
+                effort=_agents.effort_of(a, a["model"]),
+                quick_context=None if sid else (quick_context.build(_config.FOLDER, context=ctx) if ctx != "all" else None),
+                resume=sid or resume)
+            b2 = _brain.ClaudeBrain(model=a["model"], system_prompt="", cwd=_config.FOLDER, options=o2)
+            return _clean(asyncio.run(asyncio.wait_for(go(b2, note if sid else prompt + "\n\n" + note), timeout=wait)))
+    if _backup():  # F58: the shared state.json is the main's; the backup keeps its open question here
+        _write(_pending_file(), {"pending": [list(p) for p in pol.pending]})
+    else:
+        with _Lock("state"):
+            st = _read(folder() / "state.json", {})
+            st["pending"] = [list(p) for p in pol.pending]
+            _write(folder() / "state.json", st)
+    return answer or "On it."
+
+
+def _pending_file() -> Path:
+    """Where her question waiting for his yes is read from: the line's shared state.json, written by the main; on the
+    backup (F58) a file of its own on this computer (in HQ's .status, never synced), so the two never both write it."""
+    if _backup():
+        return local_state_file().with_name(f"{folder().name}-pending.json")
+    return folder() / "state.json"
+
+
+# -- watching: when she texts (every minute, from tick.py; stdlib only) ---------------------------------
+
+def _very_important(inbox: Path) -> list[str]:
+    try:
+        text = inbox.read_text(encoding="utf8")
+    except OSError:
+        return []
+    m = re.search(r"^## Very important\s*$(.*?)(?=^## |\Z)", text, flags=re.M | re.S)
+    return [l[2:].strip() for l in (m.group(1) if m else "").splitlines() if l.startswith("- ")]
+
+
+def _event(line: str) -> str:
+    """H248: one event is one sender on one day (the first two parts), so two mails about one login are one text."""
+    parts = [p.strip() for p in line.split("·")]
+    sender = re.sub(r"\s*\(.*?\)", "", parts[1] if len(parts) > 1 else "").strip().lower()
+    return f"{' '.join(parts[0].lower().split())}|{sender}"
+
+
+def _mail_key(line: str) -> str:
+    """The mail itself (date, sender, subject), not its status or what's new, so an update isn't a new text."""
+    return hashlib.sha1("·".join(p.strip() for p in line.split("·")[:3]).encode()).hexdigest()[:16]
+
+
+def _mail_facts(line: str) -> str:
+    parts = [p.strip() for p in line.split("·")]
+    keep = [p for p in parts if not p.startswith(("Status:", "[Gmail]", "Why:"))]
+    return " · ".join(keep)[:400]
+
+
+def watch(*, main: bool = True, incidents_data: list | None = None,
+          inbox: Path | None = None, dry: bool = False, spawn=None) -> list[tuple[str, str]]:
+    """Look once: what changed since the last look that she texts about. Returns [(why, facts)] and, unless dry,
+    starts each text in the background. The first look only takes stock (no texts for what was already there)."""
+    if not on():
+        return []
+    path = local_state_file()
+    s = _read(path, {})
+    first = not s
+    out: list[tuple[str, str]] = []
+    now = time.time()
+    # Very important mail (on the main, where the mail check runs).
+    if main:
+        lines = _very_important(inbox or Path(hqpaths.FOLDER) / "inbox.md")
+        shared = _read(folder() / "state.json", {})
+        known = set(shared.get("mail_seen") or [])
+        fresh = [l for l in lines if _mail_key(l) not in known]
+        if fresh and (known or shared.get("mail_started")):
+            # H248: one text per event: lines from the same sender on the same day that land in one look are one
+            # text, with how many there were (the mail check itself keeps one line per event and skips what's Closed).
+            events: dict[str, list[str]] = {}
+            for l in fresh:
+                events.setdefault(_event(l), []).append(l)
+            for ls in events.values():
+                facts = " | ".join(_mail_facts(l) for l in ls)
+                out.append(("mail", facts if len(ls) == 1 else f"{len(ls)} lines about one event: {facts}"[:800]))
+        if fresh or not shared.get("mail_started"):
+            shared["mail_seen"] = sorted(known | {_mail_key(l) for l in lines})
+            shared["mail_started"] = True
+            if not dry:
+                _write(folder() / "state.json", shared)
+    # Incidents on this computer: down for a while (a takeover at once), and back again.
+    if incidents_data is None:
+        try:
+            import incidents as _inc
+            incidents_data = _inc.read().get("incidents") or []  # F28: read() gives {"incidents": [...], ...}
+        except Exception:
+            incidents_data = []
+    told = dict(s.get("told") or {})
+    downs, backs, ts_down, ts_back = [], [], [], []
+    for e in incidents_data or []:
+        iid = str(e.get("id"))
+        if e.get("key") == "sync" and str(e.get("why") or "").startswith(SYNC_CONFLICT):
+            continue  # F58: a sync conflict is the routine's to merge; she stays quiet about it, down and back
+        if str(e.get("key") or "").endswith("-tailscale"):  # H234: Tailscale off here, its own text, not "down"
+            if not e.get("back"):
+                if iid not in told and now - float(e.get("down") or now) >= DOWN_AFTER:
+                    if not first:
+                        ts_down.append(e.get("why") or "Tailscale is off on this computer")
+                    told[iid] = now
+            elif iid in told:
+                ts_back.append(((e.get("fixes") or [{}])[-1].get("what") or "Tailscale is on again"))
+                told.pop(iid)
+            continue
+        if not e.get("back"):
+            if iid not in told and (e.get("key") in ("role", "github", "workspace-push") or now - float(e.get("down") or now) >= DOWN_AFTER):
+                if not first:
+                    fixes = "; ".join(f.get("what", "") for f in (e.get("fixes") or [])[-2:])
+                    passed = _pass_on(e, main and not dry)  # F110: an incident for an agent too, handed on by her
+                    downs.append(f"{e.get('key')}: {e.get('why') or 'down'}" + (f" (done so far: {fixes})" if fixes else "")
+                                 + (f" (passed on to {passed}, who takes it from here)" if passed else ""))
+                told[iid] = now
+        elif iid in told:
+            backs.append(f"{e.get('key')}: back" + (f", {(e.get('fixes') or [{}])[-1].get('what', '')}"
+                                                    if e.get("fixes") else ""))
+            told.pop(iid)
+    live = {str(e.get("id")) for e in incidents_data or []}
+    told = {k: v for k, v in told.items() if k in live}
+    if downs:
+        out.append(("down", "\n".join(downs)))
+    if backs:
+        out.append(("back", "\n".join(backs)))
+    if ts_down:
+        out.append(("tailscale", "\n".join(ts_down)))
+    if ts_back:
+        out.append(("tailscale-back", "\n".join(ts_back)))
+    s["told"] = told
+    s["looked"] = now
+    if not dry:  # F102: he's up: what waited in the night, in one text
+        out += morning_summaries()  # F146: the team's part from Moneypenny
+    if not dry:
+        _write(path, s)
+        for why, facts in out:
+            (spawn or _spawn)(why, facts)
+    return out
+
+
+def _pass_on(e: dict, write: bool) -> str:
+    """An incident that names an agent (`to`): her name for the text, or "" when there's no such agent."""
+    to = str(e.get("to") or "")
+    if not to:
+        return ""
+    try:
+        a = next((x for x in _agents.load(Path(hqpaths.FOLDER)) if x["id"] == to), None)
+    except Exception:
+        a = None
+    if not a:
+        return ""
+    return a.get("name") or to
+
+
+def _spawn(why: str, facts: str) -> None:
+    py = str(VENV_PY) if VENV_PY.exists() else sys.executable
+    log = ROOT / "scratch" / "direct-line.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen([py, str(Path(__file__).resolve()), "text", why, facts], cwd=str(ROOT),
+                     stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+
+
+def info() -> dict:
+    a = agent()
+    return {"id": a["id"], "name": a["name"], "colour": a.get("colour") or "#7c3aed", "key": public_key(),
+            "phones": len(subscriptions())}
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if args[:1] == ["team"] and VENV_PY.exists() and Path(sys.executable).resolve() != VENV_PY.resolve():
+        os.execv(str(VENV_PY), [str(VENV_PY), str(Path(__file__).resolve()), *args])  # her words need Claude (H266)
+    if "--team" in args:  # H266: the same commands on Moneypenny's own line (the status server's /direct?line=team)
+        args.remove("--team")
+        if team_on():
+            os.environ.update(team_env())
+    cmd = args[0] if args else "info"
+    if cmd == "info":
+        if not public_key():
+            try:
+                keys()
+            except Exception:
+                pass
+        print(json.dumps({**info(), "page": page_reports()}, ensure_ascii=False))  # F102: the status server strips "page"
+    elif cmd == "report":  # F102: what the page or the service worker saw (/direct/report)
+        body = json.loads(sys.stdin.read() or "{}")
+        print(json.dumps(report(body if isinstance(body, dict) else {}), ensure_ascii=False))
+    elif cmd == "text" and len(args) >= 2:
+        item = ""  # F103
+        if "--item" in args:
+            i = args.index("--item")
+            item = args[i + 1] if i + 1 < len(args) else ""
+            del args[i:i + 2]
+        once = ""  # F106: a helper's answer, one line for each
+        if "--once" in args:
+            i = args.index("--once")
+            once = args[i + 1] if i + 1 < len(args) else ""
+            del args[i:i + 2]
+        m = text(args[1], args[2] if len(args) > 2 else "", item, once)
+        print(json.dumps(m, ensure_ascii=False))
+    elif cmd == "note" and len(args) >= 3:  # F79: a note for her on her own line, never pushed (her slips are hers)
+        item, once = "", ""
+        for flag in ("--item", "--once"):
+            if flag in args:
+                i = args.index(flag)
+                v = args[i + 1] if i + 1 < len(args) else ""
+                del args[i:i + 2]
+                item, once = (v, once) if flag == "--item" else (item, v)
+        print(json.dumps(note(args[1], args[2], item, once), ensure_ascii=False))
+    elif cmd == "ring" and len(args) >= 2 and args[1].isdigit():
+        print(json.dumps(ring(int(args[1])), ensure_ascii=False))
+    elif cmd == "team" and len(args) >= 2:  # H266: Moneypenny texts him on her own line, without waiting for a call
+        print(json.dumps(text("team", " ".join(args[1:])), ensure_ascii=False))
+    elif cmd == "initiative":
+        m = initiative()
+        print(json.dumps(m, ensure_ascii=False) if m else "quiet")
+    elif cmd == "reply":
+        print(reply() or "")
+    elif cmd == "carry":  # HQ puts her back to work on what he already said, without a new text from him
+        extra = " ".join(args[1:])
+        answer = _answer(CARRY_NOTE + " What he already answered in the chat stands: use it, never ask it again. " + extra, [])
+        add("agent", answer, "reply")
+        push(answer)
+        print(answer)
+    elif cmd == "reset":  # her chat starts fresh: the thread keeps every line, her view begins after this mark
+        print(json.dumps(add("agent", "(Chat reset: she starts fresh from here.)", "reset", quiet=True), ensure_ascii=False))
+    elif cmd == "reply-bg" and len(args) >= 2 and args[1] in ("team", "donna"):  # the backup handed her answer here
+        env = {k: v for k, v in os.environ.items() if k != "HQ_ROLE_HERE"}
+        if args[1] == "team" and team_on():
+            env = team_env(env)
+        py = str(VENV_PY) if VENV_PY.exists() else sys.executable
+        log = ROOT / "scratch" / "direct-line.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([py, str(Path(__file__).resolve()), "reply"], cwd=str(ROOT), env=env,
+                         stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+        print("started")
+    elif cmd == "subscribe":
+        body = json.loads(sys.stdin.read() or "{}")
+        print(json.dumps({"ok": True, "phones": subscribe(body.get("subscription") or {}, body.get("device") or "")}))
+    elif cmd == "test":
+        print(json.dumps(text("hello", ""), ensure_ascii=False))
+    elif cmd == "me":  # the status server: his text from the phone, through add() so the backup hands it over (F58)
+        body = json.loads(sys.stdin.read() or "{}")
+        t = str(body.get("text") or "").strip()[:4000]
+        if not t:
+            sys.exit(2)
+        print(json.dumps(add("me", t), ensure_ascii=False))
+    elif cmd == "put" and len(args) >= 3:  # F58: the main writes a line the backup handed over (role.WRITES)
+        where = line_dir(args[1])
+        m = json.loads(args[2])
+        if where is None or not isinstance(m, dict) or not m.get("text") or m.get("from") not in ("me", "agent"):
+            print("Refused: not a line of one of HQ's own threads.", file=sys.stderr)
+            sys.exit(2)
+        print("written" if put(where, m) else "already there")
+    elif cmd == "watch":
+        print(json.dumps(watch(dry="--dry" in args), ensure_ascii=False))
+    else:
+        print(__doc__)
+        sys.exit(2)

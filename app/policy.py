@@ -1,0 +1,1595 @@
+"""What HQ may do on a call without asking, what it must ask for, and what never.
+
+One place, readable top to bottom. Every tool call of the call's Claude session goes
+through decide(); the brain wires it in twice:
+
+- a PreToolUse hook, which sees every call, also ones that a settings "allow" rule would
+  let through without asking (the folder's settings.local.json allows `Bash(git add *)`,
+  which would also allow `git add -A`);
+- can_use_tool, the SDK's permission prompt, for whatever still reaches a prompt.
+
+The three answers:
+  ALLOW  go ahead.
+  ASK    HQ asks the user out loud ("Can I …? Say yes or no."). The call is refused
+         for now; the next thing they say decides. A clear yes approves exactly that
+         call once (same tool, same input), and Claude makes it again.
+  DENY   never, not even with a yes.
+
+Two switches: unattended (after hang-up: nobody to ask, so ASK means no) and dry_run
+(tests: no file changes, no git, and even a yes doesn't let a change through).
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+# M1: the routine's scripts a call may run (the queue, the usage, lid-closed sleep) are HQ's own.
+HQ_ROUTINE = Path(os.path.realpath(Path(__file__).resolve().parent.parent / "routine"))
+# H65: HQ itself (the app: its code, logs and the status page's data). A call reads it freely, like the
+# workspace; changing anything in it still asks.
+HQ_ROOT = Path(os.path.realpath(Path(__file__).resolve().parent.parent))
+
+
+def _slug(path) -> str:
+    """How Claude Code names a working folder's own place under ~/.claude/projects."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(path))
+
+
+# F60: a call's tool answer over the Claude SDK's message limit kills the session without a word. A whole
+# read of a file over this size is cut to a part instead: the refusal says so and how to read a part.
+BIG_FILE_BYTES = 400_000
+
+
+def _too_big(path: str, inp: dict | None = None) -> str | None:
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    if size <= BIG_FILE_BYTES:
+        return None
+    limit = (inp or {}).get("limit")
+    if limit:
+        # Fable clean-up (27 October 2026): a Read with offset and limit is judged on the bytes of those lines, not the
+        # whole file. The planning's rows are up to 10 KB each, so "a few hundred lines" of it is still most of the file.
+        try:
+            offset, limit = max(int((inp or {}).get("offset") or 1), 1), int(limit)
+            got = 0
+            with open(path, "rb") as f:
+                for n, line in enumerate(f, 1):
+                    if n < offset:
+                        continue
+                    if n >= offset + limit:
+                        break
+                    got += len(line)
+        except (OSError, ValueError, TypeError):
+            got = size
+        if got <= BIG_FILE_BYTES:
+            return None
+        fit = max(1, int(limit * BIG_FILE_BYTES / got))
+        return (f"{Path(path).name}: those {limit} lines are {got // 1000} KB, too much for one read on a call (the "
+                f"lines are long). Read at most about {fit} lines at a time, or grep just the row you need; the open items on the "
+                f"planning are python3 \"{HQ_ROUTINE / 'planning_board.py'}\" --words.")
+    return (f"{Path(path).name} is {size // 1000} KB, too big to read whole on a call. Cut to a part: "
+            f"read it with offset and limit (a few hundred lines), or grep the line you need; the open items on the planning "
+            f"are python3 \"{HQ_ROUTINE / 'planning_board.py'}\" --words.")
+
+
+def tool_output(path: str, folder: Path) -> bool:
+    """H277: a file where a call's Claude session saved a long tool output (…/<session>/tool-results/…), under
+    the projects folder of the workspace or HQ. Reading it back is reading what the call already read."""
+    try:
+        real = Path(os.path.realpath(Path(path).expanduser()))
+        base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+        base = Path(os.path.realpath(base))
+        rel = real.relative_to(base).parts
+    except (ValueError, OSError):
+        return False
+    slugs = {_slug(folder), _slug(HQ_ROOT), _slug(HQ_ROOT / "workspace")}
+    return len(rel) >= 4 and rel[0] in slugs and rel[2] == "tool-results" and ".." not in rel
+
+
+def one_writer(rel: str) -> bool:
+    """H203: a workspace file only the main writes (role.ONE_WRITER). Never raises."""
+    try:
+        import sys
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import role
+        return role.one_writer(rel)
+    except Exception:
+        return False
+
+
+def is_backup() -> bool:
+    """H56.3: this HQ is the backup now (routine/role.py; alone it's always main). Never raises."""
+    try:
+        import sys
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import role
+        return role.is_backup()
+    except Exception:
+        return False
+# H65: the status page's server, on this computer only. A call may read its pages (GET), nothing else.
+STATUS_HOSTS = ("localhost", "127.0.0.1")
+STATUS_PORT = os.environ.get("HQ_STATUS_PORT", "4758")
+CURL_SAFE_FLAGS = {"-s", "-S", "-sS", "-Ss", "-f", "-fs", "-sf", "-fsS", "-sSf", "-L", "-m", "--max-time",
+                   "--silent", "--show-error", "--fail", "--compressed", "-g", "--globoff"}
+
+ALLOW, ASK, DENY = "allow", "ask", "deny"
+
+# F99, piece 1 of the foundation (30 October 2026, his words: "so we need to do everything together here"): the guards
+# around his own life in code, not in instructions. The vision, the map and the rules ask, on a call, in a text and after
+# a call (nobody to ask there, so no). The files with a script of their own are refused whatever the tool, with the way
+# in named: that script takes the lock and keeps the log, so a change there can be followed.
+VISION_FILES = {"my-answers.md", "day-in-the-life.md", "day-in-the-life-stories.md", "lifestyle-design.md", "vision.md",
+                "map.md", "rules.md"}  # and every CLAUDE.md
+_APP = HQ_ROUTINE.parent / "app"
+WAYS_IN = {
+    "hq/roadmap.md": (f"the status block: python3 \"{HQ_ROUTINE.parent / 'status' / 'set-status.py'}\"; the planning's rows are "
+                      "changed by him with Claude Code in a chat of his own"),
+    "hq/sprint.json": "nothing from a call: the planning's ranks and tags are read only here",
+    "challenges.md": f"python3 \"{_APP / 'todo.py'}\"",
+    "inbox.md": (f"python3 \"{HQ_ROUTINE / 'handover.py'}\" edit inbox.md "
+                 f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}'"),
+    "hq/notes.md": f"python3 \"{_APP / 'notes.py'}\" (add, clear, restore)",
+    "hq/games.json": f"python3 \"{_APP / 'games.py'}\"",
+    "hq/lists.json": f"python3 \"{_APP / 'lists.py'}\"",
+    "hq/coaching.json": f"python3 \"{_APP / 'coaching.py'}\"",
+    "hq/calendar.json": f"python3 \"{HQ_ROUTINE / 'pings.py'}\", and the calendar connector for the calendar itself",
+    "hq/calendar-todo.json": f"python3 \"{_APP / 'todo.py'}\" (plan, unplan)",
+    "hq/calendar-marks.json": "the page's own marks",
+    "hq/mistakes.jsonl": "nothing from a call: it's kept as it is",
+    "hq/trail.jsonl": "nothing from a call: it's kept as it is",
+    "hq/features.json": f"python3 \"{_APP / 'features.py'}\" on|off NAME",
+}
+ABOUT_WAY = f"python3 \"{_APP / 'about_self.py'}\" add AGENT \"FACT\""
+# F114 (2 November 2026, his words on the status page: "The doors hold on calls and texts too ... one wall, not two"): the same
+# tiers on a call and in a text. The coaching log has its script (the lock,
+# and on the backup the main writes it); the after-call run still writes it itself, alone, as before.
+LOG_REL = "coaching/log.md"
+LOG_WAY = (f"python3 \"{HQ_ROUTINE / 'handover.py'}\" edit coaching/log.md "
+           f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}' (each old text once, all or nothing, with the log's lock)")
+# His own setup, which a cycle reads and never writes: the agents' settings and the handbook, what HQ reads about him, the backend's
+# switches. On a call or in a text a change asks him first, like his vision; through the shell it's refused (an Edit he says yes to).
+HIS_SETUP = re.compile(r"^(me\.md|hq/backend\.json|hq/agents/(?![^/]+-about-herself\.md$)[^/]+)$")
+# Written only by HQ's own programs: never changed from a call or a text.
+PROGRAM_STATE = {"hq/agents/cycles-state.json": "it's kept as it is; nothing from a call or a text changes it"}
+_LEDGER = re.compile(r"^hq/(?:ledger/([a-z0-9-]+?)(?:[.-][^/]*)?|notes-([a-z0-9-]+)\.md)$")
+# What proves his words is written only by HQ: a call or a text never changes a transcript or a thread.
+_PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
+_ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
+# The same files through the shell: a redirect, sed -i, tee, a copy or move over them, a Python one-liner, a git restore.
+_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|(?<![\w-])lists\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|(?<![\w-])features\.json|"
+                 r"calendar-todo\.json|calendar-marks\.json|thread\.jsonl|[\w-]*-about-herself\.md)")
+_SHELL_WRITE = re.compile(
+    rf">>?\s*[\"']?[^\s\"'|;&]*{_GUARDED_NAME}"
+    rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{_GUARDED_NAME}"
+    rf"|\btee\b[^|;&]*{_GUARDED_NAME}"
+    rf"|\b(?:cp|mv|rm|ln|truncate|dd|rsync|install|touch|chmod)\b[^|;&]*{_GUARDED_NAME}"
+    rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{_GUARDED_NAME}", re.I)
+# Code handed to python -c that names these files counts only when it writes (F114's reading): a json.load of calendar.json
+# on a call is a read, and refusing it left Donna saying the calendar "wouldn't open" (4 November 2026).
+# F114: his own setup and the log through the shell, refused also with a yes: the agents' settings (the mail switch is in them),
+# their state, the handbook, me.md, the backend's switches and the coaching log. An Edit he says yes to, or the log's script.
+_HIS_NAME = (r"(?:(?<![\w-])cycles(?:-state)?\.json|(?<![\w-])backend\.json|(?<![\w-])handbook\.md|(?<![\w-])me\.md|(?<![\w-])agents\.json|"
+             r"(?<![\w-])log\.md|hq/agents/[^\s\"'|;&]+)")
+
+
+# F114: what in code handed to python -c (as shellread.ran leaves it: no quotes, no brackets) writes or removes a file; a pure read doesn't.
+_CODE_WRITES = (r"[^|&\n]*(?:\bopen\s+\S+\s+[wax]b?\+?(?:\s|$)|\.write|\bdump\b|unlink|os\.remove|\brename|os\.replace|shutil|"
+                r"truncate|\bsystem\b|subprocess|Popen|\bexec\b|\bmkdir|rmtree)")
+
+
+def _writes_on(name: str) -> "re.Pattern":
+    """F114: a shell line that writes a file of this name: a redirect into it, sed -i, tee, a copy or move over it, a one-liner, a git restore."""
+    return re.compile(
+        rf">>?\s*[\"']?[^\s\"'|;&]*{name}"
+        rf"|\bsed\s+(?:-[a-zA-Z]*\s+)*-i[^|;&]*{name}"
+        rf"|\btee\b[^|;&]*{name}"
+        rf"|\b(?:mv|rm|truncate|touch|chmod|unlink|shred)\b[^|;&]*{name}"
+        rf"|\b(?:cp|ln|install|rsync)\b[^|;&\n]*{name}\s*(?:$|[|;&\n])|\bdd\b[^|;&]*\bof=\S*{name}"  # a copy out of it is a read
+        rf"|\b(?:python[\d.]*|perl|ruby|node)\s+(?:-\S+\s+)*-[a-zA-Z]*[ceE]\b(?={_CODE_WRITES})[^|&\n]*{name}"  # code handed inline that writes
+        rf"|\bgit\s+(?:\S+\s+)*(?:checkout|restore|rm|mv|reset|apply|am)\b[^|;&]*{name}", re.I)
+
+
+_SHELL_WRITE_HIS = _writes_on(_HIS_NAME)
+# 4 November 2026: what Moneypenny's QA work needs without his yes. The logs of the night: every look into her test folder,
+# every which, find and python -c import asked him, so in a text she stopped and waited for him. A command passes here only
+# when nothing in it writes, sends or runs one of HQ's own scripts (those keep their own rules below).
+_LOOK_WRITES = re.compile(r">|<<|\b(?:rm|mv|cp|tee|truncate|dd|chmod|chown|ln|install|rsync|touch|mkdir|rmdir|kill|pkill|killall|"
+                          r"sudo|su|curl|wget|ssh|scp|nc|crontab|systemctl|launchctl|osascript|open|npm|pip|pip3|claude)\b|"
+                          r"\bsed\s+(?:-[a-zA-Z]*\s+)*-i|\bgit\s+(?!log\b|show\b|diff\b|status\b|grep\b|ls-files\b|rev-parse\b|blame\b)\w|"
+                          r"\bfind\b[^|;&]*\s-(?:delete|exec|execdir|ok|fprint\w*|fls)\b", re.I)
+_HQ_SCRIPT = re.compile(r"\b(?:python[\d.]*|node|bash|sh|zsh)\s+(?:-\S+\s+)*[\"']?\S*(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b"
+                        r"|(?:^|[;&|]\s*)\.?/?\S*(?:routine|app|status|install)/[\w.-]+\.(?:py|mjs|sh)\b")  # run, not read
+
+
+def _her_look(cmd: str, runs: str) -> bool:
+    cmd = re.sub(r"\d?>\s*/dev/null|\d>&\d", " ", cmd)  # errors sent nowhere or to the output: not a file written
+    if _LOOK_WRITES.search(cmd) or re.search(_CODE_WRITES, runs):
+        return False
+    return not _HQ_SCRIPT.search(cmd)
+_SHELL_WRITE_GUARDED = _writes_on(_GUARDED_NAME)
+_SHELL_LEDGER = r"(?:ledger/(?!{a}[.-])[^\s\"'|;&/]+|(?<![\w-])notes-(?!{a}\.md|cleared\.md)[\w-]+\.md)"
+
+
+# F99: the after-call run is alone with nobody to ask: it writes the log and the lists, and adds the transcript.
+AFTER_CALL_EDIT = "coaching/log.md"
+AFTER_CALL_ADD = re.compile(r"^(coaching/log\.md|challenges\.md|hq/notes\.md|hq/agents/[^/]+-about-herself\.md|hq/calls/[^/]+\.md)$")  # F154: his quick notes too
+AFTER_CALL_SCRIPTS = {"todo.py", "about_self.py", "rules.py"}  # the planning board and the mail switch only to read (AFTER_CALL_READS)
+AFTER_CALL_READS = {"planning_board.py": {"", "--words"}, "jobs.py": {"list"}}
+
+
+
+
+def plain_address(url: str) -> bool:
+    """F99: a web address that carries nothing of ours out: http(s), a real host, no login, no query string. Anything
+    else asks (a query string or a login in an address is how text leaves through a fetch)."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(str(url).strip())
+        host = (u.hostname or "").lower()
+        port = u.port
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https") or not host or "." not in host or u.query or u.username or u.password:
+        return False
+    if port not in (None, 80, 443) or re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", host) or host.endswith((".local", ".internal", ".ts.net")):
+        return False
+    return True
+
+
+@dataclass
+class Decision:
+    verdict: str  # ALLOW, ASK or DENY
+    why: str  # one short line, for the log and the transcript
+    question: str = ""  # for ASK: what HQ asks, in plain words
+    retry: bool = False  # H78: a DENY that's only "not yet": do what `why` says, then make the same call again
+    handed: bool = False  # H203: not made here, but done: the backup handed it to the main, which wrote it (or will)
+    door: bool = False  # F114: a refused try at one of his doors (his switch, his yes, another agent's ledger): on the ledger, once
+    road: bool = False  # F145: refused, but `why` names the right road to take instead (said as that, not "don't try another way")
+
+
+# -- the lists -------------------------------------------------------------------
+
+# Harmless helpers of the session itself (loading tools, its own to-do list, skills).
+SESSION_TOOLS = {
+    "ToolSearch", "Skill", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskOutput",
+}
+READ_TOOLS = {"Read", "Glob", "Grep", "LS"}
+EDIT_TOOLS = {"Edit", "Write", "MultiEdit"}
+
+# Connectors are matched by server name, so they work whatever prefix the CLI gives them
+# (mcp__claude_ai_Google_Calendar__list_events in the CLI).
+CALENDAR_READ = {"list_calendars", "list_events", "get_event", "search_events", "suggest_time"}
+# H78 (12 October 2026, in the user's words): "If there are other people included in this appointment, then maybe
+# ask for a confirmation. If it's just my account, I just put things in my calendar. ... We can always turn it back."
+# So adding, moving and deleting go without asking, on every call; an event with other people in it (attendees, or
+# someone else's invitation) and answering an invitation still ask. Before a move or a delete she must have read the
+# event on this call, so the policy knows whether others are in it and keeps what it was (see seen()).
+CALENDAR_ADD = {"create_event"}
+CALENDAR_CHANGE = {"update_event", "delete_event"}
+GMAIL_READ = {"search_threads", "get_thread", "get_message", "list_drafts", "get_draft", "list_labels"}
+GMAIL_NEVER = {"send_message", "send", "reply", "forward", "send_draft"}
+# H213 (19 October 2026, call at 10:57, in the user's words): "I think she should be able to make an email unread,
+# read, archived, and put it into certain labels. ... Starring emails, marking them as important or not". All of these
+# are labels in Gmail (UNREAD, INBOX, STARRED, IMPORTANT and their own), so on his ask they go without a yes, like
+# adding to his own calendar; taking a mail out of the trash or spam is the undo and goes too. Never on her own (the
+# rule, config.MAIL_TIDY_RULE). Trash, spam and deleting a label still ask: "She even asked about deleting but I
+# don't think deleting is smart."
+GMAIL_TIDY = {"label_message", "label_thread", "unlabel_message", "unlabel_thread", "update_message_labels",
+              "create_label", "update_label", "untrash_message", "untrash_thread", "unmark_message_spam",
+              "unmark_thread_spam"}
+GMAIL_CAREFUL = {"trash_message", "trash_thread", "mark_message_spam", "mark_thread_spam", "delete_label"}
+GMAIL_BIN = {"TRASH", "SPAM"}  # adding one of these as a label is trashing or spamming it
+
+# Tools that make no sense on a call; they are also removed from the session.
+CALL_UNFRIENDLY = [
+    "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "EnterWorktree", "ExitWorktree",
+    "NotebookEdit", "Workflow", "CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger",
+    "DesignSync",
+]
+
+# F145 (4 November 2026, call at 11:59, Moneypenny), his words at 12:32: "Claude's general-purpose helper gets closed off on calls
+# and texts, so you can't take that side road anymore." Claude Code's own helpers run outside HQ's harness (no box, no usage line,
+# nothing on the status page, their asks not in his chat): refused, with the two right roads. Also left out of the session (brain.py).
+GENERAL_HELPERS = ["Agent", "Task", "SendMessage", "TeamCreate", "TeamDelete"]
+HELPER_ROADS = (
+    "Claude's own helper isn't used on a call or in a text (F145): it runs outside HQ, with no box, no usage line and nothing on "
+    "the status page. There are two right roads. A quick look goes to HQ's own helper, which only reads and is boxed: "
+    f"python3 \"{HQ_ROUTINE / 'helper.py'}\" start \"THE QUESTION\". Bigger work (a report, a review of many items, research) is "
+    "Moneypenny's to write up as a hand-over in the workspace's HQ/prep/ folder, after his yes, for him and Claude Code to pick up")
+
+# Read-only shell commands that may run without asking, as long as every path they touch
+# is inside the folder.
+SAFE_READ_COMMANDS = {"ls", "grep", "rg", "find", "wc", "head", "tail", "cat", "pwd", "date", "stat", "file",
+                      "ps", "pgrep", "which", "echo", "sort", "uniq", "du",
+                      # H281 (26 October 2026, call at 13:32, Moneypenny): "If you need user rights we will give you
+                      # user rights." More looks that only read, for every agent; writing, running code from text
+                      # and the outside still ask.
+                      "cut", "diff", "cmp", "column", "nl",
+                      # 27 October 2026 (test of Moneypenny's profile): `rev` asked; it only reads, like cut.
+                      "rev"}
+# H281: commands that read only their own text or tell about this computer; no file of his goes through them.
+INFO_COMMANDS = {"tr", "basename", "dirname", "realpath", "readlink", "uptime", "df", "free", "uname", "id"}
+# H281: a program in the first word after the options (sed's script, awk's program, jq's filter), checked on its own.
+PROGRAM_COMMANDS = {"sed", "awk", "jq"}
+SAFE_GIT_READ = {"status", "log", "diff", "show", "rev-parse", "branch", "ls-files",
+                 "describe", "rev-list", "ls-remote", "cat-file", "blame", "tag"}  # H281
+
+
+def gmail_never_tool_names(prefixes: tuple[str, ...] = ("mcp__claude_ai_Gmail__",)) -> list[str]:
+    return [p + name for p in prefixes for name in sorted(GMAIL_NEVER)]
+
+
+@dataclass
+class Policy:
+    folder: Path
+    dry_run: bool = False  # tests: nothing may change, not even with a yes
+    unattended: bool = False  # after hang-up: nobody can answer a question
+    # Calls the user was asked about, waiting for his answer, and the ones he said yes to.
+    pending: list[tuple[str, str, str]] = field(default_factory=list)  # (tool, key, question)
+    approved: set[tuple[str, str]] = field(default_factory=set)
+    log: list[tuple[str, str, Decision]] = field(default_factory=list)  # (tool, summary, decision)
+    listener: object = None  # called as listener(tool, summary, decision), e.g. the transcript
+    # H78: calendar events read on this call: event id -> (others in it?, what it was, in one line).
+    events: dict[str, tuple[bool, str]] = field(default_factory=dict)
+    # H277: where a cd earlier in the same command went, so `cd HQ && python3 routine/sprint.py …` is known.
+    _cwd: Path | None = None
+    # H280: a call about building HQ (Moneypenny's context "build") writes Claude's memory for the workspace without
+    # a yes, so a lesson she learns is there at the next call's start.
+    memory_writes: bool = False
+    team_texts: bool = False  # H266: Moneypenny (context build) texts him on her own line without a yes
+    after_call: bool = False  # F99: the after-call run: only the log, the lists and the transcript
+    pending_turns: int = 0  # how many of his turns the pending questions have waited (answer, PENDING_TURNS)
+    agent: str = ""  # F103: who's taking this turn, for the ledger's line on a refused outward action
+    # F114: where this call's or this chat's own words are (its transcript, the thread the text came in): his words count only there
+    words_from: list = field(default_factory=list)
+
+    def __post_init__(self):
+        self.folder = Path(os.path.realpath(self.folder))
+        # M5: folders in the workspace that are never changed and never go to git, from me.md.
+        import me as _me
+        self.protected = set(_me.load(self.folder)["protected"])
+
+    # -- the decision -----------------------------------------------------------
+
+    def decide(self, tool: str, inp: dict) -> Decision:
+        d = self._decide(tool, inp or {})
+        if self.dry_run and d.verdict == ALLOW and _writes(tool, inp or {}):
+            d = Decision(DENY, "test run: no changes allowed")
+        if d.verdict == ASK:
+            key = _key(inp)
+            if (tool, key) in self.approved:
+                self.approved.discard((tool, key))
+                if self.dry_run:
+                    d = Decision(DENY, f"test run: the yes is noted, but nothing changes ({d.why})")
+                else:
+                    d = Decision(ALLOW, f"they said yes ({d.why})")
+            elif self.unattended:
+                d = Decision(DENY, f"nobody to ask after the call ({d.why})")
+            else:
+                if not any(p[0] == tool and p[1] == key for p in self.pending):
+                    self.pending.append((tool, key, d.question))
+                    self.pending_turns = 0
+        if (self.after_call and d.verdict == DENY and not d.road and not self.dry_run and tool == "Bash"
+                and LOG_REL in str((inp or {}).get("command") or "")):  # F155: a refused log save after a call names the way that works
+            d = Decision(DENY, f"{d.why}; after the call the coaching log is yours to write directly: make the change with the "
+                               "Edit tool on coaching/log.md", retry=True, road=True)
+        summary = summarize(tool, inp or {})
+        self.log.append((tool, summary, d))
+        if callable(self.listener):
+            try:
+                self.listener(tool, summary, d)
+            except Exception:
+                pass
+        return d
+
+    def _decide(self, tool: str, inp: dict) -> Decision:
+        server, name = _mcp_parts(tool)
+        if server and os.environ.get("HQ_NO_OUTSIDE") == "1" and not re.match(r"(get|list|search|read|fetch|query|suggest)_?", name or ""):
+            return Decision(DENY, "this HQ is a test instance: nothing outside it changes (no mail, no calendar, no other service)")
+        if server:
+            s = server.lower()
+            if "gmail" in s:
+                if name in GMAIL_NEVER or "send" in name:
+                    return Decision(DENY, "sending, replying and forwarding email is never allowed")
+                if name in GMAIL_READ:
+                    return Decision(ALLOW, "reading mail")
+                if name in GMAIL_TIDY:
+                    added = {str(x).upper() for x in (inp.get("labelIds") or []) + (inp.get("addLabelIds") or [])}
+                    if name.startswith(("label_", "update_message")) and added & GMAIL_BIN:
+                        return _ask("move that mail to the trash or spam", "trash or spam in Gmail")
+                    return Decision(ALLOW, "tidying mail on his ask (labels, read, archive, star, important)")
+                if name in GMAIL_CAREFUL:
+                    what = ("delete that label (the mails keep their other labels)" if name == "delete_label"
+                            else "move that mail to the spam" if "spam" in name else "move that mail to the trash")
+                    return _ask(what, "trash, spam or deleting a label in Gmail")
+                return _ask(f"{_plain(name)} in your Gmail", "a Gmail change")
+            if "calendar" in s:
+                if name in CALENDAR_READ:
+                    return Decision(ALLOW, "reading the calendar")
+                return self._calendar(name, inp)
+            return _ask(f"use {_plain(name)} in {server.replace('_', ' ')}", "another connector")
+
+        if tool in SESSION_TOOLS:
+            return Decision(ALLOW, "session helper")
+        if tool in READ_TOOLS:
+            path = inp.get("file_path") or inp.get("path") or str(self.folder)
+            if tool == "Read":
+                big = _too_big(path, inp)
+                if big:
+                    return Decision(DENY, big)
+            if self.inside(path):
+                return Decision(ALLOW, "reading in the folder")
+            if self.in_hq(path):
+                return Decision(ALLOW, "reading in HQ")
+            if tool_output(path, self.folder):
+                return Decision(ALLOW, "reading this call's own saved output")
+            if in_memory(path, self.folder):
+                return Decision(ALLOW, "reading Claude's memory for this workspace")
+            return _ask(f"read {Path(path).name} outside your workspace", "reading outside the folder")
+        if tool in EDIT_TOOLS:
+            return self._edit(inp.get("file_path") or "", tool, inp)
+        if tool == "Bash":
+            return self._bash(inp.get("command") or "")
+        if tool in CALL_UNFRIENDLY:
+            return Decision(DENY, "not available on a call")
+        if tool == "WebSearch":
+            # H103 (13 October 2026), in his words: "donna needs access to internet always (no need to ask for yes)".
+            return Decision(ALLOW, "looking it up on the web (no need to ask)")
+        if tool == "WebFetch":
+            url = str(inp.get("url") or "")
+            if plain_address(url):
+                return Decision(ALLOW, "reading a plain web address (no need to ask)")  # H103
+            return _ask("open that web address, which carries more than a plain page", "a web address with data in it (F99)")
+        if tool in GENERAL_HELPERS:  # F145: never Claude's own helper here; the two right roads instead
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)  # F145: on the ledger, like the other doors
+        return _ask(f"use {tool}", "anything else")
+
+    def _calendar(self, name: str, inp: dict) -> Decision:
+        """H78: his own calendar changes go without asking; with other people in it, ask."""
+        if _has_others(inp):
+            return _ask(_calendar_question(name, inp), "a calendar change with other people in it")
+        if name in CALENDAR_ADD:
+            return Decision(ALLOW, "adding to the calendar (no need to ask)")
+        if name in CALENDAR_CHANGE:
+            ev = self.events.get(str(inp.get("eventId") or ""))
+            if ev is None:
+                return Decision(DENY, "look at this event first (get_event), so it can be put back, and to see "
+                                      "whether other people are in it; then try again", retry=True)
+            others, was = ev
+            if others:
+                return _ask(_calendar_question(name, inp), "a calendar change with other people in it")
+            verb = "deleting" if "delete" in name else "moving or changing"
+            return Decision(ALLOW, f"{verb} in the calendar (no need to ask); it was: {was}")
+        return _ask(_calendar_question(name, inp), "a calendar change")
+
+    def seen(self, tool: str, response) -> None:
+        """H78: after a calendar read, remember each event it showed: whether others are in it, and what it was,
+        so a move or delete can be put back (the line goes into the transcript with the change). Never raises."""
+        server, name = _mcp_parts(tool)
+        if "calendar" in server.lower() and name in CALENDAR_ADD | CALENDAR_CHANGE | {"respond_to_event"}:
+            # H153: a write in the calendar (a call, Donna's chat, an appointment's note): HQ's calendar reads it again
+            if not self.dry_run:
+                try:  # a write behind her "it's in your calendar", for the outbox's claim check
+                    import outbox
+                    outbox.calendar_written(name)
+                except Exception:
+                    pass
+                try:
+                    import agenda
+                    agenda.changed(name)
+                except Exception:
+                    pass
+            return
+        if "calendar" not in server.lower() or name not in CALENDAR_READ:
+            return
+        try:
+            for ev in _event_dicts(response):
+                self.events[str(ev["id"])] = (_has_others(ev), _event_line(ev))
+        except Exception:
+            pass
+
+    def _edit(self, path: str, tool: str = "Edit", inp: dict | None = None) -> Decision:
+        if not path:
+            return Decision(DENY, "no file named")
+        if not self.inside(path):
+            if self.memory_writes and in_memory(path, self.folder) and Path(path).suffix == ".md":
+                return Decision(ALLOW, "writing Claude's memory for this workspace (a call about building HQ)")
+            if self.in_hq(path):
+                return _ask(f"change {Path(path).name} in HQ", "a change in HQ")
+            return _ask(f"change {Path(path).name}, outside your workspace", "a file outside the folder")
+        rel = self.rel(path)
+        top = rel.parts[0] if rel.parts else ""
+        if self.team_texts and tuple(rel.parts[:2]) == ("HQ", "qa-tests") and len(rel.parts) >= 4:
+            # 4 November 2026: real QA makes her write her own tests; asking his yes for each edit left him in the middle
+            return Decision(ALLOW, "her own QA tests for an item (the program checks and seals them)")
+        if top in self.protected:
+            return Decision(DENY, f"the {top} folder is never changed")
+        if re.match(r"^my notes .*\.md$", rel.name, re.I):
+            return Decision(DENY, "your own notes are never edited")
+        if top in (".git",):
+            return Decision(DENY, "git's own files are not edited")
+        if top == ".claude":
+            return _ask(f"change the project setup file {rel.name}", "the project setup")
+        low = rel.as_posix().casefold()  # casefold: a Mac's disk doesn't tell Roadmap.md from roadmap.md
+        if self.after_call and low != AFTER_CALL_EDIT:  # F99: alone after a call, it writes only the log
+            return Decision(DENY, f"after a call only the log, the lists and the transcript are written, not {rel.name}: "
+                                  "leave it as a follow-up in the log, for when he can be asked")
+        way = WAYS_IN.get(low)
+        if way:
+            return Decision(DENY, f"{rel.name} is never edited directly, whoever asks: use {way}", retry=True)
+        if low == LOG_REL and not self.after_call:  # F114: the log through its script, also on a yes
+            return Decision(DENY, f"the coaching log is never edited directly on a call or in a text: use {LOG_WAY}", retry=True)
+        if _PROOF.match(low):
+            return Decision(DENY, f"{rel.name} is what proves his words, and only HQ writes it")
+        if _ABOUT_LIST.match(low):
+            return Decision(DENY, f"her list only takes what passes the filter: use {ABOUT_WAY}", retry=True)
+        theirs = self._not_hers(low, rel.name)
+        if theirs:
+            return theirs
+        if low in PROGRAM_STATE:  # F114: a yes written in by hand would be his yes typed by an agent
+            return Decision(DENY, f"{rel.name} is written only by HQ's own programs, whoever asks: {PROGRAM_STATE[low]}", door=True)
+        if low == hqpaths_mail_rel() and self._moves_mail_switch(path, tool, inp or {}):  # F114: not even with a yes
+            return Decision(DENY, _mail_words(), door=True)
+        if rel.name.casefold() == "claude.md" or low in VISION_FILES or HIS_SETUP.match(low):
+            key = (tool, _key(inp or {}))
+            if key in self.approved:  # his yes for exactly this change; on the backup it still goes to the main below
+                self.approved.discard(key)
+            else:
+                return _ask(f"change {rel.name}, which is yours",
+                            "his own setup: the agents' settings, the handbook, me.md or the backend (F114)" if HIS_SETUP.match(low)
+                            else "his vision, map, rules or CLAUDE.md (F99)")
+        if is_backup() and one_writer(rel.as_posix()):
+            return self._hand_over(tool, rel.as_posix(), inp or {})
+        return Decision(ALLOW, "writing in the folder")
+
+    def _not_hers(self, low: str, name: str) -> Decision | None:
+        """F114: another agent's ledger or own notes, as in a cycle: each agent writes only her own. With no agent named, none."""
+        m = _LEDGER.match(low)
+        if not m:
+            return None
+        aid, name = (self.agent or "").lower(), name.casefold()
+        if aid and ((low.startswith("hq/ledger/") and name.startswith((f"{aid}.", f"{aid}-"))) or low == f"hq/notes-{aid}.md"):
+            return None
+        whose = "another agent's ledger" if low.startswith("hq/ledger/") else "another agent's own notes"
+        return Decision(DENY, f"{name} is {whose}: only she writes it, whoever asks", door=True)
+
+    def _moves_mail_switch(self, path: str, tool: str, inp: dict) -> bool:
+        """F114: whether this Edit, MultiEdit or Write of the agents' settings would set, change or take away the mail switch."""
+        try:
+            old = Path(path).read_text(encoding="utf8")
+        except OSError:
+            old = ""
+        new = _after_edit(old, tool, inp)
+        if new is None:  # the edit wouldn't apply (its text isn't there): nothing changes
+            return False
+        import hqpaths
+        return hqpaths.mail_switch_changed(old, new)
+
+    def _hand_over(self, tool: str, rel: str, inp: dict) -> Decision:
+        """H203: on the backup, a change to a file only the main writes goes to the main, which makes it on its own
+        copy; the sync brings it back here. Nothing is written here, so the two never make conflict copies."""
+        if tool == "Write":
+            content = inp.get("content") if isinstance(inp.get("content"), str) else None
+            if content is not None and len(content.encode("utf8")) <= 90_000 and self._one_way():
+                if self.dry_run:
+                    return Decision(DENY, f"test run: on the backup this file {rel} would go to the main whole")
+                return self._hand("put", rel, json.dumps({"text": content}, ensure_ascii=False))
+            return Decision(DENY, f"this HQ is the backup, and {rel} is written only by the main: make the change as "
+                                  "an Edit (only the part that changes), so the main can make it on its own copy",
+                            retry=True)
+        edits = inp.get("edits") if tool == "MultiEdit" else [inp]
+        edits = [{"old": e.get("old_string") or "", "new": e.get("new_string") or "", "all": bool(e.get("replace_all"))}
+                 for e in edits or [] if isinstance(e, dict)]
+        if len(json.dumps(edits)) > 90_000:  # the main's /api/forward takes up to 100 KB
+            return Decision(DENY, f"this HQ is the backup, so this change to {rel} goes to the main, and it's too big "
+                                  "to send in one go: make it as a few smaller Edits", retry=True)
+        if self.dry_run:
+            return Decision(DENY, f"test run: on the backup this change to {rel} would go to the main")
+        return self._hand("edit", rel, json.dumps({"edits": edits}, ensure_ascii=False))
+
+    def _one_way(self) -> bool:
+        try:
+            import backend
+            return backend.on("one_way_sync")
+        except Exception:
+            return False
+
+    def _hand(self, what: str, rel: str, payload: str) -> Decision:
+        try:
+            import sys
+            if str(HQ_ROUTINE) not in sys.path:
+                sys.path.insert(0, str(HQ_ROUTINE))
+            import role
+            code, out, err, how = role.hand("handover", [what, rel, payload])
+        except Exception as e:
+            code, out, err, how = 3, "", repr(e), "error"
+        said = " ".join((out + " " + err).split())[:300]
+        if how == "kept":
+            return Decision(DENY, f"this HQ is the backup and the main can't be reached right now, so this change to "
+                                  f"{rel} is kept here and goes to the main as soon as it answers; it then comes back "
+                                  "with the sync. Don't make it again", handed=True)
+        if how == "main" and code == 0:
+            return Decision(DENY, f"this HQ is the backup, so the main wrote this change to {rel}; it reaches this "
+                                  "computer with the sync within a minute (a read right now may not show it yet). "
+                                  "Don't make it again", handed=True)
+        if how == "main" and code == 1:
+            return Decision(DENY, f"this HQ is the backup, and the main's copy of {rel} differs from this one ({said}); "
+                                  "read the file again in a moment, when the sync has brought the main's copy, and "
+                                  "make the edit on what's there", retry=True)
+        return Decision(DENY, f"this HQ is the backup, and the main didn't take this change to {rel} ({said or how})")
+
+    def _bash(self, command: str) -> Decision:
+        cmd = command.strip()
+        if not cmd:
+            return Decision(DENY, "empty command")
+        # Only plain commands, joined by && or |. No redirection into files, no
+        # subshells, variables or here-documents (quoted text may contain anything).
+        if _SHELL_WRITE.search(cmd):  # F99: the same files through the shell, also with a yes
+            return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
+        runs = _what_runs(cmd)  # F114: a text in quotes (a log line, a note) isn't a command; code handed to python -c or sh -c is
+        if _SHELL_WRITE_GUARDED.search(runs):  # F99's files through code handed inline that writes them
+            return Decision(DENY, "those files are never written through the shell, whoever asks: use their own script")
+        if _starts_a_claude(cmd, runs):  # F145: no general-purpose Claude through the shell either, also with a yes
+            return Decision(DENY, HELPER_ROADS, road=True, door=True)
+        if re.match(r"\s*ssh\s", cmd) and not is_backup():  # 4 November 2026: she's on the main and tried to log in to it (after F145's Claude check, so ssh host claude gets the two roads)
+            return Decision(DENY, "you are already on the main computer, where HQ, the team, the planning and the tests run: "
+                                  "run the same command here, without ssh; no yes is needed to look")
+        if _SHELL_WRITE_HIS.search(runs):  # F114: his own setup and the log, also with a yes
+            return Decision(DENY, "his own setup (the agents' settings and state, the handbook, me.md, the backend) and the coaching log are "
+                                  "never written through the shell, whoever asks: his files with an Edit he says yes to, the log with "
+                                  + LOG_WAY, door=bool(re.search(r"cycles(?:-state)?\.json", runs, re.I)))
+        if _writes_on(_SHELL_LEDGER.format(a=re.escape((self.agent or "").lower() or "\x00"))).search(runs):  # F114
+            return Decision(DENY, "another agent's ledger or notes is hers: only she writes it, whoever asks", door=True)
+        if self.team_texts and _her_look(cmd, runs):  # 4 November 2026: real QA, her looks and her test runs
+            return Decision(ALLOW, "a look of hers, or a run of her own QA tests: nothing written")
+        cmd = _hide_quoted_dollars(cmd)  # H281: awk's $1 and sed's $p in single quotes are text, not variables
+        # 27 October 2026: ${n} of a plain for loop (for n in 1 2; do sed -n "${n}p" …) is filled in by _loops below.
+        loop_vars = re.findall(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", cmd)
+        probe = re.sub(r"\$\{(%s)\}" % "|".join(map(re.escape, loop_vars)), "", cmd) if loop_vars else cmd
+        if re.search(r"`|\$\(|\$\{|<<", probe):
+            return _ask("run a shell command", "a complex shell command")
+        cmd = re.sub(r"\s2>\s*/dev/null|\s2>&1", " ", cmd)
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars="();<>|&\n")
+        lex.whitespace = " \t\r"
+        lex.whitespace_split = True
+        try:
+            tokens = list(lex)
+        except ValueError:
+            return _ask("run a shell command", "a shell command that doesn't parse")
+        segments: list[list[str]] = [[]]
+        for tok in tokens:
+            if tok in ("&&", "|", ";", "||"):
+                segments.append([])
+            elif tok and set(tok) <= set("();<>|&\n"):
+                return _ask("run a shell command", "a complex shell command")
+            else:
+                segments[-1].append(tok)
+        segments = _loops(segments)
+        if segments is None:
+            return _ask("run a shell command", "a shell loop it can't follow")
+        segments = [seg[2:] if len(seg) > 2 and seg[0] == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", seg[1]) else seg
+                    for seg in segments]  # F114: timeout N in front of a command changes nothing it may do
+        # H277: several steps chained count as one; a cd carries over to the steps after it.
+        results: list[tuple[list[str], Decision]] = []
+        self._cwd = None
+        try:
+            for seg in segments:
+                if any("$" in w for w in seg):
+                    results.append((seg, _ask("run a shell command", "a shell command with a variable")))
+                    continue
+                d = self._bash_one([w.replace(_DOLLAR, "$") for w in seg])
+                results.append((seg, d))
+                if seg and seg[0] == "cd" and d.verdict == ALLOW:
+                    target = Path(seg[1]).expanduser() if len(seg) > 1 else Path.home()
+                    if not target.is_absolute():
+                        target = (self._cwd or self.folder) / target
+                    self._cwd = Path(os.path.realpath(target))
+        finally:
+            self._cwd = None
+        for verdict in (DENY, ASK):
+            for seg, d in results:
+                if d.verdict == verdict:
+                    if len(results) > 1:
+                        # Fable clean-up (27 October 2026): a chained command is refused whole when one step is, and the
+                        # agent read that as "I can't do this at all" (Moneypenny, 17:38: "From a call I can't put it in
+                        # their line"). So the refusal names the step, and that the rest would run without it.
+                        step = " ".join(w.replace(_DOLLAR, "$") for w in seg)[:90]
+                        d = Decision(d.verdict, f"only the step `{step}`: {d.why}. The other steps of that command "
+                                                f"are fine on their own: run them again without this step",
+                                     question=d.question, retry=d.retry, handed=d.handed, door=d.door, road=d.road)
+                    return d
+        return Decision(ALLOW, "; ".join(dict.fromkeys(d.why for _, d in results)))
+
+    def _bash_one(self, words: list[str]) -> Decision:
+        if not words:
+            return Decision(DENY, "empty command")
+        prog, args = words[0], words[1:]
+        if self.after_call and prog in ("python3", "python") and args:  # F99: alone after a call
+            name = Path(args[0]).name
+            sub = args[1] if len(args) > 1 else ""
+            mine = self.hq_script(args[0], name) or self.hq_app_script(args[0], name)
+            if mine and name == "handover.py" and len(args) == 4 and sub == "edit" and self._is_log(args[2]):
+                return Decision(ALLOW, "the coaching log, through its script, after the call")  # afternotes: F114 sends the log through handover.py, the after-call run refused it
+            if mine and name == "handover.py" and sub == "edit" and len(args) > 2 and self._is_log(args[2]):
+                # F155: a dropped call's notes were lost when the log's save went another way (flow 602): name the way that works
+                return Decision(DENY, "after the call the coaching log is yours to write directly: make the change with the Edit "
+                                      "tool on coaching/log.md, or as handover.py edit coaching/log.md 'JSON' with the JSON as one "
+                                      "quoted word", retry=True, road=True)
+            if not mine or not (name in AFTER_CALL_SCRIPTS or sub in AFTER_CALL_READS.get(name, ())):
+                return Decision(DENY, f"after a call only the log, the lists and the transcript are written, so {name} "
+                                      f"{sub} waits: leave it as a follow-up in the log")
+        if prog == "cd":
+            target = args[0] if args else str(Path.home())
+            if self.inside(target):
+                return Decision(ALLOW, "moving within the folder")
+            if self.in_hq(target):
+                return Decision(ALLOW, "moving within HQ")
+            if in_memory(target, self.folder):
+                return Decision(ALLOW, "moving into Claude's memory for this workspace")
+            return _ask("go outside your workspace", "a folder outside")
+        if prog == "date":
+            return Decision(ALLOW, "the date")
+        if prog == "cat":
+            for a in args:
+                big = None if a.startswith("-") else _too_big(a if os.path.isabs(a) else str(Path(self.folder) / a))
+                if big:
+                    return Decision(DENY, big)
+        if prog == "git":
+            return self._git(args)
+        if prog == "curl":
+            return self._curl(args)
+        # The mail check's switch on the queue section, and how often it runs (H149); the rest of the queue is gone.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "jobs.py"):
+            sub = args[1] if len(args) > 1 else ""
+            if sub in ("list", "next", "mail-fast", "mail-hourly"):
+                return Decision(ALLOW, "the mail check's switch and how often it runs")
+            return Decision(DENY, "from a call the queue script takes list, mail-fast or mail-hourly; the mail switch itself is his own hand's")
+        # The planning board and the hand-overs, read only.
+        if prog in ("python3", "python") and args and (self.hq_script(args[0], "planning_board.py") or self.hq_script(args[0], "handovers.py")):
+            if len(args) <= 3:
+                return Decision(ALLOW, "the planning board or the hand-overs, read only")
+            return Decision(DENY, "the planning board and the hand-overs only read")
+        # H124: Donna texts first. Picking appointments to ping, reminders and her own notes only writes HQ's own list
+        # in the workspace (direct-line/pings.json, her notes file); Google Calendar is never touched by it.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "pings.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "due", "watch", "unwatch",
+                       "out", "out-stop",  # H212: his own times out, for the weather
+                       "nudge", "nudge-done", "nudge-later",  # H211: nudge until done
+                       "call", "call-cancel"):  # H238: an agent calls him at a time they agreed
+                return Decision(ALLOW, "her pings, reminders, notes and watches")
+            # H125: match is the mail check's own (it found a mail for a watch)
+            return Decision(DENY, "the pings script takes list, appt, remind, remind-every, remind-stop, cancel, note, note-clear, watch, unwatch, out, out-stop, nudge, nudge-done, nudge-later, call or call-cancel")
+        # H213: the mail sorting rules he agreed, in the workspace (HQ/mail-sort.json): read, add, stop, start, remove.
+        # `sorted` is the mail check's own line per mail.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "mailsort.py"):
+            if len(args) == 1 or args[1] in ("list", "add", "stop", "start", "remove"):
+                return Decision(ALLOW, "his mail sorting rules")
+            return Decision(DENY, "the mail sorting script takes list, add, stop, start or remove")
+        # H132: what an agent has said about herself, kept in her own list in the workspace (HQ/agents/). F98: add holds
+        # the filter itself, so a yes-free add can't keep his life.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "about_self.py"):
+            if len(args) == 1 or args[1] in ("list", "add", "check"):
+                return Decision(ALLOW, "her own list of what she has said about herself")
+            return Decision(DENY, "the about-herself script takes list, add or check")
+        # F99: the mail list's way in, since the file itself is refused: an edit on that one file, all or nothing, with
+        # its lock; on the backup it goes to the main.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "handover.py"):
+            if len(args) == 4 and args[1] == "edit" and args[2] == "inbox.md":
+                return Decision(ALLOW, "an edit of the mail list, with its lock")
+            if len(args) == 4 and args[1] == "edit" and args[2] == LOG_REL:  # F114: the log's way in, since the file itself is refused
+                return Decision(ALLOW, "an edit of the coaching log, with its lock")
+            return Decision(DENY, "from a call, the handover script only edits the mail list or the coaching log "
+                                  "(edit inbox.md JSON, edit coaching/log.md JSON)")
+        # F99: the status block's way in, since the planning file itself is refused.
+        if prog in ("python3", "python") and args and self.status_script(args[0], "set-status.py"):
+            return Decision(ALLOW, "the status block")
+        # H143: the week's ticks and X in his calendar, read only, to look back with him.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "planning.py"):
+            if len(args) == 1 or (args[1] == "week" and len(args) <= 3):
+                return Decision(ALLOW, "the week's ticks and X in his calendar")
+            return Decision(DENY, "from a call, the planning script only reads a week (week, or week with a date)")
+        # H146: his notes on the appointments, read only (the page adds and clears them).
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "appt_notes.py"):
+            if len(args) == 1 or (len(args) == 2 and args[1] in ("list", "json")):
+                return Decision(ALLOW, "his notes on the appointments")
+            return Decision(DENY, "from a call, the appointment notes script only reads them")
+        # H263: his quick notes: read, clear one (kept, so it can come back), the cleared ones, bring one back. The
+        # notes file is in the workspace, which a call may edit anyway; this way a cleared note is never lost.
+        # Fable, 27 October 2026: the briefing and the library behind it, read only (a layer of the map, a briefing).
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "briefing.py"):
+            if len(args) == 1 or args[1] in ("day", "coach", "build", "layer", "fresh"):
+                return Decision(ALLOW, "the briefing, or a layer of the map")
+            return Decision(DENY, "the briefing script takes day, coach, build, fresh or layer N on a call")
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "helper.py"):
+            if len(args) > 1 and args[1] in ("start", "list") and not self.after_call:  # F106: boxed, only reads, nothing to say yes to
+                return Decision(ALLOW, "a helper beside the call: it only reads, boxed in minutes and turns")
+            return Decision(DENY, "from a call, the helper takes start \"THE QUESTION\" or list")
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "rules.py"):
+            return Decision(ALLOW, "reading how something works here")
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "backend.py"):
+            if len(args) == 1 or args[1] in ("list", "show"):
+                return Decision(ALLOW, "the backend switches")
+            return _ask(f"flip the backend switch {' '.join(args[1:3])}", "a backend switch")
+        # H266: Moneypenny texts him on her own line, on her own, without waiting for a call (direct_line.py team).
+        if (prog in ("python3", "python") and len(args) >= 3 and self.hq_app_script(args[0], "direct_line.py")
+                and args[1] == "team"):
+            if self.team_texts:
+                return Decision(ALLOW, "Moneypenny texts him on her own line")
+            return Decision(DENY, "only Moneypenny texts on her own line")
+        # H279: an old text on the chat line she answers on, found in the thread or, past the 400, in its git history.
+        # Read only; --dir (a test's own folder) isn't for a call or a text.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "thread_search.py"):
+            if not any(x == "--dir" or x.startswith("--dir=") for x in args[1:]):
+                return Decision(ALLOW, "looking up an old text on this chat")
+            return Decision(DENY, "the text search looks only on the chat line she answers on")
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "notes.py"):
+            if len(args) == 1 or args[1] in ("add", "clear", "cleared", "restore"):  # F99: add, the file is refused
+                return Decision(ALLOW, "his quick notes")
+            return Decision(DENY, "the notes script takes add, clear, cleared or restore")
+        # H200: the to-do list, the user's own file in the workspace: read, add, done, let go, move, undo. Each change is
+        # one table row and its log line, the same as editing the file by hand, which a call may do anyway.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "todo.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "show", "add", "done", "letgo", "move", "tick", "untick",
+                                                  "order", "rename", "undo", "blocks", "plan", "unplan",
+                                                  "repeat"):
+                return Decision(ALLOW, "the to-do list")
+            return Decision(DENY, "the to-do script takes summary, json, add, done, letgo, move, tick, untick, order, "
+                                  "rename, undo, blocks, plan, unplan or repeat")
+        # H222: the six-week games, the workspace's own HQ/games.json: read, tick a day, count, a note, the diary, a
+        # week's look back, the debrief, undo. Making a game or changing its design is the team's (new, spec), from
+        # the design written in their map.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "games.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "show", "kinds", "check", "tick", "count", "note",
+                                             "diary", "week", "debrief", "undo"):
+                return Decision(ALLOW, "the six-week game")
+            return Decision(DENY, "making a six-week game or changing its design is done from the design in their map, "
+                                  "in a chat of their own; from a call the games script reads, ticks, counts, notes, keeps "
+                                  "the diary, the week's look back and the debrief")
+        # The bucketlist and the wishlist, the workspace's own HQ/lists.json: read them and keep them as the user says
+        # it. Deleting an item for good and bringing the old wishlist over are the page's (and a chat's on the computer).
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "lists.py"):
+            if len(args) == 1 or args[1] in ("summary", "bucket", "wish", "bucketlist", "wishlist", "json", "show", "add",
+                                             "set", "link", "unlink", "done", "open", "drop", "move", "under", "undo"):
+                return Decision(ALLOW, "the bucketlist and the wishlist")
+            return Decision(DENY, "from a call the lists script reads, adds, changes, ticks off, lets go and moves; "
+                                  "deleting an item for good is done in the app")
+        # H225: Life coaching's check-ins: what's due, and marking one done (or not now) once it's through.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "coaching.py"):
+            if len(args) == 1 or args[1] in ("summary", "json", "due") or (args[1] in ("done", "later") and len(args) == 3):
+                return Decision(ALLOW, "Life coaching's check-ins")
+            return Decision(DENY, "from a call, the coaching script says what's due and marks a check-in done or not now")
+        # H235: their own extensions: list them, read their rules and the last clash check, and run one of an
+        # extension's own scripts, only one it declares (extensions.py refuses the rest); one that says "ask" waits for
+        # a yes. Settling a clash is the page's buttons'.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "extensions.py"):
+            sub = args[1] if len(args) > 1 else "list"
+            if sub in ("list", "summary", "json", "rule", "mail") or (sub == "clash" and len(args) == 2):
+                return Decision(ALLOW, "their own extensions")
+            if sub == "run" and len(args) >= 4:
+                try:
+                    import extensions as _ext
+                    s = _ext.script(args[2], args[3])
+                except Exception:
+                    s = None
+                if not s:
+                    return Decision(DENY, f"there's no script {args[3]} in an extension {args[2]} that's on")
+                if s.get("ask"):
+                    return _ask(f"run {args[3]} from your extension {args[2]}", "an extension's script that asks first")
+                return Decision(ALLOW, "one of their own extension's scripts")
+            return Decision(DENY, "from a call, the extensions script lists them, gives their rules, the last check, or runs one of their scripts")
+        # H224: the workflows, read only: which are on, the call rule, a blank checklist, and their file's checklist
+        # held against the guide before a layer is called done. Turning one on or off is Settings'.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "workflows.py"):
+            if len(args) == 1 or args[1] == "rule" or (args[1] in ("check", "checklist") and len(args) in (3, 4)):
+                return Decision(ALLOW, "the workflows and their checklist")
+            return Decision(DENY, "from a call, the workflows script only lists, gives the rule, a checklist or the check")
+        # H56.3: main and backup. Asking which one is main, and making one the main on his ask.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "role.py"):
+            if len(args) == 1 or (len(args) == 3 and args[1] == "main"):
+                return Decision(ALLOW, "which HQ is main")
+            return Decision(DENY, "from a call, the role script only says which one is main, or makes one the main")
+        # L9/L10: the usage check. Reads the latest saved usage and shows it on the status page, nothing else.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "usage-check.py"):
+            if len(args) == 1:
+                return Decision(ALLOW, "reading the usage")
+            return Decision(DENY, "the usage check from a call takes no options")
+        # H214: a 9292 link door to door. Only looks places up (the government's open address service, the open
+        # station list) and prints a link; it changes nothing.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "travel.py"):
+            if len(args) >= 2 and args[1] in ("link", "where"):
+                return Decision(ALLOW, "a 9292 travel link")
+            return Decision(DENY, "the travel script takes link or where")
+        # H229: travel on appointments. Lists and shows the trips, turns travel on or off for one, keeps a place by name;
+        # only HQ's own file in the workspace changes. `check` is the routine's, not a call's.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "trips.py"):
+            if len(args) == 1 or args[1] in ("list", "on", "off", "show", "place", "places", "forget"):
+                return Decision(ALLOW, "travel on appointments")
+            return Decision(DENY, "the trips script takes list, on, off, show, place, places or forget")
+        # H230: driving to appointments: only whether a maps key is here and today's looks. The key itself is set in
+        # Settings (never on a call: it would be in the transcript), and a test look costs one of the day's looks.
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "drive.py"):
+            if len(args) == 1 or args[1:] == ["status"]:
+                return Decision(ALLOW, "whether driving has a key")
+            return Decision(DENY, "the driving script only says whether a key is here; the key goes in Settings")
+        # H45: lid-closed sleep. Reads it, or flips it on or off; the script itself only runs the two exact
+        # pmset commands the one-time setup allows without a password, nothing else.
+        if prog in ("python3", "python") and args and self.hq_script(args[0], "lidsleep.py"):
+            if len(args) == 1 or (len(args) == 2 and args[1] in ("on", "off")):
+                return Decision(ALLOW, "the lid-closed sleep switch")
+            return Decision(DENY, "the lid-closed sleep switch takes only on or off")
+        if prog in INFO_COMMANDS:
+            return Decision(ALLOW, "a look at this computer")
+        if prog in ("dpkg", "apt", "systemctl", "journalctl", "ss"):
+            return _system_look(prog, args)
+        if prog in PROGRAM_COMMANDS:
+            files = _program_files(prog, args)
+            if isinstance(files, Decision):
+                return files
+            return self._read_paths(files, plain=True)
+        if prog in SAFE_READ_COMMANDS:
+            if prog == "find" and any(a in ("-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0",
+                                            "-fprintf", "-fls") for a in args):
+                return _ask("run a find command that changes files", "find with actions")
+            if prog == "sort" and any(a in ("-o", "--output") or a.startswith(("--output=", "-o")) for a in args):
+                return _ask("write sorted lines into a file", "sort into a file")  # H281: sort -o writes
+            if prog == "uniq" and len([a for a in args if not a.startswith("-")]) > 1:
+                return _ask("write lines into a file", "uniq into a file")  # H281: uniq's second name is written
+            return self._read_paths(args)
+        return _ask(f"run the command {prog}", "a shell command")
+
+    def _read_paths(self, args: list[str], plain: bool = False) -> Decision:
+        """Every path a read-only command touches must be readable here (plain: args are all names, H281)."""
+        paths = [a for a in args if plain or (not a.startswith("-") and ("/" in a or Path(self._base(), a).exists()))]
+        if all(self.inside(p) for p in paths):
+            return Decision(ALLOW, "reading in the folder")
+        if all(self.inside(p) or self.in_hq(p) for p in paths):
+            return Decision(ALLOW, "reading in HQ")
+        if all(self.inside(p) or self.in_hq(p) or tool_output(p, self.folder) or in_memory(p, self.folder)
+               for p in paths):
+            return Decision(ALLOW, "reading this call's own saved output or Claude's memory for this workspace")
+        return _ask("look at something outside your workspace", "reading outside the folder")
+
+    def _curl(self, args: list[str]) -> Decision:
+        """H65: reading the status page's data (GET on this computer's status server); anything else asks."""
+        urls, i = [], 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-m", "--max-time"):
+                i += 2
+                continue
+            if a.startswith("-"):
+                if a not in CURL_SAFE_FLAGS:
+                    return _ask("run curl that way", "curl with options")
+            else:
+                urls.append(a)
+            i += 1
+        if not urls:
+            return _ask("run curl", "curl")
+        for u in urls:
+            m = re.match(r"^(?:https?://)?([^/:?#]+):(\d+)(/[^\s]*)?$", u)
+            if not m or m.group(1) not in STATUS_HOSTS or m.group(2) != STATUS_PORT:
+                return _ask("fetch something from the internet", "curl elsewhere")
+        return Decision(ALLOW, "reading the status page")
+
+    def _git(self, args: list[str]) -> Decision:
+        # "git -C <dir> …" must point inside the folder; in HQ (H65) only to look.
+        in_hq = False
+        while args and args[0] in ("-C", "-c", "--no-pager"):
+            if args[0] == "--no-pager":
+                args = args[1:]
+                continue
+            if args[0] == "-c":
+                # H281: a setting for one git command can make it run a program (a pager, an external diff).
+                return _ask("run git with a setting of its own", "git -c")
+            if args[0] == "-C" and len(args) > 1 and not self.inside(args[1]):
+                if not self.in_hq(args[1]):
+                    return _ask("run git outside your workspace", "git elsewhere")
+                in_hq = True
+            args = args[2:]
+        if not args:
+            return Decision(ALLOW, "git")
+        sub, rest = args[0], args[1:]
+        if sub in SAFE_GIT_READ:
+            why = _git_writes(sub, rest)
+            if why:
+                return _ask(f"run git {sub} that way", why)
+            return Decision(ALLOW, "looking at git")
+        if in_hq:
+            return _ask(f"run git {sub} in HQ", "a git change in HQ")
+        if sub == "add":
+            files = [a for a in rest if a != "--"]
+            bad = [a for a in files if a.startswith("-") or a in (".", "*", ":/", "./") or any(c in a for c in "*?[")]
+            dirs = [a for a in files if not a.startswith("-") and Path(self.folder, a).is_dir()]
+            if not files or bad or dirs:
+                return _ask("add everything to git at once", "git add without named files")
+            if not all(self.inside(a) for a in files):
+                return _ask("add files from outside the folder to git", "git add outside")
+            if any(self.rel(a).parts[:1] and self.rel(a).parts[0] in self.protected for a in files):
+                return Decision(DENY, "that folder never goes to GitHub")
+            if self.after_call and not all(AFTER_CALL_ADD.match(self.rel(a).as_posix().casefold()) for a in files):
+                # F154 (5 November 2026): one file the call changed through HQ's own scripts (the planning, a calendar note) refused the
+                # whole add, so the log wasn't committed either and the notes looked lost. Say which, so the run adds the rest again.
+                other = [a for a in files if not AFTER_CALL_ADD.match(self.rel(a).as_posix().casefold())]
+                return Decision(DENY, f"after a call only the log, the lists, the notes and the transcript are committed, not {', '.join(other)}: "
+                                      "run git add again without them (HQ commits its own files), then commit", retry=True)
+            return Decision(ALLOW, "git add, files by name")
+        if sub in ("commit", "push") and is_backup():
+            # H56.3: only the main one commits; on the backup the notes go over with the sync.
+            return Decision(DENY, "this HQ is the backup now: only the main one commits, the files go over with the sync")
+        if sub == "commit":
+            if any(a in ("-a", "--all", "--amend", "--no-verify", "-n") or a.startswith("--amend") for a in rest):
+                return _ask("commit in a special way", "a special commit")
+            return Decision(ALLOW, "git commit")
+        if sub == "push":
+            if any(a in ("-f", "--force", "--force-with-lease", "--delete", "-d", "--mirror", "--all", "--tags") or a.startswith("--force") or a.startswith("+") for a in rest):
+                return _ask("force-push to GitHub", "a special push")
+            return Decision(ALLOW, "git push")
+        return _ask(f"run git {sub}", "another git command")
+
+    # -- the user's answer -------------------------------------------------------
+
+    def has_pending(self) -> bool:
+        return bool(self.pending)
+
+    # Fable clean-up (27 October 2026): a question stays open for this many of his turns when his words neither
+    # approve nor refuse it (a question back, "Is the checklist complete? Then yes", something else entirely); before,
+    # any other words dropped the question for good and were told to the agent as a no, so he had to say yes over and
+    # over and she asked again from scratch.
+    PENDING_TURNS = 2
+
+    def answer(self, words: str) -> tuple[bool | None, list[str]]:
+        """The user's next words after a question. Returns (answer, questions): True a clear yes (approved once),
+        False a clear no (dropped), None neither (the question stays pending for his next words, PENDING_TURNS at most)."""
+        questions = [q for _, _, q in self.pending]
+        if is_clear_yes(words):
+            self.approved |= {(t, k) for t, k, _ in self.pending}
+            self.pending.clear()
+            return True, questions
+        self.pending_turns += 1
+        if is_clear_no(words) or self.pending_turns >= self.PENDING_TURNS:
+            self.pending.clear()
+            return False, questions
+        return None, questions
+
+    def end_of_turn(self) -> None:
+        """A yes counts for the turn right after it, not for later."""
+        self.approved.clear()
+
+    # -- paths ------------------------------------------------------------------
+
+    def _base(self) -> Path:
+        return self._cwd or self.folder
+
+    def inside(self, path: str) -> bool:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        real = Path(os.path.realpath(p))
+        return real == self.folder or self.folder in real.parents
+
+    def in_hq(self, path: str) -> bool:
+        """H65: inside HQ itself (the app). The workspace link resolves to the folder, so it isn't counted here."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        real = Path(os.path.realpath(p))
+        return real == HQ_ROOT or HQ_ROOT in real.parents
+
+    def hq_script(self, path: str, name: str) -> bool:
+        """M1: one of HQ's own routine scripts (HQ is the app, outside the folder the call works in)."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        return Path(os.path.realpath(p)) == HQ_ROUTINE / name
+
+    def hq_app_script(self, path: str, name: str) -> bool:
+        """H132: one of HQ's own app scripts, like hq_script for the routine's."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "app" / name
+
+    def status_script(self, path: str, name: str) -> bool:
+        """F99: one of HQ's own status scripts, like hq_script for the routine's."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        return Path(os.path.realpath(p)) == HQ_ROUTINE.parent / "status" / name
+
+    def _is_log(self, arg: str) -> bool:
+        """F155: the coaching log as handover.py takes it: its name in the folder, with or without ./, or its full path."""
+        if arg.replace(os.sep, "/").lstrip("./") == LOG_REL:
+            return True
+        try:
+            return os.path.isabs(os.path.expanduser(arg)) and self.rel(arg).as_posix() == LOG_REL
+        except ValueError:
+            return False
+
+    def rel(self, path: str) -> Path:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = self._base() / p
+        return Path(os.path.realpath(p)).relative_to(self.folder)
+
+
+# -- helpers ------------------------------------------------------------------------
+
+# 9 October 2026: "i dont mind the confirmation, but lets make it like real". So a
+# natural answer counts ("yeah, perfect", "sounds good", "mm-hm, put it in"), and a yes with a
+# change ("yes, but make it seven") does not approve the old version: Claude makes the change.
+_YES = re.compile(
+    r"^(yes|yeah|yea|yep|yup|ya|ja|jazeker|sure|ok|okay|k|alright|all right|go ahead|go for it|go on|"
+    r"do it|please do|please|absolutely|of course|correct|that's right|right|exactly|that's fine|"
+    r"that is fine|fine|perfect|great|good|lovely|nice|cool|awesome|sounds good|sounds great|"
+    r"sounds perfect|definitely|mhm|mm hmm|mm hm|uh huh|why not|put it in|add it|book it|let's do it)\b"
+)
+_NOT = re.compile(
+    r"\b(no|not|don't|dont|do not|nope|wait|stop|hold on|cancel|never|nee|but|instead|actually|"
+    r"rather|change|make it|move it)\b"
+)
+_HARMLESS = re.compile(r"\b(no problem|no worries|why not|not a problem)\b")
+
+
+def _loops(segments: list[list[str]]) -> list[list[str]] | None:
+    """H277: `for l in A B C; do …; done` becomes its body once per value, with $l, "$l" filled in, so each step
+    is judged as if typed out. Only plain loops over plain words; anything else gives None (asks)."""
+    out: list[list[str]] = []
+    i = 0
+    while i < len(segments):
+        seg = segments[i]
+        if seg[:1] in (["while"], ["until"], ["if"], ["then"], ["else"], ["fi"], ["do"], ["done"]):
+            return None
+        if seg[:1] != ["for"]:
+            out.append(seg)
+            i += 1
+            continue
+        if len(seg) < 3 or seg[2] != "in" or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", seg[1]):
+            return None
+        var, values = seg[1], seg[3:]
+        if any("$" in v or "*" in v or "?" in v for v in values):
+            return None
+        body: list[list[str]] = []
+        j = i + 1
+        while j < len(segments) and segments[j] != ["done"]:
+            body.append(segments[j])
+            j += 1
+        if j >= len(segments) or not body or body[0][:1] != ["do"]:
+            return None
+        body[0] = body[0][1:]
+        if any(b[:1] in (["for"], ["do"], ["while"], ["if"]) for b in body):
+            return None
+        pat = re.compile(r"\$(?:\{%s\}|%s(?![A-Za-z0-9_]))" % (var, var))
+        for v in values or [""]:
+            for b in body:
+                out.append([pat.sub(v, w) for w in b])
+        i = j + 1
+    return out
+
+
+_DOLLAR = "\x00"
+
+
+def _hide_quoted_dollars(cmd: str) -> str:
+    """H281: a $ inside single quotes is plain text to the shell; hide it so it isn't taken for a variable.
+    27 October 2026: so is a $ that no name can follow (before a closing quote, a space, a pipe or the end), like the
+    end anchor in grep -v "^$"."""
+    out, single, double, i = [], False, False, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "\\" and not single and i + 1 < len(cmd):
+            out.append(cmd[i:i + 2])
+            i += 2
+            continue
+        if c == "'" and not double:
+            single = not single
+        elif c == '"' and not single:
+            double = not double
+        lone = c == "$" and (i + 1 == len(cmd) or cmd[i + 1] in " \t\n\"'|)\\")
+        out.append(_DOLLAR if (c == "$" and (single or lone)) else c)
+        i += 1
+    return "".join(out)
+
+
+RUNS_A_CLAUDE = ("claude", "codex", "openclaw")  # F145: as shellread.RUNS: a general-purpose agent outside HQ's harness
+_STARTS = {"nohup", "setsid", "sudo", "doas", "caffeinate"}  # F145: what only starts the next program, past cyclehook's wrappers
+# F145, the second check: programs that start a command they're handed, often in quotes or after their own arguments (a session, a lock file, a
+# host): with one of them in the line, any claude, codex or openclaw in it counts as started.
+_STARTERS = {"tmux", "screen", "script", "watch", "flock", "chrt", "taskset", "unbuffer", "busybox", "ssh", "osascript", "su", "runuser",
+             "systemd-run", "at", "batch", "parallel", "expect", "dtach", "abduco",
+             "strace", "ltrace", "gdb", "perf", "rlwrap", "cpulimit", "xvfb-run", "firejail", "docker", "podman"}  # F145, the third check
+_STARTER_RUNS = re.compile(r"(?<![\w-])(?:(?:uv|pipx|poetry|pdm|hatch|rye)\s+run|python[\d.]*\s+(?:-\S+\s+)*-m\s+pty)(?![\w-])")
+# F145: a line that only reads: its first program is one of these, so a claude, codex or openclaw in it is a word it looks for, not a program
+_PLAIN_READS = {"grep", "egrep", "fgrep", "rg", "which", "ls", "cat", "pgrep", "ps", "tail", "head", "git"}
+_CLAUDE_WORD = re.compile(r"(?:^|[\s\"'`/;&|(=])(?:claude|codex|openclaw)(?=[\s\"'`;&|)]|$)")
+_PACKAGE_RUN = re.compile(r"(?<![\w-])(?:npx|bunx|pnpx|(?:pnpm|yarn|bun)\s+(?:dlx|x|exec)|npm\s+(?:exec|x)|deno\s+run)\b[^;&|\n]*"
+                          r"(?:@anthropic-ai/claude-code|@openai/codex|(?<![\w@/-])(?:claude|codex|openclaw)(?![\w-]))")
+_CLAUDE_PACKAGE = re.compile(r"(?:@anthropic-ai/)?claude-code(?:@\S*)?$|@openai/codex(?:@\S*)?$")  # F145: the package, run by uv, pipx, poetry ...
+_CLAUDE_IN_CODE = re.compile(r"[\"'`](?:[^\"'`\s]*/)?(?:claude|codex|openclaw)(?:[\"'`\s]|$)")
+
+
+def _starts_a_claude(cmd: str, runs: str) -> bool:
+    """F145: whether a shell line would start claude, codex or openclaw: as its program, behind timeout, nohup, env and the like, inside what a
+    shell is handed (sh -c, eval, a heredoc), or named as a program in code handed to Python, node, perl or ruby (subprocess, os.system).
+    Reading or grepping for the word isn't starting it. HQ's own helper (routine/helper.py) starts its model itself, not from here.
+    A known limit of reading the words: a name built up inside code ("cl" + "aude") or a script written first and run after isn't caught here
+    (the script's write and its run ask on their own)."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import shellread
+        def program(words):
+            while words and (os.path.basename(words[0]) in _STARTS or os.path.basename(words[0]) in shellread.WRAPPERS):
+                words = shellread._program(" ".join(words[1:]))
+                while words and words[0].startswith("-"):
+                    words = words[1:]
+            return os.path.basename(words[0]) if words else ""
+
+        for piece in re.split(r"[;&|\n()`]+", runs):  # a bare claude, codex or openclaw anywhere in a piece that isn't a plain read
+            words = shellread._program(piece)
+            if any(os.path.basename(w) in RUNS_A_CLAUDE for w in words) and program(list(words)) not in _PLAIN_READS:
+                return True
+        for raw in re.split(r"[;&|\n]+", cmd):  # a starter anywhere in its line as written: what it's handed is often in quotes
+            toks = [w.strip("\"'`(),") for w in re.findall(r"[^\s\"'`]+", raw) if not re.match(r"[A-Za-z_]\w*=", w)]
+            if not toks or program(shellread._program(" ".join(toks))) in _PLAIN_READS:
+                continue
+            last_start, read_since = None, False
+            for i, w in enumerate(toks):
+                name = os.path.basename(w)
+                if name in _STARTERS or _STARTER_RUNS.match(" ".join(toks[i:i + 3])):
+                    last_start, read_since = i, False
+                elif last_start is not None and name in _PLAIN_READS:
+                    read_since = True  # ssh host "pgrep -af claude": the starter is handed a plain read
+                elif (name in RUNS_A_CLAUDE or _CLAUDE_PACKAGE.match(w)) and last_start is not None and not read_since:
+                    return True
+        if _PACKAGE_RUN.search(cmd):
+            return True
+        return bool(shellread._RUNS_CODE_TEXT.search(cmd) and _CLAUDE_IN_CODE.search(cmd))
+    except Exception:
+        return bool(re.search(r"(?:^|[\s;&|(`'\"/])(?:claude|codex|openclaw)\s+(?:-|exec\b)", cmd))
+
+
+def _what_runs(cmd: str) -> str:
+    """F114: a shell line as the cycles' hook reads it (shellread.ran): a quoted text with spaces in it is out, what's handed to a shell
+    or to Python to run stays in. On a failure the line as it is."""
+    try:
+        if str(HQ_ROUTINE) not in sys.path:
+            sys.path.insert(0, str(HQ_ROUTINE))
+        import shellread
+        return shellread.ran(cmd)
+    except Exception:
+        return cmd
+
+
+def hqpaths_mail_rel() -> str:
+    """F114: where the mail switch lives, relative and casefolded as _edit compares paths."""
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_REL.casefold()
+
+
+def _mail_words() -> str:
+    if str(HQ_ROUTINE) not in sys.path:
+        sys.path.insert(0, str(HQ_ROUTINE))
+    import hqpaths
+    return hqpaths.MAIL_SWITCH_WORDS
+
+
+def _after_edit(text: str, tool: str, inp: dict) -> str | None:
+    """F114: a file's text after an Edit, MultiEdit or Write, as the tool would leave it; None when an edit wouldn't apply."""
+    if tool == "Write":
+        c = inp.get("content")
+        return c if isinstance(c, str) else None
+    edits = inp.get("edits") if tool == "MultiEdit" else [inp]
+    for e in edits or []:
+        if not isinstance(e, dict):
+            return None
+        old, new = str(e.get("old_string") or ""), str(e.get("new_string") or "")
+        if not old or old not in text:
+            return None
+        text = text.replace(old, new) if e.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def in_memory(path: str, folder: Path) -> bool:
+    """H281: Claude's memory folder for this workspace (…/projects/<the workspace>/memory). Reading it is free."""
+    try:
+        real = Path(os.path.realpath(Path(path).expanduser()))
+        base = Path(os.path.realpath(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"))
+        rel = real.relative_to(base).parts
+    except (ValueError, OSError):
+        return False
+    slugs = {_slug(folder), _slug(Path(os.path.realpath(folder))), _slug(HQ_ROOT / "workspace")}
+    return len(rel) >= 2 and rel[0] in slugs and rel[1] == "memory" and ".." not in rel
+
+
+# H281: git's looks that can still write: an option that writes a file, or a branch or tag made or removed.
+_GIT_OUTPUT = ("--output", "-o")
+_BRANCH_LIST = {"-l", "--list", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--contains",
+                "--no-contains", "--merged", "--no-merged", "--points-at", "--show-current", "--column", "--no-column"}
+_TAG_LIST = {"-l", "--list", "--contains", "--no-contains", "--merged", "--no-merged", "--points-at", "-i",
+             "--ignore-case", "--column", "--no-column"}
+
+
+def _git_writes(sub: str, rest: list[str]) -> str:
+    """Why this git look would change something, or "" when it only looks."""
+    if any(a == "--output" or a.startswith("--output=") or (sub in ("diff", "log", "show") and a == "-o") for a in rest):
+        return "git writing into a file"
+    if any(a in ("--ext-diff", "--textconv") for a in rest):
+        return "git running a program of its own"
+    if sub in ("branch", "tag"):
+        listing = _BRANCH_LIST if sub == "branch" else _TAG_LIST
+        flags = [a for a in rest if a.startswith("-")]
+        names = [a for a in rest if not a.startswith("-")]
+        ok_flag = all(a.split("=")[0] in listing or a.startswith(("--sort", "--format", "-n", "--abbrev", "--color"))
+                      for a in flags)
+        lists = any(a.split("=")[0] in ("-l", "--list", "--contains", "--merged", "--no-merged", "--no-contains",
+                                       "--points-at", "-a", "--all", "-r", "--remotes") for a in flags)
+        if not ok_flag or (names and not lists):
+            return f"a git {sub} made, moved or removed"
+    return ""
+
+
+# H281: sed's own commands that only print. One command each, after an optional address or range and !:
+# p P l = q Q d D n N g G h H x z, s/…/…/ with g p i I m M or a number, y/…/…/. No w, W, e, r, R, braces or a file.
+_SED_ADDR = r"(?:\d+(?:~\d+)?|\$|/(?:[^/\\\n]|\\.)*/[IM]*)"
+_SED_CMD = re.compile(
+    r"\s*(?:" + _SED_ADDR + r"(?:\s*,\s*(?:" + _SED_ADDR + r"|[+~]\d+))?)?\s*!?\s*"
+    r"(?:[pPl=qQdDnNgGhHxz]|s(?P<d>[^\s\\\n])(?:(?!(?P=d))[^\\\n]|\\.)*(?P=d)(?:(?!(?P=d))[^\\\n]|\\.)*(?P=d)"
+    r"[gpiImM0-9]*|y(?P<e>[^\s\\\n])(?:(?!(?P=e))[^\\\n]|\\.)*(?P=e)(?:(?!(?P=e))[^\\\n]|\\.)*(?P=e))"
+    r"\s*(?:;|\n|$)")
+
+
+def _sed_only_prints(script: str) -> bool:
+    pos = 0
+    if not script.strip():
+        return False
+    while pos < len(script):
+        m = _SED_CMD.match(script, pos)
+        if not m or m.end() == pos:
+            return False
+        pos = m.end()
+    return True
+
+
+# awk: no system(), no getline, no > or | (writing to a file or a command), no ENVIRON, no loading code.
+_AWK_BAD = re.compile(r"system\s*\(|getline|[>|]|ENVIRON|PROCINFO|@load|@include|close\s*\(|fflush")
+_JQ_BAD = re.compile(r"\b(env|import|include|input_filename|\$__loc__|halt_error)\b|\$ENV")
+
+
+def _program_files(prog: str, args: list[str]):
+    """H281: for sed, awk and jq, check the program and give back the files they read; a Decision when it asks."""
+    scripts, files, i = [], [], 0
+    takes = {"sed": {"-e", "--expression", "-l", "--line-length"},
+             "awk": {"-F", "-v", "--field-separator", "--assign"},
+             "jq": {"--arg", "--argjson", "--indent"}}[prog]
+    plain = {"sed": {"-n", "--quiet", "--silent", "-E", "-r", "--regexp-extended", "-s", "--separate", "-z",
+                     "--null-data", "-u", "--unbuffered", "--posix", "--debug"},
+             "awk": {"--posix", "--traditional"},
+             "jq": {"-r", "-c", "-n", "-s", "-e", "-S", "-j", "-a", "-C", "-M", "--raw-output", "--compact-output",
+                    "--null-input", "--slurp", "--sort-keys", "--tab", "--join-output", "--ascii-output",
+                    "--exit-status", "--color-output", "--monochrome-output", "--raw-input", "-R"}}[prog]
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            files += args[i + 1:]
+            break
+        if a.startswith("-") and a != "-":
+            name = a.split("=")[0]
+            if prog == "sed" and (a.startswith(("-i", "--in-place")) or name in ("-f", "--file")):
+                return _ask("let sed change a file or read a script" if a.startswith(("-i", "--in")) else
+                            "let sed run a script from a file", "sed that writes or runs a file")
+            if prog == "awk" and (name in ("-f", "--file", "-i", "--include", "-l", "--load", "-E", "--exec")
+                                  or a.startswith(("-f", "-i", "-l", "-E"))):
+                return _ask("let awk run code from a file or load something", "awk that loads code")
+            if name in takes:
+                n = 2 if (prog == "jq" and name in ("--arg", "--argjson")) else 1
+                if prog == "sed" and name in ("-e", "--expression"):
+                    scripts.append(a.split("=", 1)[1] if "=" in a else (args[i + 1] if i + 1 < len(args) else ""))
+                if "=" in a and a.startswith("--"):
+                    n = 0
+                i += 1 + n
+                continue
+            if prog == "awk" and (a.startswith("-F") or a.startswith("-v")) and len(a) > 2:
+                i += 1
+                continue
+            if prog == "sed" and a.startswith("-") and not a.startswith("--") and set(a[1:]) <= set("nErsuz"):
+                i += 1
+                continue
+            if name in plain:
+                i += 1
+                continue
+            return _ask(f"run {prog} with {a}", f"{prog} with options")
+        if not scripts and not (prog == "sed" and any(x in ("-e", "--expression") or x.startswith("--expression=")
+                                                      for x in args)):
+            scripts.append(a)
+        elif prog == "awk" and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", a):
+            pass  # an awk assignment between the files
+        else:
+            files.append(a)
+        i += 1
+    if not scripts:
+        return _ask(f"run {prog}", f"{prog} without a program")
+    for sc in scripts:
+        if prog == "sed" and not _sed_only_prints(sc):
+            return _ask("run sed with more than printing", "a sed script that may write or run something")
+        if prog == "awk" and _AWK_BAD.search(sc):
+            return _ask("run awk with something that writes or runs a program", "an awk program that writes or runs")
+        if prog == "jq" and _JQ_BAD.search(sc):
+            return _ask("run jq that way", "a jq filter that reads the environment or loads code")
+    return [f for f in files if f != "-"]
+
+
+def _system_look(prog: str, args: list[str]) -> Decision:
+    """H281: looks at what's installed and running on this computer; anything that changes it asks."""
+    look = Decision(ALLOW, "a look at this computer")
+    if prog == "dpkg" and args and args[0] in ("-l", "-s", "--list", "--status"):
+        return look
+    if prog == "apt" and args[:1] == ["list"] and "--installed" in args and all(
+            not a.startswith("-") or a in ("--installed",) for a in args[1:]):
+        return look
+    if prog == "systemctl":
+        flags = [a for a in args if a.startswith("-")]
+        words = [a for a in args if not a.startswith("-")]
+        if words and words[0] in ("status", "is-active", "is-enabled") and all(
+                a in ("--user", "--system", "--no-pager", "-l", "--full", "-q", "--quiet") or a.startswith("--lines=")
+                for a in flags):
+            return look
+    if prog == "journalctl" and "--user" in args:
+        ok, i = True, 0
+        while i < len(args):
+            a = args[i]
+            if a in ("-n", "--lines", "-u", "--user-unit", "--unit", "-o", "--output", "--since", "--until", "-p",
+                     "--priority"):
+                i += 2
+                continue
+            if a in ("--user", "--no-pager", "-q", "--quiet", "-r", "--reverse", "-x", "--no-hostname") or \
+                    a.startswith(("--lines=", "--since=", "--until=", "--user-unit=", "--unit=", "--output=",
+                                  "--priority=")) or re.fullmatch(r"-n\d+", a):
+                i += 1
+                continue
+            ok = False
+            break
+        if ok:
+            return look
+    if prog == "ss" and args and all(re.fullmatch(r"-[ltnupaxwe46]+", a) for a in args):
+        return look
+    return _ask(f"run {prog} that way", f"{prog} beyond a look")
+
+
+def is_clear_yes(words: str) -> bool:
+    w = re.sub(r"[^a-z' ]", " ", words.lower())
+    w = re.sub(r"^\s*(hq|um+|uh+|hmm+|well)\s+", "", " ".join(w.split()))
+    return bool(_YES.match(w)) and not _NOT.search(_HARMLESS.sub(" ", w))
+
+
+_NO = re.compile(r"^(no|nope|nah|nee|don't|dont|do not|not now|never mind|nevermind|stop|wait|hold on|cancel|leave it|skip it|forget it)\b")
+
+
+def is_clear_no(words: str) -> bool:
+    """A clear no, a stop, or a yes with a change ("yes, but make it seven"): the question is dropped. Anything else
+    (a question back, another subject) isn't an answer to it."""
+    w = re.sub(r"[^a-z' ]", " ", words.lower())
+    w = re.sub(r"^\s*(hq|um+|uh+|hmm+|well|oh|okay|ok)\s+", "", " ".join(w.split()))
+    if _NO.match(w):
+        return True
+    return bool(_YES.match(w)) and bool(_NOT.search(_HARMLESS.sub(" ", w)))
+
+
+def _ask(question: str, why: str) -> Decision:
+    return Decision(ASK, why, question=f"Can I {question}?")
+
+
+def _calendar_question(name: str, inp: dict) -> str:
+    what = inp.get("summary") or inp.get("title") or ""
+    what = f" \"{what}\"" if what else ""
+    if "create" in name:
+        return f"add{what} to your calendar"
+    if "delete" in name:
+        return f"delete{what or ' an event'} from your calendar"
+    if "respond" in name:
+        return "answer that invitation in your calendar"
+    return f"change{what or ' an event'} in your calendar"
+
+
+def _has_others(ev: dict) -> bool:
+    """Other people in an event: an attendee who isn't him, or an organizer who isn't one of his calendars. F188: the
+    calendar tool takes invites in attendees and in the older attendeeEmails (plain addresses); either one counts."""
+    for a in ev.get("attendees") or []:
+        if not (isinstance(a, dict) and a.get("self")):
+            return True
+    if any(str(e).strip() for e in ev.get("attendeeEmails") or []):
+        return True
+    org = ev.get("organizer")
+    return isinstance(org, dict) and bool(org.get("email")) and not org.get("self")
+
+
+def _event_line(ev: dict) -> str:
+    def when(k):
+        t = ev.get(k) or {}
+        return str(t.get("dateTime") or t.get("date") or "?") if isinstance(t, dict) else "?"
+    bits = [f"\"{ev.get('summary') or '(no title)'}\"", f"{when('start')} to {when('end')}"]
+    if ev.get("location"):
+        bits.append(f"at {ev['location']}")
+    if ev.get("recurringEventId"):
+        bits.append("one of a series")
+    return ", ".join(bits)[:300]
+
+
+def _event_dicts(x, depth: int = 0):
+    """Every event in a calendar tool's answer, whatever wraps it (content blocks, JSON in text, a list)."""
+    if depth > 8:
+        return
+    if isinstance(x, str):
+        t = x.strip()
+        if t[:1] in "[{":
+            try:
+                yield from _event_dicts(json.loads(t), depth + 1)
+            except ValueError:
+                pass
+    elif isinstance(x, list):
+        for y in x:
+            yield from _event_dicts(y, depth + 1)
+    elif isinstance(x, dict):
+        if x.get("id") and isinstance(x.get("start"), dict):
+            yield x
+        for k, y in x.items():
+            if k in ("events", "items", "content", "text", "result", "structuredContent", "event") or isinstance(y, str):
+                yield from _event_dicts(y, depth + 1)
+
+
+def _mcp_parts(tool: str) -> tuple[str, str]:
+    if not tool.startswith("mcp__"):
+        return "", ""
+    parts = tool.split("__")
+    if len(parts) < 3:
+        return parts[-1], ""
+    return parts[1].removeprefix("claude_ai_"), "__".join(parts[2:])
+
+
+def _plain(name: str) -> str:
+    return name.replace("_", " ")
+
+
+def _key(inp: dict) -> str:
+    return json.dumps(inp or {}, sort_keys=True, ensure_ascii=False)
+
+
+def _writes(tool: str, inp: dict) -> bool:
+    if tool in EDIT_TOOLS:
+        return True
+    server, name = _mcp_parts(tool)
+    if "calendar" in server.lower() and name not in CALENDAR_READ:
+        return True  # H78: a calendar change goes without asking now, so a test run stops it here
+    if "gmail" in server.lower() and name in GMAIL_TIDY:
+        return True  # H213: tidying mail goes without asking, so a test run stops it here
+    if tool == "Bash":
+        c = inp.get("command") or ""
+        return bool(re.search(r"\bgit\s+(add|commit|push)\b", c))
+    return False
+
+
+def summarize(tool: str, inp: dict) -> str:
+    """A short line for the transcript: what the tool call was about."""
+    server, name = _mcp_parts(tool)
+    if server:
+        bits = [inp.get(k) for k in ("summary", "query", "q", "calendarId", "timeMin", "timeMax") if inp.get(k)]
+        return f"{server.replace('_', ' ')}: {_plain(name)}" + (f" ({', '.join(str(b) for b in bits)[:120]})" if bits else "")
+    if tool in READ_TOOLS | EDIT_TOOLS:
+        p = inp.get("file_path") or inp.get("path") or inp.get("pattern") or ""
+        return f"{tool} {Path(p).name if '/' in str(p) else p}"
+    if tool == "Bash":
+        return f"Bash: {(inp.get('command') or '')[:140]}"
+    if tool == "Skill":
+        return f"Skill {inp.get('skill') or inp.get('name') or ''}"
+    return tool

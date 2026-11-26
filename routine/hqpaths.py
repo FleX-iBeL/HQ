@@ -1,0 +1,487 @@
+"""Where HQ is, and where the user's own files are (phase M, M1, 10 October 2026).
+
+HQ is the app: the same for everyone, its code in this folder. The user's own data lives in one
+folder at the top of HQ called workspace, which the HQ repo ignores completely (it may be a link
+to a folder elsewhere). Runtime state (scratch/, .status/) stays in HQ, also
+ignored by the repo.
+
+    HQ         this app's folder (the parent of routine/)
+    WORKSPACE  HQ/workspace, or HQ_WORKSPACE
+    FOLDER     the workspace with the link resolved: where Claude works, git runs and jobs start
+               (the same path a chat in that folder has, so its settings and memory are found)
+    DATA       FOLDER/HQ: the roadmap with its status block and queue, and the call transcripts
+    ROADMAP    DATA/roadmap.md, or HQ_ROADMAP
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+
+HQ = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+WORKSPACE = os.environ.get("HQ_WORKSPACE") or os.path.join(HQ, "workspace")
+FOLDER = os.path.realpath(WORKSPACE)
+DATA = os.path.join(FOLDER, "HQ")
+ROADMAP = os.environ.get("HQ_ROADMAP") or os.path.join(DATA, "roadmap.md")
+
+# F17 (12 October 2026): the detailed flows on the VPS reached the real job list (through the backup's forward to
+# the main). A test (HQ_UNDER_TEST, set by app/happy_flows.py for itself and everything it starts) may never change
+# the real workspace's roadmap, nor hand anything to the other HQ through this HQ's real pairing.
+
+
+def real_roadmap() -> str:
+    """The real workspace's roadmap, whatever HQ_ROADMAP says: HQ_REAL_ROADMAP (the detailed flows name it once, so
+    every copy of HQ a flow starts knows it), else this HQ's own workspace link."""
+    return os.path.realpath(os.environ.get("HQ_REAL_ROADMAP")
+                            or os.path.join(os.path.realpath(os.path.join(HQ, "workspace")), "HQ", "roadmap.md"))
+
+
+# F102: what a key looks like, for HQ's privacy check, a commit of the workspace and a transcript's lines.
+KEY_PATTERNS = [
+    r"sk-ant-[A-Za-z0-9_-]{10,}",
+    r"\bgh[pousr]_[A-Za-z0-9]{20,}",
+    r"github_pat_[A-Za-z0-9_]{20,}",
+    r"\bxox[abpr]-[A-Za-z0-9-]{10,}",
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+]
+_KEYS = re.compile("|".join(f"(?:{p})" for p in KEY_PATTERNS))
+
+
+def key_hits(text: str) -> list:
+    """The keys in a text, each cut to what says what it is."""
+    return [m.group(0)[:8] + "…" for m in _KEYS.finditer(text or "")]
+
+
+def mask_keys(text: str) -> str:
+    """Every key in a text masked, kept readable: a transcript line never holds one."""
+    return _KEYS.sub(lambda m: m.group(0)[:4] + "[masked]", text or "")
+
+
+def under_test() -> bool:
+    return bool(os.environ.get("HQ_UNDER_TEST"))
+
+
+def real_support() -> str:
+    """This computer's real HQ memory, whatever HQ_SUPPORT says (HQ_REAL_SUPPORT names it for a test)."""
+    if os.environ.get("HQ_REAL_SUPPORT"):
+        return os.path.realpath(os.path.expanduser(os.environ["HQ_REAL_SUPPORT"]))
+    saved = os.environ.pop("HQ_SUPPORT", None)
+    try:
+        return os.path.realpath(support_dir())
+    finally:
+        if saved is not None:
+            os.environ["HQ_SUPPORT"] = saved
+
+
+def own_support_dirs() -> set:
+    """F137 (3 November 2026): where this computer's own HQ memory is when nothing points it elsewhere, worked out from
+    the account's home (its own and HOME's), never from HQ_SUPPORT or HQ_REAL_SUPPORT. A test that dropped HQ_SUPPORT on
+    the laptop read the real role.json there while HQ_REAL_SUPPORT named the wall's throwaway, so the check that compared
+    the two let three of its to-do rows through to the real main."""
+    homes = {os.path.expanduser("~")}
+    try:
+        import pwd
+        homes.add(pwd.getpwuid(os.getuid()).pw_dir)
+    except Exception:
+        pass
+    out = set()
+    for h in filter(None, homes):
+        out.add(os.path.realpath(os.path.join(h, "Library", "Application Support", "HQ") if IS_MAC
+                                 else os.path.join(h, ".local", "state", "hq")))
+    if not IS_MAC and os.environ.get("XDG_STATE_HOME"):
+        out.add(os.path.realpath(os.path.join(os.environ["XDG_STATE_HOME"], "hq")))
+    return out
+
+
+def guard_beside_roadmap(path: str) -> None:
+    """F17, F104: stop when a test is about to write a file in the real workspace's own folder, next to its roadmap: a process can hold the real path
+    from its import, or from a refused run that keeps a line before it's refused."""
+    if under_test() and os.path.dirname(os.path.realpath(path)) == os.path.dirname(real_roadmap()):
+        sys.stderr.write(f"Refused (F17): a test may not write {os.path.basename(path)} in the real workspace.\n")
+        sys.exit(2)
+
+
+def guard_roadmap(path: str | None = None) -> None:
+    """Stop with an error when a test is about to change the real workspace's roadmap (F17)."""
+    if under_test() and os.path.realpath(path or ROADMAP) == real_roadmap():
+        sys.stderr.write("Refused (F17): a test may not change the real workspace's roadmap "
+                         f"({path or ROADMAP}). Give it its own copy with HQ_ROADMAP.\n")
+        sys.exit(3)
+
+
+# H56.1 (12 October 2026): HQ also runs on a Linux server, as the routine and the watchdog (systemd there).
+# The Mac stays exactly as it was; on Linux the same parts find their own places and programs.
+IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+
+
+def where() -> str:
+    """H83 (12 October 2026): which HQ this is, shown small under the name on the status page, the phone
+    version and the Mac app. HQ_LABEL (the server's, e.g. VPS) when set, else this computer: "Local · macOS",
+    "Local · Linux" or "Local · Windows" (the wording is Claude's choice). status/server.mjs says the same."""
+    label = os.environ.get("HQ_LABEL", "").strip()
+    if label:
+        return label
+    return "Local · " + ("macOS" if IS_MAC else "Linux" if IS_LINUX else "Windows" if os.name == "nt" else sys.platform)
+
+
+_HOST = None
+
+
+def host_name() -> str:
+    """This computer's own short name, the one that doesn't move with the network (H162, 16 October 2026). On a
+    Mac the network's name (gethostname) follows the network it's on: on his phone's hotspot it became the phone's
+    ("iPhone-van-P took over" in the incident log of 14 October), so main and backup lost track of who is who.
+    There, scutil's LocalHostName (the name set in Sharing, e.g. My-MacBook-Air) comes first."""
+    global _HOST
+    if _HOST:
+        return _HOST
+    name = ""
+    if IS_MAC:
+        try:
+            import subprocess
+            name = subprocess.run(["/usr/sbin/scutil", "--get", "LocalHostName"], capture_output=True,
+                                  text=True, timeout=3).stdout.strip()
+        except Exception:
+            name = ""
+    _HOST = name or socket.gethostname().split(".")[0]
+    return _HOST
+
+
+def short_name() -> str:
+    """H88 (13 October 2026): this computer's short name for its heartbeat line on both status pages: HQ_LABEL
+    when set (the server's, VPS), "Laptop" on a Mac, else the computer's own name (Claude's choice)."""
+    label = os.environ.get("HQ_LABEL", "").strip()
+    if label:
+        return label
+    return "Laptop" if IS_MAC else host_name()
+
+
+def support_dir() -> str:
+    """HQ's own memory outside the workspace (the heartbeat, the watchdog's line and log, failures in a row):
+    ~/Library/Application Support/HQ2 on a Mac (where macOS lets the watchdog read without asking), else
+    $XDG_STATE_HOME/hq2 (~/.local/state/hq2). HQ_SUPPORT puts it elsewhere, e.g. for a second HQ on one
+    computer. watchdog.py runs on its own and works this out the same way."""
+    if os.environ.get("HQ_SUPPORT"):
+        return os.path.expanduser(os.environ["HQ_SUPPORT"])
+    if IS_MAC:
+        return os.path.expanduser("~/Library/Application Support/HQ2")
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "hq2")
+
+
+SUPPORT = support_dir()
+
+# Where a program may be when the helper runs it with a bare PATH (the Mac's helper app has only /usr/bin:/bin).
+_EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin", os.path.expanduser("~/.npm-global/bin"),
+               os.path.expanduser("~/.local/bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+
+
+def tool(name: str, default: str) -> str:
+    """A program's full path: HQ_<NAME> if set (e.g. HQ_NODE), else on a Mac `default` as before, else the
+    first one found on PATH or in the usual places, else `default`."""
+    env = os.environ.get("HQ_" + name.upper().replace("-", "_"))
+    if env:
+        return env
+    if IS_MAC:
+        return default
+    path = os.pathsep.join([os.environ.get("PATH", ""), *_EXTRA_PATH])
+    return shutil.which(name, path=path) or default
+
+
+def tailscale(*args: str) -> list[str]:
+    """The command for `tailscale <args>`. On Linux, Tailscale's serve settings belong to root unless the
+    user was made its operator, so it runs through `sudo -n` there (never asks for a password; fails
+    instead). HQ_TS_SUDO=0 leaves sudo out."""
+    ts = tool("tailscale", "/usr/local/bin/tailscale")
+    if IS_LINUX and os.geteuid() != 0 and os.environ.get("HQ_TS_SUDO", "1") != "0":
+        return ["sudo", "-n", ts, *args]
+    return [ts, *args]
+
+
+def listening(port: int) -> bool:
+    """Something listens on this computer's port: lsof on a Mac as before, a plain connect elsewhere."""
+    if IS_MAC:
+        r = subprocess.run(["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"], capture_output=True, text=True)
+        return bool(r.stdout.strip())
+    try:
+        socket.create_connection(("127.0.0.1", int(port)), timeout=2).close()
+        return True
+    except OSError:
+        return False
+
+
+def listener(port: int) -> int | None:
+    """F102: the pid listening on this computer's port, or None. By that exact pid, never by a name."""
+    tool_ = ["/usr/sbin/lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"] if IS_MAC else ["fuser", f"{port}/tcp"]
+    try:
+        r = subprocess.run(tool_, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pids = [int(x) for x in r.stdout.split() if x.isdigit()]
+    return pids[0] if pids else None
+
+
+def boottime() -> int:
+    """When this computer last started (epoch seconds): kern.boottime on a Mac, btime in /proc/stat on Linux."""
+    if IS_LINUX:
+        try:
+            for line in open("/proc/stat"):
+                if line.startswith("btime "):
+                    return int(line.split()[1])
+        except OSError:
+            pass
+        return 0
+    r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
+    m = re.search(r"sec = (\d+)", r.stdout)
+    return int(m.group(1)) if m else 0
+
+
+def waketime() -> int:
+    """When a Mac last woke from sleep (kern.waketime); 0 elsewhere (a server doesn't sleep)."""
+    if not IS_MAC:
+        return 0
+    r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.waketime"], capture_output=True, text=True)
+    m = re.search(r"sec = (\d+)", r.stdout)
+    return int(m.group(1)) if m else 0
+
+
+def unit(name: str) -> str:
+    """A systemd user unit of this HQ on Linux, e.g. unit("routine.timer") → hq-routine.timer. HQ_UNIT
+    changes the prefix, so a second HQ on one server has its own units."""
+    return f"{os.environ.get('HQ_UNIT') or 'hq2'}-{name}"
+
+
+def call_port() -> int:
+    return int(os.environ.get("HQ_PORT") or 7870)
+
+
+def status_port() -> int:
+    return int(os.environ.get("HQ_STATUS_PORT") or 4758)
+
+
+def shell() -> str:
+    """The shell for HQ's own scripts (start.sh, phone.sh): zsh on a Mac as before, sh elsewhere."""
+    return "/bin/zsh" if IS_MAC else "/bin/sh"
+
+
+def start_script() -> str:
+    """What starts the call line: app/start.sh on a Mac, app/start-linux.sh on Linux."""
+    return os.path.join(HQ, "app", "start.sh" if IS_MAC else "start-linux.sh")
+
+
+def window_kind() -> str | None:
+    """H56.2: where a job's or the mail check's window opens: "own" (the user's local/open-window), "terminal"
+    (a Mac's Terminal), "tmux" (a tmux session, on Linux or anywhere tmux is found off a Mac), else None."""
+    if part("open-window"):
+        return "own"
+    if IS_MAC:
+        return "terminal"
+    return "tmux" if shutil.which(tool("tmux", "tmux")) or os.path.isfile(tool("tmux", "tmux")) else None
+
+
+def session(name: str) -> str:
+    """H56.2: the tmux session of a job or the mail check, e.g. session("job-63") → hq-job-63 (HQ_UNIT's prefix,
+    so a second HQ on one server has its own sessions)."""
+    return unit(name)
+
+
+def ssh_host() -> str:
+    """H56.2: the name to reach this server by from the laptop, for the watch line on the status page:
+    HQ_SSH_HOST, else this computer's own name."""
+    return os.environ.get("HQ_SSH_HOST") or host_name()
+
+
+PANE_VARS = ("TMUX", "TMUX_PANE")
+
+
+def tmux_env(base: dict | None = None, **extra) -> dict:
+    """F138: the environment for a tmux command that must reach the server TMUX_TMPDIR names (or the default one), never the
+    server of the pane it's called from. Inside a pane tmux takes its socket from $TMUX before TMUX_TMPDIR, so a test run's
+    `kill-server` from inside a job's pane ended the job's own server, and the job with it (3 November 2026, job 497)."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if k not in PANE_VARS}
+    env.update(extra)
+    return env
+
+
+AGENT_PREFIX = os.environ.get("HQ_AGENT_PREFIX") or "com.hq2"  # this HQ's own LaunchAgent and unit ids
+
+
+def agent_label(name: str, default_prefix: str = AGENT_PREFIX) -> str:
+    """The id of this HQ's LaunchAgent, e.g. agent_label("watchdog"): <prefix>.<name>. Only its own prefix counts, so
+    another HQ installed on the same computer is never taken for this one."""
+    return f"{default_prefix}.{name}"
+
+
+# H59 (11 October 2026): the user's own builds. As asked on the call of 13:14: "if my friends on windows
+# have to build their own things, wont it erase what they have built and then need to do it again?" So HQ has one
+# place for them, local/ at the top of HQ: ignored by HQ's repo, never touched by an update, never uploaded. Where
+# HQ has a part that differs per computer (starting the call line, opening a job's window, the watchdog, starting
+# at login...), it looks there first: local/<name> with any of the endings below. [Claude's choice of the name
+# local/ and of looking by name.] The names HQ looks for are listed in INSTALL.md, "Your own parts".
+LOCAL = os.environ.get("HQ_LOCAL") or os.path.join(HQ, "local")
+_ENDINGS = ("", ".sh", ".py", ".ps1", ".cmd", ".bat")
+
+
+def part(name: str) -> str | None:
+    """The user's own version of a platform part, local/<name>[.sh|.py|.ps1|.cmd|.bat], or None."""
+    for end in _ENDINGS:
+        p = os.path.join(LOCAL, name + end)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def part_cmd(name: str, *args: str) -> list[str] | None:
+    """The command that runs the user's own part (by its ending), or None when there is none."""
+    p = part(name)
+    if not p:
+        return None
+    if p.endswith(".py"):
+        import sys
+        return [sys.executable or "python3", p, *args]
+    if p.endswith(".ps1"):
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", p, *args]
+    if p.endswith((".cmd", ".bat")):
+        return ["cmd", "/c", p, *args]
+    if p.endswith(".sh"):
+        return ["/bin/sh", p, *args]
+    return [p, *args]
+
+
+# F99, piece 1 of the foundation (30 October 2026): a team job or an agent's own run starts without his private folder:
+# no CLAUDE.md with its imports, no memory, no project settings (their hook pours his rules into every prompt, their
+# skills name him). It reads what it needs by path. The folder's deny list is gone with those settings, so the never-send
+# list comes with the job itself: the flags here, and cyclehook.py on any connector.
+JOB_ENV = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+           "HQ_IN_JOB": "1"}  # F100: a job's own process: it can't give itself his say-so
+NEVER_MAIL = ("send_message", "send", "reply", "forward", "send_draft")  # the same as policy.GMAIL_NEVER
+
+
+def never_mail_tools() -> list[str]:
+    return [f"mcp__claude_ai_Gmail__{t}" for t in NEVER_MAIL]
+
+
+def may_send(agent: str) -> bool:
+    """H298: the one switch for mail. His decision of 1 November 2026: drafts only, built so one switch can open it later. An agent
+    sends only with `"mail": "send"` on her line in HQ/agents/cycles.json, on the maker's HQ. No script or call sets it: it's his, by hand."""
+    import json
+    try:
+        d = json.load(open(os.path.join(FOLDER, "HQ", "agents", "cycles.json"), encoding="utf8"))
+        return bool(is_maker()) and ((d.get("agents") or {}).get(agent) or {}).get("mail") == "send"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+MAIL_SWITCH_REL = "HQ/agents/cycles.json"
+MAIL_SWITCH_WORDS = ("the mail switch is his, set only by his own hand in Settings: never from a call, a text or a job "
+                     "(F114). Leave the mail setting as it is")
+
+
+def mail_switch(text: str | None) -> dict:
+    """F114: each agent's mail setting in a cycles.json text, {agent: value}; {} when it doesn't read."""
+    import json
+    try:
+        d = json.loads(text or "")
+        return {str(k): v.get("mail") for k, v in (d.get("agents") or {}).items() if isinstance(v, dict) and "mail" in v}
+    except (ValueError, AttributeError, TypeError):
+        return {}
+
+
+def mail_switch_changed(old: str | None, new: str | None) -> bool:
+    """F114: whether a new cycles.json text changes the mail switch of any agent (set, changed or taken away)."""
+    return mail_switch(old) != mail_switch(new)
+
+
+def job_flags(agent: str | None = None) -> list[str]:
+    """The flags every team job and cycle starts with, next to JOB_ENV."""
+    return ["--setting-sources", "user"] + ([] if agent and may_send(agent) else ["--disallowedTools", ",".join(never_mail_tools())])
+
+
+def cells(line: str) -> list[str]:
+    """F101: a table row's cells, split only on unescaped pipes (a row may carry \\| in its words), stripped. Every
+    reader of the planning uses this one, so a row reads the same to the reviewer, the QA mark and the release."""
+    import re
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line.rstrip())[1:-1]]
+
+
+def join_cells(cs: list[str]) -> str:
+    """F101: the row back from cells(), its escaped pipes untouched."""
+    return ("| " + " | ".join(cs) + " |").replace("|  |", "| |").replace("|  |", "| |")
+
+
+OLD_NAME = "jar" + "vis"  # F104: HQ's old project name, written so that it stands nowhere: only for clearing what it left behind
+
+
+def is_maker() -> bool:
+    """F101: whether this HQ is the maker's (the workspace's features.json says so, or HQ_MAKER on that computer). Only
+    the maker's HQ follows the work line; a friend's stays on its released version."""
+    import json
+    env = os.environ.get("HQ_MAKER")
+    if env in ("0", "1"):
+        return env == "1"
+    try:
+        return json.load(open(os.path.join(FOLDER, "HQ", "features.json"), encoding="utf8")).get("maker") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+THE_MAKER = "the maker's"  # F104: not_friend's plain answer on the maker's own copy, where there's nothing to say
+
+
+PUBLIC_NAME = "FleX-iBeL"  # the name HQ's public repo commits as
+
+
+def _commits_as_maker() -> bool | None:
+    """F104: whether HQ's repo commits as the maker: its own config says the public name (push.own_identity sets it, only on a computer that
+    pushes with HQ's key). A friend's copy is a `git clone` over https, whose config has no name at all: her own name, if she sets one, is
+    never this one. None when it can't be told."""
+    try:
+        r = subprocess.run(["git", "-C", HQ, "config", "--local", "--get", "user.name"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode not in (0, 1):  # 1: the name isn't set
+        return None
+    return r.stdout.strip() == PUBLIC_NAME
+
+
+def not_friend() -> str:
+    """F104: why this HQ doesn't count as a friend's for what acts on it, the guard on the release; "" when it does. What the workspace says
+    wins: HQ_MAKER=0 only ever closes things elsewhere and means nothing here. is_maker() says no on a file it can't read, and that's no ground
+    to touch anything: a workspace that isn't there, or a features.json half written or broken, isn't a friend's. A workspace that's there
+    with no features.json is, the template has none, unless a second computer is set up: on a new backup the file may simply not have come
+    over yet. And whatever the workspace says, a repo that commits as the maker isn't a friend's: a lost "maker" key can't send his copy back."""
+    import json
+    if os.environ.get("HQ_MAKER") == "1":
+        return THE_MAKER
+    p = os.path.join(FOLDER, "HQ", "features.json")
+    if os.path.exists(p):
+        try:
+            d = json.load(open(p, encoding="utf8"))
+        except (OSError, ValueError):
+            return "features.json can't be read"
+        if not isinstance(d, dict):
+            return "features.json can't be read"
+        if d.get("maker") is True:
+            return THE_MAKER
+    else:
+        try:
+            paired = bool(json.load(open(os.path.join(SUPPORT, "role.json"), encoding="utf8")).get("peer"))
+        except (OSError, ValueError, AttributeError):
+            paired = False
+        if paired:
+            return "a second computer is set up and features.json hasn't come over"
+        if not os.path.exists(ROADMAP):
+            return "there's no workspace here"
+    as_maker = _commits_as_maker()
+    if as_maker is None:
+        return "it can't be told who this repo commits as"
+    return "this repo commits as the maker" if as_maker else ""
+
+
+def is_friend() -> bool:
+    """F104: whether this HQ is surely not the maker's, for what acts on it. See not_friend."""
+    return not not_friend()

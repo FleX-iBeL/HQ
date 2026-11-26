@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""F106: the call rules that aren't in a call's start, looked up when a turn needs them.
+
+A call starts with a small core (config.start_rules); how building HQ, the to-do list, the reminders and the rest work stands
+here, and the agent reads a topic before she acts on it.
+
+    python3 app/rules.py                  the topics
+    python3 app/rules.py TOPIC            the rule of one topic
+    python3 app/rules.py craft AGENT      how she works (her craft)
+    python3 app/rules.py maintain [N]     the walkthrough on keeping HQ running (MAINTAINING.md): its sections, or section N
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("HQ_RULES_LOOKUP", "1")
+import agents  # noqa: E402
+import config  # noqa: E402
+import maintaining  # noqa: E402
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        print("\n".join(f"{k}: {v}" for k, v in config.topics().items()))
+        return 0
+    if argv[0] == "maintain":  # the walkthrough on keeping HQ running, a section at a time
+        secs = maintaining.sections()
+        if not secs:
+            print(f"No walkthrough here ({maintaining.FILE}).")
+            return 2
+        if len(argv) == 1:
+            print("\n".join(f"{n}. {t}" for n, t, _ in secs))
+            return 0
+        body = maintaining.section(" ".join(argv[1:]))
+        if not body:
+            print(f"No section {' '.join(argv[1:])}. There are: " + "; ".join(f"{n} {t}" for n, t, _ in secs) + ".")
+            return 2
+        print(body.rstrip())
+        return 0
+    if argv[0] == "craft" and len(argv) > 1:
+        a = next((x for x in agents.load(config.FOLDER) if argv[1].lower() in (x["id"], x["name"].lower())), None)
+        if not a:
+            print(f"No agent called {argv[1]}.")
+            return 2
+        print(a.get("craft") or "")
+        return 0
+    text = config.rule_topic(argv[0])
+    if not text:
+        print(f"No topic {argv[0]}. There are: {', '.join(config.topics())}.")
+        return 2
+    print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

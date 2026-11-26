@@ -1,0 +1,533 @@
+"""H132: what each agent has said about herself, so she stays the same person on every call and in every text.
+
+The user, 14 October 2026 (call at 13:31): "Donna made some comment about she has a nice chair. When there are
+personality comments made like this, I want it to be stored in their own notes. So that their messaging in the
+future will stay consistent."
+
+One file per agent in the workspace (never in HQ's code): HQ/agents/<id>-about-herself.md, one fact per line
+("- …"). Written after a call with the call's notes (the wrap-up prompt, config.WRAP_UP_PROMPT) and by her direct-line
+chat when she says it there (direct_line.TEXT_RULES); agents.load gives each agent her list as `about_self`, and
+agents.persona puts it in front of her on every call, three-way call and text. Standard library only.
+
+    python3 app/about_self.py                     every agent's list
+    python3 app/about_self.py list AGENT          one agent's list (AGENT: her id or name)
+    python3 app/about_self.py add AGENT "FACT"    keep one fact (skipped when it's already there, refused when it's his life); prints the file
+    python3 app/about_self.py check [AGENT]       the lines already on a list that the filter would refuse; changes nothing
+    python3 app/about_self.py harvest-call FILE   H232: keep the new things the agents said about themselves on a call
+    python3 app/about_self.py harvest-text AGENT "TEXT"   the same for one of her texts
+    python3 app/about_self.py tidy                drop the near-repeats from every list
+
+H232 (the user's quick note, 20 October 2026: "you were supposed to keep making new personal comments and keeping
+track of them and build a unique personality this way"): the list only grew when the after-call work (on the cheap
+model, one optional line among many) remembered to run `add`, and a repeat only counted word for word, so it stayed at
+one or two lines, one of them twice. Now HQ itself harvests: after every call and every text of hers a small look
+(Haiku, no tools) reads what she said and returns only the new things about herself, a near-repeat is skipped, and
+her persona nudges her to bring in a new one now and then and an old one back, never contradicting one.
+
+H298, piece 2 (29 October 2026, the identity fix): the harvest had kept lines about the user's life as the agent's own
+(she "does yoga every morning", "biked to the shop in the rain"), because his sentences and hers about him read alike to
+the look. Now the look is told her life is only her own, and `own_life` holds each fact against what she really said:
+kept only when its words come from a sentence of hers in the first person that isn't about him. The lists already
+written are the user's to wipe (they're in the workspace); `tidy` drops only near-repeats.
+
+F98 (30 October 2026, his words: "bigger question is why is it happening AGAIN"): his life came back within a day,
+because an agent narrating his plans in the first person reads like her own life ("I've cleared my Tuesday and I'm
+biking to the clinic at 10:40"), and `add` had no filter at all while a call or text may run it without a yes. Now
+`refused` is the one filter on every way in: `add` itself holds it, so the harvest, the wrap-up and a command all go
+through it. A fact is refused when it's about him, when it's the shape of planning his days, or when it names his world:
+his name, the names and private words in me.md, a name in his calendar or to-do titles, or a day or a time together with
+something on his calendar. `own_life` also no longer counts a sentence that plans a day as hers. `check` shows what's
+already on a list; the lines themselves are his to take off. Fix round of F98 (31 October 2026, QA found 21 of his 48
+real lines of 29 October kept through `add`, which has no transcript to hold them against): `refused` also takes his
+own words (`his_words`, his lines as hislines.his_lines reads them, a turned "I" or "she" included) and whatever doesn't
+read as a line about her (`not_about_her`: a question, a reply, an order). And an ordinary word with a capital in one
+of his titles ("Small", "Session", "I'm") no longer counts as a name, so her own life isn't refused for it.
+"""
+from __future__ import annotations
+
+import os
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+MOST = 40  # facts kept per agent, the newest; Claude's choice
+LONGEST = 200  # characters per fact
+
+HEAD = ("# What {name} has said about herself\n\n"
+        "> **Private.** H132, H232: the little things {name} has told you about herself on calls and in her chat "
+        "(her day, her desk, her moods and opinions, the office), kept by HQ after every call and text, so she stays "
+        "the same person. Loaded with her character on every "
+        "call and text. Change or remove a line whenever you like.\n\n")
+
+
+def _folder() -> Path:
+    if os.environ.get("HQ_FOLDER"):
+        return Path(os.environ["HQ_FOLDER"])
+    ws = Path(os.environ.get("HQ_WORKSPACE", str(Path(__file__).resolve().parent.parent / "workspace")))
+    return Path(os.path.realpath(ws))
+
+
+def path(folder: Path | None, agent_id: str) -> Path:
+    return (folder or _folder()) / "HQ" / "agents" / f"{agent_id}-about-herself.md"
+
+
+def facts(folder: Path | None, agent_id: str) -> list[str]:
+    try:
+        text = path(folder, agent_id).read_text(encoding="utf8")
+    except OSError:
+        return []
+    return [l[2:].strip() for l in text.splitlines() if l.startswith("- ") and l[2:].strip()]
+
+
+def _key(fact: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", fact.lower()).strip()
+
+
+_SMALL = set("a an and the of to in on at by for with from is are was were be been am i im i'm my me she her he his "
+             "it its that this as or but has have had says said told say tell just very so has said she's".split())
+
+
+def _words(fact: str) -> set[str]:
+    return {w.rstrip("s") for w in _key(fact).split() if len(w) > 2 and w not in _SMALL}
+
+
+def same(a: str, b: str) -> bool:
+    """H232: the same detail, also when it's said a bit differently ("has a desk down the hall with a notebook" and
+    "has said she's at her desk down the hall with a notebook")."""
+    if _key(a) == _key(b):
+        return True
+    wa, wb = _words(a), _words(b)
+    if not wa or not wb:
+        return False
+    both = len(wa & wb)
+    return both / len(wa | wb) >= 0.6 or (both >= 3 and both >= 0.8 * min(len(wa), len(wb)))
+
+
+def _write(folder: Path | None, agent: dict, have: list[str]) -> None:
+    p = path(folder, agent["id"])
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(HEAD.replace("{name}", agent["name"]) + "".join(f"- {f}\n" for f in have), encoding="utf8")
+    os.replace(tmp, p)
+
+
+def add(folder: Path | None, agent: dict, fact: str) -> bool:
+    """Keep FACT in her list. False when it was empty, already there, or his life (F98: `refused`, on every way in)."""
+    fact = " ".join(str(fact).split())
+    if not fact or refused(folder, fact):
+        return False
+    fact = fact[:LONGEST].strip()
+    if not os.environ.get("HQ_ROLE_HERE"):  # F102: only the main writes it; from the backup it's handed over, like a text line
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+            import role
+            if role.is_backup():
+                _code, _o, _e, how = role.hand("about_self", ["add", agent["id"], fact], timeout=15)
+                if how in ("main", "kept"):
+                    return how == "kept" or _code == 0
+        except Exception:
+            pass
+    have = facts(folder, agent["id"])
+    if any(same(fact, f) for f in have):
+        return False
+    _write(folder, agent, (have + [fact])[-MOST:])
+    return True
+
+
+def tidy(folder: Path | None, agent: dict) -> int:
+    """H232: drop the near-repeats from her list, the first wording kept. How many went."""
+    have = facts(folder, agent["id"])
+    keep: list[str] = []
+    for f in have:
+        if not any(same(f, k) for k in keep):
+            keep.append(f)
+    if len(keep) < len(have):
+        _write(folder, agent, keep)
+    return len(have) - len(keep)
+
+
+# -- H232: the harvest, a small look after every call and text --------------------------------------------------
+
+HARVEST_MODEL = "haiku"   # Claude's choice: the cheapest, about a tenth of a cent a look
+HARVEST_BUDGET = 0.05
+HARVEST_TIMEOUT = 90
+HARVEST_SYSTEM = (
+    "You keep the small personal details colleagues at an office have said about themselves, so they stay the same "
+    "people. You get each colleague's list of what she said before, then what she said now. Return only the NEW "
+    "things she said about HERSELF, in the first person, as a person: her own day, her own life outside work, her "
+    "desk or the office, what she likes or can't stand, a habit of hers, an opinion, a mood, something that happened "
+    "to her. Her life is her own, at the office and around it. Never anything about the boss: not his day, his "
+    "health, his habits, his plans, his family, his things, his errands, his work, not even when she repeated it, "
+    "asked about it or cheered it on (\"you did your workout\", \"your bike\", \"how was the appointment\" are "
+    "about him, not her). Not tasks, not what she did or will do for him, not anything already on her list in other "
+    "words, not things she only asked. Each one a short line in the third person without her name, under 20 words. "
+    "Most of the time there is nothing new: then return an empty list. Answer with JSON only: "
+    "{\"new\": [{\"agent\": \"<her name>\", \"fact\": \"...\"}]}"
+)
+
+# H298, piece 2 (the identity fix): the harvest had been reading his sentences as hers (an agent "does yoga",
+# "biked to the bike shop in the rain"). The look above says it; this holds it in code: a fact is kept only when its
+# words come from a sentence she said in the first person about herself, not from one about him.
+_FIRST = re.compile(r"\b(i|i'm|i've|i'd|i'll|me|my|mine|myself)\b")
+_ABOUT_HIM = re.compile(r"\b(you|you're|you've|you'd|you'll|your|yours|yourself|he|him|his|himself|she's|the boss|the user)\b")
+_HIM_IN_FACT = re.compile(r"\b(he|him|his|himself|the boss|the user|you|your)\b")
+OWN_SHARE = 0.5  # at least this share of a fact's content words must come from her own first-person sentences
+
+# F98: the shape of planning a day, which is the work she does for him, never her own life: a verb of the calendar with a
+# day, a time or the calendar itself in the same sentence.
+_DAY = r"(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|today|tonight|tomorrow|weekend)"
+_CLOCK = r"(?:\d{1,2}[:.]\d{2}|\d{1,2}\s?(?:am|pm))"
+_WHEN = re.compile(rf"\b{_DAY}\b|\b{_CLOCK}\b|\b(?:calendar|agenda|appointments?|time ?blocks?|blocks?|schedule)\b")
+_PLAN_VERB = re.compile(r"\b(?:clear(?:s|ed|ing)?|block(?:s|ed|ing)?|book(?:s|ed|ing)?|mov(?:e|es|ed|ing)|"
+                        r"re-?schedul(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|plann?(?:s|ed|ing)?|put|puts|cancel(?:s|led|ling)?|"
+                        r"remind(?:s|ed|ing)?|free(?:s|d)?|sort(?:s|ed|ing)?)\b")
+
+
+# Fix round of F98: what doesn't read as a line about her, her own "I" included: a question, a reply to someone, an order.
+_REPLY = re.compile(r"^(?:(?:yes|yeah|yep|nope|ok|okay|oke|thanks|thank you|wtf|oh|hey|hi|hello|or maybe)\b|"
+                    r"(?:no|perfect|exactly|great|good|sure|right|alright|cool|nice|wow|what)(?:[,.!?:]|$))")
+_ORDER = re.compile(r"^(?:let'?s|lets|can you|could you|would you|will you|should we|do we|merge|add|build|fix|check|"
+                    r"run|push|send|remove|update|change|make|give|tell|show|put|move)\b")
+_MARKS = re.compile(r"(?:\s*\*\([^)]*\)\*)+\s*$")  # a transcript's *(typed)* and *(cut in)*
+_KEPT_DAY = re.compile(r"\s*\(\d{1,2} [A-Z][a-z]{2}\)$")  # the day the harvest keeps a fact with
+NAME_SHARE = 3  # a word from a title is a name when it's written with a capital at least this many times for each small one
+HIS_RUN = 3  # this many words in a row, in his order, are his words; fewer only when they're the whole of a line of his
+_CLIPPED = {"m", "s", "ve", "ll", "d", "re"}  # what's left of i'm, she's, i've once the punctuation is gone
+
+
+def _sentences(said: str) -> list[str]:
+    out = []
+    for line in said.splitlines():
+        line = re.sub(r"^- [0-9:]+ \*\*[^*]+:\*\*\s*", "", line)  # a transcript line's time and speaker
+        line = re.sub(r"^[A-Za-z][\w ]{0,30}:\s+", "", line)  # "Name: text"
+        out += [x.strip() for x in re.split(r"(?<=[.!?])\s+", line) if x.strip()]
+    return out
+
+
+def plans_a_day(text: str) -> bool:
+    """F98: the shape of planning a day: a calendar verb next to a day, a time or the calendar."""
+    low = text.lower()
+    return bool(_PLAN_VERB.search(low) and _WHEN.search(low))
+
+
+def _life_names(folder: Path) -> tuple[set[str], set[str]]:
+    """F98: what names his world in this workspace: (names, calendar words). Names are his own name, the names and
+    private words in me.md, and every name inside his calendar and to-do titles (a capital that isn't the title's first
+    word, on a word hardly ever written small in his to-do list, his calendar and his own writing). Calendar words are the content words of his calendar's titles. Read fresh; nothing of it is kept or in HQ's code."""
+    import json
+    names: set[str] = set()
+    try:
+        import me as _me
+        m = _me.load(folder)
+        names |= {w for w in re.findall(r"[^\W\d_][\w'-]+", " ".join([m.get("name") or "", m.get("hear") or ""]))}
+        names |= {str(w) for w in m.get("private") or []}
+    except Exception:
+        pass
+    titles: list[str] = []
+    calendar: list[str] = []
+    todo = ""
+    try:
+        d = json.loads((folder / "HQ" / "calendar.json").read_text(encoding="utf8"))
+        calendar = [str(e.get("title") or "") for e in d.get("events") or [] if isinstance(e, dict)]
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        todo = (folder / "challenges.md").read_text(encoding="utf8")
+        for line in todo.splitlines():
+            m2 = re.match(r"^\|\s*([^|]+?)\s*\|", line)
+            if m2 and not re.fullmatch(r"[-: ]+", m2.group(1)):
+                titles.append(m2.group(1))
+    except OSError:
+        pass
+    said = todo + "\n" + "\n".join(set(calendar))  # a weekly appointment counts once
+    for rel in ("current-situation.md", "map.md", "my-answers.md"):  # enough of his own writing to tell the two apart
+        try:
+            said += "\n" + (folder / rel).read_text(encoding="utf8")
+        except OSError:
+            pass
+    small = Counter(re.findall(r"(?<![\w'-])[a-z][\w-]+", said))
+    capital = Counter(re.findall(r"(?<=[\w,)] )[A-Z][\w-]+", said))
+    for t in titles + calendar:
+        for w in re.findall(r"[^\W\d_][\w'-]+", t)[1:]:
+            w = w.split("'")[0]  # Sam's is Sam, I'm is no name
+            # Fix round of F98: a capital in a title only makes a name when the word is hardly ever written small: "Small"
+            # or "Session" in a title is an ordinary word, a name typed small now and then stays a name.
+            if w[0].isupper() and len(w) > 2 and not w.isupper() and small[w.lower()] * NAME_SHARE <= capital[w]:
+                names.add(w)
+    days = {d.capitalize() for d in "monday tuesday wednesday thursday friday saturday sunday".split()}
+    months = {m3.capitalize() for m3 in "january february march april may june july august september october november december".split()}
+    names = {n for n in names if n and n not in days and n not in months}
+    words: set[str] = set()
+    for t in calendar:
+        words |= _words(t)
+    return names, words
+
+
+def _run(text: str) -> str:
+    """TEXT as his words are compared: the content words in their order, so a turned "I", "my" or "she" stays the same."""
+    words = re.findall(r"\w+", text.lower().replace("’", "'"))
+    return " ".join(w.rstrip("s") for w in words if w not in _SMALL and w not in _CLIPPED)
+
+
+def his_words(folder: Path, fact: str) -> bool:
+    """Fix round of F98: FACT is a line of his, or HIS_RUN words or more of one in his order. The lines are the ones a
+    say-so is held against (hislines.his_lines), read fresh, nothing of them kept."""
+    run = _run(_KEPT_DAY.sub("", _MARKS.sub("", fact)))
+    if not run:
+        return False
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "routine"))
+    import hislines
+    lines = (_run(line) for _, line in hislines.his_lines(str(folder)))
+    if len(run.split()) < HIS_RUN:
+        return run in lines
+    return any(f" {run} " in f" {line} " for line in lines)
+
+
+def not_about_her(fact: str) -> bool:
+    """Fix round of F98: a question, a reply or an order isn't a line about her, whoever typed it."""
+    low = _KEPT_DAY.sub("", _MARKS.sub("", fact)).lower().strip()
+    return low.endswith("?") or bool(_REPLY.search(low) or _ORDER.search(low))
+
+
+# F114 (2 November 2026, the checklist re-run: of 14 facts of the kind that came back before, 12 passed, health, sleep and where he lives
+# among them, worded without a name): a fact is also refused by its kind, whoever it names. An agent's own life is her desk, her
+# opinions, her moods, her habits and the office; her health, her sleep, where she lives and a calendar are the kinds his own life comes
+# back in, so they're never kept, on any way in (the harvest, the wrap-up and a call or a text all go through `add`).
+_HEALTH = re.compile(
+    r"\b(?:health|healthy|ill|illness|sick|sickness|burn-?out|burned out|burnt out|doctors?|gp|huisarts|physio\w*|psycholog\w*|psychiatr\w*|"
+    r"therap(?:y|ies|ist)|counsell?(?:or|ing)|clinics?|hospitals?|surgery|dentists?|diagnos\w*|symptoms?|medication|medical|medicines?|"
+    r"pills?|prescriptions?|bladder|digestion|digestive|bowels?|stool|cramps?|pains?|painful|injur(?:y|ed|ies)|anxiety|anxious|"
+    r"panic attacks?|depress(?:ion|ed|ive)|ptsd|trauma\w*|diabetes|blood (?:test|tests|sample|samples|pressure)|allerg(?:y|ies|ic)|"
+    r"migraines?|recover(?:y|ing) from|sick leave|hay fever)\b")
+_SLEEP = re.compile(
+    r"\b(?:sleep|sleeps|sleeping|sleepless|slept|asleep|insomnia|naps?|napping|bed ?time|bedtime|goes to bed|go to bed|went to bed|"
+    r"in bed|gets up|got up|get up|wak(?:e|es|ing|ened) up|woke|alarms?|night owl|tired(?! of)|exhausted|nightmares?|"
+    r"restless nights?|late nights?)\b")
+_HOME = re.compile(
+    r"\b(?:lives?|living) (?:in|at|on|near|above|below|by|with|just)\b|\bmov(?:ed|ing|es?) (?:in|into|house|to a new|out)\b|"
+    r"\b(?:address|postcode|post code|zip code|landlord|landlady|tenant|rent|rents|rented|renting|neighbou?rs?|neighbou?rhood|"
+    r"house number|front door|housing)\b|"
+    r"\b(?:a|her|the|his|my|their|our|new) (?:flat|apartment|studio)\b(?!\s+white)|\b\d+(?:st|nd|rd|th) floor\b|"
+    r"\b\w+(?:straat|street|laan|weg|gracht|plein|kade|road|avenue)\s+\d+")
+_CALENDAR = re.compile(
+    rf"\b(?:appointments?|calendar|agenda|meetings? (?:at|on|with)|booked|bookings?|time ?blocks?|schedule[ds]?|office days?|deadlines?|"
+    rf"due (?:on|by)|on the \d{{1,2}}(?:st|nd|rd|th))\b|"
+    rf"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?(?: and \w+days?)? (?:afternoons?|mornings?|evenings?|nights?)\b|"
+    rf"\b{_DAY}\b.*\b{_CLOCK}\b|\b{_CLOCK}\b.*\b{_DAY}\b")
+KINDS = (("health", _HEALTH), ("sleep", _SLEEP), ("where someone lives", _HOME), ("a calendar", _CALENDAR))
+
+
+def his_kind(fact: str) -> str:
+    """F114: the kind of his life FACT is about (health, sleep, where someone lives, a calendar), or ""."""
+    low = " ".join(_KEPT_DAY.sub("", _MARKS.sub("", str(fact))).lower().replace("’", "'").split())
+    return next((k for k, rx in KINDS if rx.search(low)), "")
+
+
+def refused(folder: Path | None, fact: str) -> str:
+    """F98: why FACT can't be kept as hers, or "". The one filter on every way in."""
+    folder = folder or _folder()
+    low = fact.lower()
+    if not_about_her(fact):
+        return "it's a question, a reply or an order, not something about her"
+    if _HIM_IN_FACT.search(low):
+        return "it's about him, not her"
+    if plans_a_day(fact):
+        return "it's the shape of planning a day, which is her work for him, not her own life"
+    kind = his_kind(fact)
+    if kind:  # F114: by its kind, not only by a name
+        return f"it's about {kind}, the kind of thing that's his life, never kept as hers"
+    names, calendar = _life_names(folder)
+    for n in sorted(names, key=len, reverse=True):
+        if re.search(rf"(?<![\w-]){re.escape(n.lower())}(?![\w-])", low):
+            return "it names someone or something from his own life"
+    if (re.search(rf"\b{_DAY}\b|\b{_CLOCK}\b", low)) and (_words(fact) & calendar):
+        return "it names a day or a time together with something on his calendar"
+    if his_words(folder, fact):
+        return "it's his own words, not hers"
+    return ""
+
+
+def own_life(fact: str, said: str) -> bool:
+    """H298, piece 2: whether a fact is about her own life, held mechanically against what she said: the fact names
+    nobody else, and at least half its content words appear in sentences of hers that are in the first person and not
+    about him (no you, your, he, his). A transcript full of his life, where every line of hers is about him, keeps
+    nothing. F98: a sentence that plans a day doesn't count as hers either, whoever's day she says it is."""
+    if _HIM_IN_FACT.search(fact.lower()):
+        return False
+    hers: set[str] = set()
+    for sent in _sentences(said):
+        low = sent.lower()
+        if _FIRST.search(low) and not _ABOUT_HIM.search(low) and not plans_a_day(low):
+            hers |= _words(sent)
+    want = _words(fact)
+    if not want or not hers:
+        return False
+    return len(want & hers) / len(want) >= OWN_SHARE
+
+
+def _claude() -> str:
+    if os.environ.get("HQ_CLAUDE"):
+        return os.environ["HQ_CLAUDE"]
+    import shutil
+    for c in (shutil.which("claude"), str(Path.home() / ".local/bin/claude"), "/opt/homebrew/bin/claude"):
+        if c and os.path.exists(c):
+            return c
+    return "claude"
+
+
+def look(lists: dict[str, list[str]], said: str) -> list[tuple[str, str]]:
+    """The small look: [(her name, a new fact)] from what was said. HQ_ABOUT_FAKE (JSON, the same shape as the
+    answer) stands in for Claude in the flows. Never raises."""
+    import json
+    fake = os.environ.get("HQ_ABOUT_FAKE")
+    try:
+        if fake is not None:
+            out = fake
+        else:
+            import subprocess
+            ask = "".join(f"{n}'s list so far:\n" + ("".join(f"- {f}\n" for f in have) or "- nothing yet\n") + "\n"
+                          for n, have in lists.items())
+            ask += "What was said now (only the colleagues' own lines count):\n" + said[-30000:]
+            p = subprocess.run([_claude(), "-p", "--model", HARVEST_MODEL, "--output-format", "json", "--tools", "",
+                                "--strict-mcp-config", "--setting-sources", "", "--max-budget-usd", str(HARVEST_BUDGET),
+                                "--no-session-persistence", "--system-prompt", HARVEST_SYSTEM],
+                               input=ask, capture_output=True, text=True, timeout=HARVEST_TIMEOUT)
+            out = json.loads(p.stdout).get("result") or ""
+        m = re.findall(r"\{.*\}", out, re.S)
+        got = (json.loads(m[-1]).get("new") or []) if m else []
+        names = {n.lower(): n for n in lists}
+        return [(names[str(g.get("agent", "")).strip().lower()], str(g["fact"]).strip()) for g in got
+                if isinstance(g, dict) and g.get("fact") and str(g.get("agent", "")).strip().lower() in names]
+    except Exception as e:
+        print(f"about_self: the look failed: {e!r}", file=sys.stderr)
+        return []
+
+
+def harvest(folder: Path | None, who: list[dict], said: str) -> list[tuple[str, str]]:
+    """Keep what's new about each agent in WHO from SAID; [(her name, fact)] that were kept."""
+    if not who or not said.strip():
+        return []
+    lists = {a["name"]: facts(folder, a["id"]) for a in who}
+    by = {a["name"]: a for a in who}
+    import time as _t
+    day = _t.strftime("%d %b").lstrip("0")  # so a mood or a day is read as then, not forever
+    # H298, piece 2: only a fact that comes from her own first-person sentences about herself is kept.
+    return [(n, f) for n, f in look(lists, said) if own_life(f, said) and add(folder, by[n], f"{f.rstrip('.')} ({day})")]
+
+
+def call_lines(text: str, everyone: list[dict]) -> tuple[list[dict], str]:
+    """From a call's transcript: the agents on it (the call's own, and anyone brought in) and their spoken lines."""
+    first = re.search(r"agent ([A-Za-z][\w ]*?)\s+·", text)
+    lower = text.lower()
+    on = [a for a in everyone if (first and a["name"].lower() == first.group(1).strip().lower())
+          or re.search(rf"\b{re.escape(a['name'].lower())} joined\b|\bput {re.escape(a['name'].lower())} on\b", lower)]
+    labels = ["HQ"] + [a["name"] for a in everyone]
+    said = [re.sub(r"<br>", " ", l) for l in text.splitlines()
+            if re.match(rf"^- [0-9:]+ \*\*({'|'.join(map(re.escape, labels))}):\*\*", l)]
+    return on, "\n".join(said)
+
+
+# H232: what a new detail could be about; one is picked per day, so it isn't the same thing every call
+TOPICS = ("your day so far", "something small at the office today", "what you did last night or plan to tonight",
+          "a little opinion you hold", "something tied to what's on his calendar today", "how your week is going",
+          "a habit of yours", "something you're looking forward to", "what you think of something going on in his life",
+          "your mood today, and why")
+
+
+def block(agent: dict, user: str = "the user", day: str | None = None) -> str:
+    """Her list, for her persona (agents.persona): never contradict it, bring an old one back, add a new one now and
+    then (H132, H232). The picks change once a day."""
+    import time as _t
+    import zlib
+    have = agent.get("about_self") or []
+    day = day or _t.strftime("%Y-%m-%d")
+    seed = zlib.crc32(f"{agent.get('id')}{day}".encode())
+    out = "\nYour own life, so you stay the same person (H132, H232). What you've said about yourself before:"
+    out += ("\n" + "\n".join(f"- {f}" for f in have)) if have else " nothing yet."
+    out += (f"\nYou're a real colleague of {user}'s with a life of your own: a day, a desk, moods, opinions, things "
+            f"outside HQ. Now and then, not every time and never forced, let a small new detail about yourself slip "
+            f"into what you say, the way a colleague does in passing (today it could be about {TOPICS[seed % len(TOPICS)]}). "
+            f"It gets kept, so make it something you'd want to stay true. ")
+    if have:
+        out += (f"Or bring an old one back the way a person remembers their own life (today maybe: \"{have[(seed >> 8) % len(have)]}\"), "
+                f"but not the same one call after call. ")
+    return out + ("Never contradict anything above. An opinion or a mood can change over time, as with anyone: then "
+                  "say why it changed.\n")
+
+
+def _find(folder: Path, who: str) -> dict | None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import agents
+    who = who.strip().lower()
+    return next((a for a in agents.load(folder) if who in (a["id"], a["name"].lower())), None)
+
+
+def main(argv: list[str]) -> int:
+    folder = _folder()
+    if not argv:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import agents
+        for a in agents.load(folder):
+            print(f"{a['name']}:", *(f"\n- {f}" for f in facts(folder, a["id"])) or [" nothing yet"], sep="")
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    if cmd in ("harvest-call", "harvest-text", "tidy"):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import agents
+        everyone = agents.load(folder)
+        if cmd == "tidy":
+            for a in everyone:
+                print(f"{a['name']}: {tidy(folder, a)} near-repeats dropped")
+            return 0
+        if cmd == "harvest-call" and len(rest) == 1:
+            try:
+                text = Path(rest[0]).read_text(encoding="utf8")
+            except OSError as e:
+                print(f"no transcript: {e}", file=sys.stderr)
+                return 1
+            who, said = call_lines(text, everyone)
+        elif cmd == "harvest-text" and len(rest) == 2:
+            a = _find(folder, rest[0])
+            who, said = ([a] if a else []), f"{a['name'] if a else rest[0]}: {rest[1]}"
+        else:
+            print(__doc__.split("\n\n")[-2], file=sys.stderr)
+            return 2
+        for n, f in harvest(folder, who, said):
+            print(f"kept for {n}: {f}")
+        return 0
+    if cmd == "check":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import agents
+        found = 0
+        for a in agents.load(folder):
+            if rest and rest[0].strip().lower() not in (a["id"], a["name"].lower()):
+                continue
+            for f in facts(folder, a["id"]):
+                why = refused(folder, f)
+                if why:
+                    found += 1
+                    print(f"{a['name']}: {f}\n    {why}")
+        print(f"{found} line(s) the filter would refuse." if found else "Nothing on the lists that the filter would refuse.")
+        return 0
+    if cmd not in ("list", "add") or not rest or (cmd == "add" and len(rest) != 2) or (cmd == "list" and len(rest) != 1):
+        print(__doc__.split("\n\n")[-2], file=sys.stderr)
+        return 2
+    a = _find(folder, rest[0])
+    if a is None:
+        print(f"no agent called {rest[0]}", file=sys.stderr)
+        return 1
+    if cmd == "list":
+        print(*(f"- {f}" for f in facts(folder, a["id"])) or [f"{a['name']}: nothing yet"], sep="\n")
+        return 0
+    why = refused(folder, " ".join(rest[1].split()))
+    if why:
+        print(f"refused: {why}. Nothing of his life is kept as hers (F98).", file=sys.stderr)
+        return 1
+    kept = add(folder, a, rest[1])
+    print(("kept" if kept else "already there") + f": {path(folder, a['id'])}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
