@@ -11,6 +11,7 @@
 (function () {
   if (!document.getElementById("todosheet")) return;
   let data = null, closedOpen = false, armed = "";
+  const ownOpen = {};  // an item with sub-items: are its own details unfolded (by id; open by itself when it has any)
   const css = document.createElement("style");
   css.textContent = `
   #todobody .bltot { border-radius:14px; background:var(--soft); padding:10px 13px; font:15px/1.35 -apple-system,sans-serif; }
@@ -58,6 +59,7 @@
     if (t.subs) p.push(t.subs_done + " of " + t.subs + " done");
     if (it.score) p.push("score " + it.score);
     if (it.links.length) p.push(it.links.length === 1 ? "1 link" : it.links.length + " links");
+    if (it.notes) p.push("notes");
     return p.filter(Boolean).join(" · ");
   }
   function listOf(key) { return ((data && data.lists) || []).find(l => l.key === key) || null; }
@@ -94,7 +96,7 @@
     ck.setAttribute("aria-label", (it.state === "done" ? "Open again: " : "Done: ") + it.name);
     ck.addEventListener("click", () => change({ do: it.state === "open" ? "done" : "open", item: it.id }));
     const b = el("button", "it"); b.type = "button"; b.appendChild(el("span", "", it.name));
-    const m = meta(it); if (m) b.appendChild(el("small", "", m));
+    const m = meta(it); b.appendChild(el("small", "", m || (it.state === "open" ? "Tap to give it a price, a goal, links, notes" : "")));
     b.addEventListener("click", () => go(key, path.concat(it.id)));
     r.append(ck, b);
     return r;
@@ -159,12 +161,7 @@
     }
     return c;
   }
-  function drawItem(l, path, chain) {
-    const it = chain[chain.length - 1];
-    todoTitle.textContent = l.name;
-    if (chain.length > 1) todoBody.appendChild(el("div", "blcrumb", chain.slice(0, -1).map(x => x.name).join(" › ")));
-    todoBody.appendChild(field("Name", input(it, "name")));
-    if (it.sub.length) todoBody.appendChild(totalsCard("With everything under it", it.totals));
+  function details(it) {  // everything one item can hold; a sub-item has exactly the same
     todoBody.appendChild(field("Kind", chips(it, "kind", [["experience", "Experience"], ["product", "Product"], ["service", "Service"]])));
     const two = el("div", "two"), sel = el("select");
     for (const [v, w] of [["once", "once"], ["month", "a month"], ["year", "a year"]]) { const o = el("option", "", w); o.value = v; o.selected = (it.every || "once") === v; sel.appendChild(o); }
@@ -190,9 +187,30 @@
     const ta = el("textarea"); ta.value = it.notes || ""; ta.placeholder = "Anything you want to remember about it";
     ta.addEventListener("change", () => { if (ta.value.trim() !== (it.notes || "")) change({ do: "set", item: it.id, field: "notes", value: ta.value.trim() }); });
     todoBody.appendChild(field("Notes", ta));
-    todoBody.appendChild(el("div", "blhead", "Sub-items" + (it.totals.subs ? " · " + it.totals.subs_done + " of " + it.totals.subs + " done" : "")));
-    rows(it.sub, l.key, path);
-    todoBody.appendChild(addBox("Add a sub-item", { under: it.id }));
+  }
+  function drawItem(l, path, chain) {
+    const it = chain[chain.length - 1];
+    todoTitle.textContent = l.name;
+    if (chain.length > 1) todoBody.appendChild(el("div", "blcrumb", chain.slice(0, -1).map(x => x.name).join(" › ")));
+    todoBody.appendChild(field("Name", input(it, "name")));
+    if (it.sub.length) {
+      // an item that holds others: what's under it comes first, each with its own price, goal, links and notes
+      todoBody.appendChild(totalsCard("With everything under it", it.totals));
+      todoBody.appendChild(el("div", "blhead", "Sub-items · " + it.totals.subs_done + " of " + it.totals.subs + " done"));
+      rows(it.sub, l.key, path);
+      todoBody.appendChild(addBox("Add a sub-item", { under: it.id }));
+      const has = !!(it.kind || it.price || it.by || it.hours || it.score || it.links.length || it.notes);
+      const open = it.id in ownOpen ? ownOpen[it.id] : has;
+      const f = el("button", "blfold", (open ? "▾ " : "▸ ") + "This item's own price, goal, links and notes"); f.type = "button";
+      f.addEventListener("click", () => { ownOpen[it.id] = !open; const at = todoBody.scrollTop; todoDraw(); todoBody.scrollTop = at; });
+      todoBody.appendChild(f);
+      if (open) details(it);
+    } else {
+      details(it);
+      todoBody.appendChild(el("div", "blhead", "Sub-items"));
+      todoBody.appendChild(el("div", "blcrumb", "Break it down: each sub-item gets its own price, goal, links and notes, and this one adds them up."));
+      todoBody.appendChild(addBox("Add a sub-item", { under: it.id }));
+    }
     const acts = el("div", "tdacts");
     const act = (text, body, cls) => { const b = el("button", cls || "", text); b.type = "button"; b.addEventListener("click", () => change(body)); acts.appendChild(b); return b; };
     if (it.state === "open") act("Done", { do: "done", item: it.id }, "ok"); else act("Open again", { do: "open", item: it.id }, "ok");
