@@ -142,6 +142,7 @@ WAYS_IN = {
                  f"'{{\"edits\": [{{\"old\": \"...\", \"new\": \"...\"}}]}}'"),
     "hq/notes.md": f"python3 \"{_APP / 'notes.py'}\" (add, clear, restore)",
     "hq/games.json": f"python3 \"{_APP / 'games.py'}\"",
+    "hq/lists.json": f"python3 \"{_APP / 'lists.py'}\"",
     "hq/coaching.json": f"python3 \"{_APP / 'coaching.py'}\"",
     "hq/calendar.json": f"python3 \"{HQ_ROUTINE / 'pings.py'}\", and the calendar connector for the calendar itself",
     "hq/calendar-todo.json": f"python3 \"{_APP / 'todo.py'}\" (plan, unplan)",
@@ -169,7 +170,7 @@ _SAYS = f"--said \"HIS WORDS\" (a line he said or typed on this call or in this 
 _PROOF = re.compile(r"^hq/(calls/[^/]+\.md|(direct-line|coaching-line|team-line)/thread\.jsonl)$")
 _ABOUT_LIST = re.compile(r"^hq/agents/[^/]+-about-herself\.md$")
 # The same files through the shell: a redirect, sed -i, tee, a copy or move over them, a Python one-liner, a git restore.
-_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|(?<![\w-])features\.json|"
+_GUARDED_NAME = (r"(?:roadmap\.md|sprint\.json|challenges\.md|inbox\.md|notes\.md|games\.json|(?<![\w-])lists\.json|coaching\.json|calendar\.json|mistakes\.jsonl|trail\.jsonl|(?<![\w-])features\.json|"
                  r"calendar-todo\.json|calendar-marks\.json|thread\.jsonl|[\w-]*-about-herself\.md)")
 _SHELL_WRITE = re.compile(
     rf">>?\s*[\"']?[^\s\"'|;&]*{_GUARDED_NAME}"
@@ -1158,6 +1159,14 @@ class Policy:
             return Decision(DENY, "making a six-week game or changing its design is the team's: write the design in "
                                   "their map and hand it to the team; from a call the games script reads, ticks, "
                                   "counts, notes, keeps the diary, the week's look back and the debrief")
+        # The bucketlist and the wishlist, the workspace's own HQ/lists.json: read them and keep them as the user says
+        # it. Deleting an item for good and bringing the old wishlist over are the page's (and a chat's on the computer).
+        if prog in ("python3", "python") and args and self.hq_app_script(args[0], "lists.py"):
+            if len(args) == 1 or args[1] in ("summary", "bucket", "wish", "bucketlist", "wishlist", "json", "show", "add",
+                                             "set", "link", "unlink", "done", "open", "drop", "move", "under", "undo"):
+                return Decision(ALLOW, "the bucketlist and the wishlist")
+            return Decision(DENY, "from a call the lists script reads, adds, changes, ticks off, lets go and moves; "
+                                  "deleting an item for good is done in the app")
         # H225: Life coaching's check-ins: what's due, and marking one done (or not now) once it's through.
         if prog in ("python3", "python") and args and self.hq_app_script(args[0], "coaching.py"):
             if len(args) == 1 or args[1] in ("summary", "json", "due") or (args[1] in ("done", "later") and len(args) == 3):

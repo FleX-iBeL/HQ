@@ -81,6 +81,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready", "go"},  # H269: a row's 
           "todo": {"add", "done", "letgo", "move", "tick", "untick", "order", "rename", "undo", "plan", "unplan", "repeat"},
           "pings": {"appt", "remind", "remind-every", "remind-stop", "cancel", "note", "note-clear", "watch", "unwatch", "out", "out-stop", "nudge", "nudge-done", "nudge-later", "call", "call-cancel", "answered"},
           "games": {"new", "spec", "tick", "count", "note", "diary", "week", "debrief", "undo"},
+          "lists": {"add", "set", "link", "unlink", "done", "open", "drop", "delete", "move", "under", "import-wish", "undo"},  # the bucketlist and the wishlist
           "coaching": {"done", "later"},
           "handover": {"edit", "put"},
           "review": {"clear", "reword", "add", "sitdown", "no", "keep", "now"},  # F77: a flag taken off on his say-so goes to the main, which writes sprint.json  # put (Fable, 27 October 2026): a whole small file, with one-way sync
@@ -100,6 +101,7 @@ WRITES = {"sprint": {"rank", "plan", "moscow", "ready", "go"},  # H269: a row's 
 TO_BOTH = {"update": {"back-here", "back-first", "forward-here"}}  # F104: what the other computer takes whichever it is: the code, not the data
 SCRIPTS = {"todo": os.path.join(os.path.dirname(HERE), "app", "todo.py"),
            "games": os.path.join(os.path.dirname(HERE), "app", "games.py"),  # H222
+           "lists": os.path.join(os.path.dirname(HERE), "app", "lists.py"),  # the bucketlist and the wishlist
            "coaching": os.path.join(os.path.dirname(HERE), "app", "coaching.py"),
            "agenda": os.path.join(os.path.dirname(HERE), "app", "agenda.py"),
            "set_status": os.path.join(os.path.dirname(HERE), "status", "set-status.py"),  # F101
@@ -116,7 +118,7 @@ PASS_ENV = ("HQ_PINGS_BY",  # what a handed request may carry over to the main (
 # is main?" The files the main writes by itself (the team, the mail check, the log's three-hour cycle, the routine's
 # reminders), and so the only one that writes them: on the backup a call or chat hands its change to these to the
 # main, which writes it; the sync brings it back. Paths are relative to the workspace.
-ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/coaching.json",
+ONE_WRITER = ("HQ/roadmap.md", "coaching/log.md", "inbox.md", "challenges.md", "HQ/games.json", "HQ/lists.json", "HQ/coaching.json",
               "HQ/sprint.json",  # H269: the planning's ranks
               "HQ/calendar-todo.json",  # H243: which block a to-do is planned in
               "HQ/usage-plan.json",  # F107: the plan in use

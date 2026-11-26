@@ -3158,13 +3158,14 @@ async function todoSend(body) {
   } catch (e) { todoSay("Couldn't reach HQ. Try again."); }
   return null;
 }
+function todoKey(v) { return v.lists ? "lists:" + v.lists.key + ":" + v.lists.path.join("/") : v.item ? "item" : v.list ? "list:" + v.list : "main"; }  // the bucketlist and the wishlist keep their own places
 function todoGo(view) {
-  todoKeep[todoView.item ? "item" : todoView.list ? "list:" + todoView.list : "main"] = todoBody.scrollTop;
+  todoKeep[todoKey(todoView)] = todoBody.scrollTop;
   todoView = view; todoSay(""); todoDraw();
-  const k = view.item ? "item" : view.list ? "list:" + view.list : "main";
-  todoBody.scrollTop = view.item ? 0 : (todoKeep[k] || 0);
+  todoBody.scrollTop = view.item ? 0 : (todoKeep[todoKey(view)] || 0);
 }
 function todoBack() {
+  if (todoView.lists && window.HQLists) return HQLists.back();  // lists.js
   if (todoView.item) todoGo({ list: todoView.from === "list" ? todoView.list : null, item: null, from: "main" });
   else todoGo({ list: null, item: null, from: "main" });
 }
@@ -3173,6 +3174,7 @@ function todoDraw() {
   todoEl.dataset.view = v;
   if (!todoData) { histNote(todoBody, "Loading…"); return; }
   if (todoData.off === "Free") { todoTitle.textContent = "To-do"; histNote(todoBody, "Free is on: none of your files. Turn it off in Settings to see your to-do list."); return; }
+  if (todoView.lists && window.HQLists && HQLists.ready()) { todoEl.dataset.view = "list"; return HQLists.draw(); }  // the bucketlist and the wishlist (lists.js)
   if (todoData.missing) { todoTitle.textContent = "To-do"; histNote(todoBody, "No to-do list yet. Tell " + (agendaAgent().name || "your agent") + " what's on your mind on a call, and it gets sorted in."); return; }
   if (v === "item") return todoDrawItem();
   if (v === "list") return todoDrawList();
@@ -3216,9 +3218,11 @@ function todoDraw() {
     }
     todoBody.appendChild(mx);
   }
-  const rest = (todoData.lists || []).filter(l => !["commit", "q1", "q2", "q3", "q4", "grocoff"].includes(l.kind));
-  if (rest.length) {
+  const hasLists = !!(window.HQLists && HQLists.ready());  // the bucketlist and the wishlist (lists.js); the wishlist there takes the old one's place
+  const rest = (todoData.lists || []).filter(l => !["commit", "q1", "q2", "q3", "q4", "grocoff"].includes(l.kind) && !(hasLists && l.kind === "wish"));
+  if (rest.length || hasLists) {
     const m = document.createElement("div"); m.className = "tdmore";
+    if (hasLists) HQLists.chips(m);
     for (const l of rest) {
       const b = document.createElement("button"); b.type = "button"; b.textContent = l.kind === "letgo" ? "Let go" : l.kind === "done" ? "Done" : l.name;
       const n = document.createElement("span"); n.textContent = String(l.items.length); b.appendChild(n);
@@ -3582,7 +3586,7 @@ function showTodo(open) {
   }
   todoEl.classList.toggle("open", open);
   todoBtn.setAttribute("aria-expanded", String(open));
-  if (open) { todoDraw(); loadTodo(); } else todoAsk++;
+  if (open) { todoDraw(); loadTodo(); if (window.HQLists) HQLists.load(); } else todoAsk++;
   showLayout();
 }
 todoBtn.addEventListener("click", () => showTodo(!todoOpen()));
@@ -4593,6 +4597,7 @@ paintTheme();
 sheetPull(tourEl, () => showTour(false));
 </script>
 <script src="games.js"></script>
+<script src="lists.js"></script>
 <script src="coach.js"></script>
 <script src="news.js"></script>
 <script>

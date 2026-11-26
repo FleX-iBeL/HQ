@@ -230,6 +230,15 @@ def _field(row: dict, name: str) -> str:
     return ""
 
 
+def _wish_moved() -> bool:
+    """Has the wishlist been brought over to the lists (lists.py import-wish)? Then wishes are kept there."""
+    try:
+        import lists as _lists
+        return bool((_lists._load().get("moved") or {}).get("wish"))
+    except Exception:
+        return False
+
+
 def read(p: Path | None = None) -> dict:
     """What the app shows: the matrix, the lists outside it, every item with its fields and details."""
     p = p or path()
@@ -254,6 +263,8 @@ def read(p: Path | None = None) -> dict:
                                                  doc["details"]),
                           "planned": plans(it["title"]) if lst["kind"] not in ("done", "letgo", "grocoff") else None})
         out.append({"key": lst["key"], "num": lst["num"], "name": lst["name"], "kind": lst["kind"], "items": items})
+    if _wish_moved():  # the old wishlist table stays in the file, the app shows the new one
+        out = [l for l in out if l["kind"] != "wish"]
     return {"lists": out, "log": doc["log"][:12], "how": doc["how"], "file": p.name,
             "changed": int(p.stat().st_mtime), "mail": very_important(), "blocks": blocks()}
 
@@ -566,6 +577,10 @@ def add(lst_want: str, title: str, notes: str = "", deadline: str = "", type_: s
         by: str = "", p: Path | None = None) -> dict:
     p = p or path()
     dst = find_list(parse(p.read_text(encoding="utf8")), lst_want)
+    if dst["kind"] == "wish" and _wish_moved():  # the wishlist lives with the bucketlist now (lists.py)
+        import lists as _lists
+        r = _lists.add(title, lst="wish", who=by, notes=notes)
+        return {"ok": True, "said": r["said"], "list": dst["key"]}
     many = split_items(title, dst["kind"])
     if len(many) > 1 or (many and dst["kind"] == "groceries"):
         return _add_many(dst, many, notes, deadline, type_, for_, by, p)

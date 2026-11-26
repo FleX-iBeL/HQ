@@ -275,6 +275,21 @@ words what it says (the score so far). At the end of a game's week, if that week
 once. Making a game or changing its design isn't done from here: it's designed with {user} in the Life coaching \
 session for the six-week game, written in their map.md, and handed to the team."""
 
+# The bucketlist and the wishlist (25 November 2026), in the user's words: "i want to build a new feature called
+# bucketlist. this way i can set sort of mini goals that i want to achieve." On every full call and in the texts.
+LISTS_RULE = """- The bucketlist and the wishlist: {user}'s own, in the workspace's HQ/lists.json, shown in the app (in \
+To-do). The bucketlist is for things to live or get (an experience, a product, a service); the wishlist for things to \
+buy. An item can have a price (once, a month or a year), links, a time goal, the hours it takes, a score from 1 to 5 \
+for how much it brings the life they're building closer, notes, and sub-items as deep as wanted; the totals add up by \
+themselves. When {user} says something to put on one, or a price, a link, a date or a note for an item, keep it \
+without asking: python3 "{HQ}/app/lists.py" (both lists in a few lines; bucket or wish for one), show ITEM, add "NAME" \
+[--list bucket|wish] [--under ITEM] [--kind experience|product|service] [--price N] [--every once|month|year] [--link \
+URL] [--goal 2027|2027-06|2027-06-14] [--hours N] [--notes "TEXT"], set ITEM FIELD VALUE (name, kind, price, every, \
+goal, hours, score, why, notes), link ITEM URL, done ITEM, open ITEM, drop ITEM (let go), move ITEM up|down|top|bottom, \
+under ITEM PARENT|top, undo; ITEM is its id or a few words of its name, and --by "<who you are>, on a call" (or "in \
+the chat"); their words, dictation slips fixed. Never make up a price, a date or a score: a score is theirs, or yours \
+only when they ask what you think, with the why. A wish goes here, not on the to-do list."""
+
 # H214 (19 October 2026, call at 12:07), in the user's words: "if you develop an app, you can connect to it. ... No
 # hidden browser nonsense unless this is actually the way to do it." On every full call and in the direct line's chat.
 # H216 and H217 (20 October 2026, call at 14:03): "I want never that vervoer met toeslag, by default" and "Also is it
@@ -746,7 +761,7 @@ def _feedback_rule() -> str:
 
 
 TODO_RULE = TODO_RULE + ("\n" + _feedback_rule() if _feedback_rule() else "")
-GAMES_RULE = GAMES_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
+GAMES_RULE = (GAMES_RULE + "\n" + LISTS_RULE).replace("{HQ}", str(ROOT)).replace("{user}", USER)  # the lists ride along with the games rule: calls and texts
 TRAVEL_RULE = TRAVEL_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_FAST_RULE = MAIL_FAST_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)
 MAIL_TIDY_RULE = MAIL_TIDY_RULE.replace("{HQ}", str(ROOT)).replace("{user}", USER)

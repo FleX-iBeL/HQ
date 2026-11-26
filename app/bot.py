@@ -506,6 +506,10 @@ if __name__ == "__main__":
     async def games_js():  # H222: the six-week game's sheet and its kinds of tracks
         return FileResponse(WEB / "games.js", media_type="text/javascript", headers=_NO_CACHE)
 
+    @app.get("/lists.js", include_in_schema=False)
+    async def lists_js():  # the bucketlist and the wishlist, drawn inside the To-do sheet
+        return FileResponse(WEB / "lists.js", media_type="text/javascript", headers=_NO_CACHE)
+
     @app.get("/coach.js", include_in_schema=False)
     async def coach_js():  # H225: the Coaching place
         return FileResponse(WEB / "coach.js", media_type="text/javascript", headers=_NO_CACHE)
@@ -1014,6 +1018,73 @@ if __name__ == "__main__":
         if code:
             return JSONResponse({"error": said or "Couldn't change the game"}, status_code=400)
         out = await asyncio.to_thread(_games.read)
+        out["said"] = said
+        out["undo"] = args[0] != "undo"
+        return JSONResponse(out, headers=_NO_CACHE)
+
+    # The bucketlist and the wishlist (lists.py), the workspace's own HQ/lists.json; a fresh install has none. The page
+    # reads them and changes them (x-hq: lists); calls and the texts do the same with the script. Never on a Free-only
+    # line; on the backup the main writes it, like the games.
+    import lists as _lists
+
+    @app.get("/api/lists", include_in_schema=False)
+    async def lists_read():
+        if config.FREE_ONLY:
+            return JSONResponse({"off": "Free", "lists": []}, headers=_NO_CACHE)
+        return JSONResponse(await asyncio.to_thread(_lists.read), headers=_NO_CACHE)
+
+    @app.post("/api/lists", include_in_schema=False)
+    async def lists_change(request: Request):
+        if request.headers.get("x-hq") != "lists":
+            return JSONResponse({"error": "Only the HQ page can change the lists"}, status_code=403)
+        if config.FREE_ONLY:
+            return JSONResponse({"error": "Not on Free"}, status_code=403)
+        try:
+            ask = await request.json()
+        except Exception:
+            ask = None
+        if not isinstance(ask, dict):
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        s = lambda k, n=300: str(ask.get(k) if ask.get(k) is not None else "")[:n]
+        do, item = s("do", 20), s("item", 200)
+        if do == "undo":
+            args = ["undo"]
+        elif do == "add" and s("name"):
+            args = ["add", s("name")] + (["--list", s("list", 10)] if s("list") else []) + (["--under", s("under", 40)] if s("under") else [])
+        elif do == "set" and item and s("field", 20) in _lists.FIELDS:
+            args = ["set", item, s("field", 20), s("value", 6000)]
+        elif do in ("link", "unlink") and item and s("url", 1000):
+            args = [do, item, s("url", 1000)]
+        elif do in ("done", "open", "drop", "delete") and item:
+            args = [do, item]
+        elif do == "move" and item and s("to", 10):
+            args = ["move", item, s("to", 10)]
+        elif do == "under" and item and s("parent", 40):
+            args = ["under", item, s("parent", 40)]
+        elif do == "import-wish":
+            args = ["import-wish"]
+        else:
+            return JSONResponse({"error": "no change asked"}, status_code=400)
+        if args[0] != "undo":
+            args += ["--by", "in the app"]
+        from policy import is_backup as _is_backup
+        if await asyncio.to_thread(_is_backup):
+            import role as _role
+            code, out_, err_, how = await asyncio.to_thread(_role.hand, "lists", args)
+            if code:
+                return JSONResponse({"error": " ".join((out_ + " " + err_).split())[:300] or "the main didn't take it"},
+                                    status_code=409)
+            out = await asyncio.to_thread(_lists.read)
+            out["said"] = " ".join(out_.split())[:300] + (" It comes back here with the sync in a moment."
+                                                         if how == "main" else "")
+            out["undo"] = args[0] != "undo"
+            out["handed"] = how
+            return JSONResponse(out, headers=_NO_CACHE)
+        code, said = await asyncio.to_thread(_lists.run, args)
+        said = " ".join(said.split())[:400]
+        if code:
+            return JSONResponse({"error": said or "Couldn't change the list"}, status_code=400)
+        out = await asyncio.to_thread(_lists.read)
         out["said"] = said
         out["undo"] = args[0] != "undo"
         return JSONResponse(out, headers=_NO_CACHE)
