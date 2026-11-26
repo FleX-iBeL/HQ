@@ -11,7 +11,8 @@
 # nothing), no git (the copy isn't a repo, so nothing is committed or pushed), no texts or pushes to the phone
 # (HQ_DIRECT_DRY=1, and the copy's phone list is emptied), nothing changed outside HQ by a call or a text (HQ_NO_OUTSIDE=1:
 # no mail, no calendar writes), no phone line, no routine (the every-minute routine is never started for it), and its
-# status server writes no history (HQ_STATUS_TRIAL=1).
+# status server writes no history (HQ_STATUS_TRIAL=1). A maps key saved there stays in its own file (HQ_MAPS_KEY_FILE), and
+# Turn everything on only says what it would do (HQ_FIX_DRY=1).
 cd "$(dirname "$0")/.." || exit 1
 ROOT="$PWD"
 WS="$ROOT/scratch/test-workspace"
@@ -21,7 +22,8 @@ PIDS="$ROOT/scratch/test-instance"
 export HQ_PORT=7872 HQ_STATUS_PORT=4759 HQ_WORKSPACE="$WS" HQ_SUPPORT="$SUP" HQ_ROLE_READ="$SUP" HQ_DIRECT_DRY=1 \
   HQ_NO_OUTSIDE=1 HQ_STATUS_TRIAL=1 HQ_UPDATE_LOOK=0 HQ_PID_FILE="$PIDS/call.pid" HQ_LOG="$PIDS/call.log" \
   HQ_STATUS_PID_FILE="$PIDS/status.pid" HQ_STATUS_LOG="$PIDS/status.log" \
-  HQ_TODO_UNDO="$PIDS/todo-undo.json" HQ_LISTS_UNDO="$PIDS/lists-undo.json" HQ_GAMES_UNDO="$PIDS/games-undo.json"
+  HQ_TODO_UNDO="$PIDS/todo-undo.json" HQ_LISTS_UNDO="$PIDS/lists-undo.json" HQ_GAMES_UNDO="$PIDS/games-undo.json" \
+  HQ_MAPS_KEY_FILE="$PIDS/maps-key" HQ_FIX_DRY=1
 unset HQ_PHONE
 
 copy() {

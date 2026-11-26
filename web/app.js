@@ -19,6 +19,22 @@ export const AREAS = { call, texts, agenda, todo, lists, inbox, pepper, mp, sett
 const CARDS = { donna: agenda, pepper, mp };
 
 const plain = (v) => v && typeof v === 'object' && !Array.isArray(v);
+// An agent's space rows from several areas: a list as one area gives it, and the keyed rows of
+// the others ({ texts: [...], pastCalls: [...] }). A keyed row takes the place of the list's row
+// with the same label (so texts and past calls fill Pepper's and Moneypenny's rows too), else it
+// comes after the list.
+function joinRows(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (plain(a) && plain(b)) return Object.assign({}, a, b);
+  const list = (Array.isArray(a) ? a : b).slice(), keyed = Array.isArray(a) ? b : a;
+  for (const row of Object.values(keyed)) {
+    if (!Array.isArray(row)) continue;
+    const i = list.findIndex((r) => Array.isArray(r) && r[0] === row[0]);
+    if (i >= 0) { if (row[1] !== '' || list[i][1] === '') list[i] = row; } else list.push(row);
+  }
+  return list;
+}
 // Values two areas both give as plain objects (like `chat`) are merged one level deep.
 function mergeInto(out, add) {
   for (const k in add) out[k] = plain(out[k]) && plain(add[k]) ? Object.assign({}, out[k], add[k]) : add[k];
@@ -49,9 +65,21 @@ export class Component extends DCLogic {
     this.setState((x) => ({ data: Object.assign({}, x.data, { [name]: typeof patch === 'function' ? patch(x.data[name]) : patch }) }));
   }
   // load(app) for every wired area: at mount, and when the app comes back (visible, online).
-  loadAll() {
+  // One load per area at a time: a load asked while that area's load still runs is dropped, and
+  // a return to the foreground loads again only when the last load is over a minute old (force:
+  // at mount and when the server answers again after being away).
+  loadAll(force) {
+    const now = Date.now();
+    this._loading = this._loading || {};
+    this._loadedAt = this._loadedAt || {};
     for (const a of Object.values(AREAS)) {
-      if (this.isReal(a) && a.load) Promise.resolve().then(() => a.load(this)).catch((err) => console.error('HQ: loading ' + a.NAME, err));
+      if (!this.isReal(a) || !a.load) continue;
+      if (this._loading[a.NAME]) continue;
+      if (!force && now - (this._loadedAt[a.NAME] || 0) < 60000) continue;
+      this._loading[a.NAME] = true;
+      this._loadedAt[a.NAME] = now;
+      Promise.resolve().then(() => a.load(this)).catch((err) => console.error('HQ: loading ' + a.NAME, err))
+        .then(() => { this._loading[a.NAME] = false; });
     }
   }
   // enter[screen](app) for every wired area, when that screen is opened (core's go()).
@@ -64,12 +92,21 @@ export class Component extends DCLogic {
   componentDidMount() {
     if (this._mountedOnce) return; // a design or device switch mounts again with the same state
     this._mountedOnce = true;
-    this.loadAll();
+    this.loadAll(true);
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => { if (!document.hidden) this.loadAll(); });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.setState({ clockNow: Date.now() }); this.loadAll(false); } });
       // Outside demo mode the offline state is the real one; the review switch is demo only.
-      api.onOffline((off) => { if (!this.demoMode) { this.setState({ offline: off }); if (!off) this.loadAll(); } });
+      api.onOffline((off) => { if (!this.demoMode) { this.setState({ offline: off }); if (!off) this.loadAll(true); } });
       if (!this.demoMode && api.offline) this.setState({ offline: true });
+      // The clock: one tick a minute, on the minute, for whatever shows the time (Now, the date,
+      // "now 14:20"); none while the page is hidden.
+      if (!this.demoMode) {
+        const tick = () => {
+          if (!document.hidden) this.setState({ clockNow: Date.now() });
+          this._clock = setTimeout(tick, 60000 - (Date.now() % 60000) + 50);
+        };
+        this._clock = setTimeout(tick, 60000 - (Date.now() % 60000) + 50);
+      }
     }
   }
   // Switch the design; boot.js mounts the new design's templates with this same state.
@@ -91,13 +128,17 @@ export class Component extends DCLogic {
       mergeInto(out, r.values || {});
       for (const k in r.agent || {}) {
         parts.agent[k] = parts.agent[k] || {};
-        mergeInto(parts.agent[k], r.agent[k]);
+        const rows = r.agent[k].rows;
+        const rest = Object.assign({}, r.agent[k]); delete rest.rows;
+        mergeInto(parts.agent[k], rest);
+        // in demo mode the prototypes' own rows stand as they are (a list replaces keyed rows)
+        if (rows) parts.agent[k].rows = this.demoMode ? (plain(parts.agent[k].rows) && plain(rows) ? Object.assign({}, parts.agent[k].rows, rows) : rows) : joinRows(parts.agent[k].rows, rows);
       }
       Object.assign(parts.sheets, r.sheets || {});
       Object.assign(parts.titles, r.titles || {});
       Object.assign(parts.submit, r.submit || {});
     }
-    return Object.assign(out, core.vals(st, ctx, parts));
+    return Object.assign(out, core.vals(st, ctx, parts, out));
   }
 }
 Object.assign(Component.prototype, core.methods, call.methods);

@@ -28,9 +28,20 @@ Two instances can run at once:
   Write to it freely: it is an HQ on its own (no hand-over to the real main, no sync, no git, so no commit or push), it
   pushes nothing to the phone (HQ_DIRECT_DRY=1: an agent's text answer is a canned line), a call or text changes nothing
   outside HQ (HQ_NO_OUTSIDE=1: no mail, no calendar writes), there's no phone line and no routine, and its status server
-  writes no history. `reset` stops it, copies the workspace again and starts it. Its pids are in `scratch/test-instance/`.
+  writes no history. A maps key saved there goes to its own file (HQ_MAPS_KEY_FILE in `scratch/test-instance/`), and
+  Turn everything on only says what it would do (HQ_FIX_DRY=1). `reset` stops it, copies the workspace again and starts
+  it. Its pids are in `scratch/test-instance/`.
 
-Both serve `web/` as it is on disk at every request.
+Both serve `web/` as it is on disk at every request; a change to `app/` or `status/` needs that instance started again.
+
+**Next to the current HQ (HQ_BESIDE=1, the default in `app/start.sh` for now).** The current HQ on this computer keeps
+the texts' phones, sends every text and push, reads the calendar again, runs the mail check, the reminders and the sync.
+So on both instances: `/direct/subscribe` and `/direct/report` answer `{"ok": true, "beside": true}` and change nothing,
+`/direct/key` answers `{"key": "", "beside": true}` (the page then signs nothing up and its bell says her texts still
+come through the current HQ app), `/direct.json` carries `"beside": true`, no push is sent from here, `/api/calendar?fresh=1`
+doesn't read the calendar again, `/api/coaching` doesn't refresh its file, `/api/lists` doesn't move an old wishlist,
+and the weather the page asks for is kept in this HQ's own memory (`weather-here.json`), not the shared `weather.json`.
+`HQ_BESIDE=0` once this HQ takes over.
 
 ## The page, the agents, the call
 
@@ -122,7 +133,7 @@ starts that call with `request_data.ring = "N"` and that agent. Nothing rings in
 | POST `/api/todo` | `x-hq: todo` | one of: `{"add": "text", "list": "1"}` (several lines: several items), `{"done": "<id or words>"}`, `{"letgo": "<id>", "why": "…"}`, `{"move": "<id>", "to": "2"}`, `{"tick": "<id>"}` / `{"untick": "<id>"}` (groceries), `{"order": "<id>", "place": 3}`, `{"rename": "<id>", "title": "…"}`, `{"plan": "<id>", "block": "<block id>"}`, `{"unplan": "<id>"}`, `{"repeat": "<id>", "rule": "every month"}` (`""` or `"off"` stops it), `{"undo": true}` | the list as above, plus `"said": "Added … to 1."`, `"undo": true` (an undo is possible now), `"id"` after a rename |
 | GET `/api/lists` | | | `{"lists": [{"key": "bucket"\|"wish", "name": "Bucketlist", "items": [{"id": "L23", "name", "kind", "price", "every", "links", "goal", "hours", "score", "notes", "status", "subs": [ … the same, as deep as wanted ], "totals"}], "totals", "open"}], "kinds": [...], "every": ["once", "month", "year"], "moved": {…}}` |
 | POST `/api/lists` | `x-hq: lists` | `{"do": "add", "name", "list": "bucket"\|"wish", "under": "L23"}`, `{"do": "set", "item": "L23", "field": "price", "value": "120"}` (fields: lists.FIELDS), `{"do": "link"\|"unlink", "item", "url"}`, `{"do": "done"\|"open"\|"drop"\|"delete", "item"}`, `{"do": "move", "item", "to": "wish"}`, `{"do": "under", "item", "parent"}`, `{"do": "undo"}` | the lists, plus `said` and `undo` |
-| GET `/api/notes` | | | `{"items": [{"id", "when", "text"}], "hers": {"name": "Donna", "items": [{"id", "when", "text"}], "watches": [{"n", "kind", "text", "until", "matches"}], "nudges": [{"n", "text", "paused"}]}}` his quick notes and Donna's notes |
+| GET `/api/notes` | | | `{"items": [{"id", "when", "text"}], "hers": {"name": "Donna", "items": [{"id", "when", "text"}], "watches": [{"n", "kind", "text", "until", "matches"}], "nudges": [{"n", "text", "paused"}]}, "cleared": [{"id", "when", "text", "cleared"}]}` his quick notes, Donna's notes, and his newest 30 cleared notes (each can come back with `restore`) |
 | POST `/api/notes` | `x-hq: notes` | `{"add": "text"}`, `{"clear": "<id>"}`, `{"restore": "<id>"}`, `{"clear_hers": "<id>"}`, `{"restore_hers": "<id>"}`, `{"nudge_done": 3}` | the notes as above |
 | POST `/api/here` | `x-hq: here` | `{"lat": 52.37, "lon": 4.89}` (only when he allows his location) | `{"ok": true}` |
 
@@ -184,7 +195,7 @@ Updates (on the call line itself):
 | GET `/direct.json` | | | Donna's line: `{"agent": {"id": "donna", "name": "Donna", "colour": "#6d28d9", "key": "<VAPID public key>", "phones": 1}, "line": "direct", "messages": [{"at": 1795718000.1, "from": "me"\|"agent", "text": "…", "why": "reply"\|"remind"\|"mail"\|…, "id": "…"}]}` (the last 200) |
 | GET `/direct.json?line=team` | | | Moneypenny's line, the same shape, `"line": "team"` |
 | POST `/direct/send` | `x-hq: direct` | `{"text": "…", "line": "team"` (optional; Donna's without), `"lat", "lon"` (optional)`}` | `{"ok": true}`; her answer lands in the thread a little later: poll `/direct.json` |
-| GET `/direct/key` | | | `{"key": "<VAPID public key>"}` for `pushManager.subscribe` |
+| GET `/direct/key` | | | `{"key": "<VAPID public key>"}` for `pushManager.subscribe` (`{"key": "", "beside": true}` next to the current HQ) |
 | POST `/direct/subscribe` | `x-hq: direct` | the browser's PushSubscription JSON | `{"ok": true, …}` |
 | POST `/direct/report` | `x-hq: direct` | what the page or its worker saw (`{"shown": "…", "error": "…"}`) | `{"ok": true}` |
 | GET `/direct-sw.js` | | | the service worker for pushed texts (register it at scope `/`). A tap opens the push's `url` (`/direct` or `/direct?line=team`), and a ring opens `/?ring=N&agent=ID` |

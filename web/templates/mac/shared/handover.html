@@ -5,5 +5,5 @@
 <sc-if value="{{ mpv.handover.has }}"><div class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 22px; overflow-wrap: anywhere">
 <sc-for list="{{ mpv.handover.blocks }}" as="b"><sc-if value="{{ b.h }}"><span class="lab" key="{{ b.key }}" style="margin-top: 6px">{{ b.text }}</span></sc-if><sc-if value="{{ b.p }}"><span>{{ b.text }}</span></sc-if><sc-if value="{{ b.li }}"><span style="display: flex; gap: 8px"><span class="muted">•</span><span class="grow">{{ b.text }}</span></span></sc-if><sc-if value="{{ b.quote }}"><span class="muted" style="padding-left: 12px; box-shadow: 2px 0 0 #e2e8f0 inset">{{ b.text }}</span></sc-if><sc-if value="{{ b.code }}"><span style="font: 13px/19px ui-monospace, Menlo, monospace; white-space: pre-wrap; background: #f8fafc; border-radius: 10px; padding: 8px 10px">{{ b.text }}</span></sc-if></sc-for>
 <span class="muted" style="font-size: 13px">{{ mpv.handover.meta }}</span></div></sc-if>
-<button class="pill" onClick="{{ back }}" style="background: #ca8a04; color: #0f172a">Mark as picked up</button>
+<button class="pill" onClick="{{ mpv.pickedUp }}" style="background: #ca8a04; color: #0f172a">Mark as picked up</button>
 </sc-if>

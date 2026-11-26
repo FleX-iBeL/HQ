@@ -488,7 +488,7 @@ function demoVals(st, ctx, D) {
       demoCall: { donna: () => { app.startCall('donna'); app.setState({ demo: true, tour: -1 }); }, pepper: () => { app.startCall('pepper'); app.setState({ demo: true }); } },
       incoming: st.incoming, pickUp: () => { app.setState({ incoming: false }); app.startCall('donna'); }, decline: () => { app.setState({ incoming: false }); say('Donna will text you instead'); },
       // what the templates gained for the real call, with the design's own words here
-      cl: { elapsed: '00:42', started: '14:19', ask: 'shall I move the gym to 20:00?', retry: () => app.setState({ offline: false }),
+      cl: { elapsed: '00:42', started: '14:19', ask: 'shall I move the gym to 20:00?', retry: () => app.setState({ offline: false }), aboutAppt: () => app.startCall('donna'), aboutTodo: () => app.startCall('donna'),
         msgOn: false, msg: '', againOn: false, again: () => {}, press: () => {}, noMenu: () => {}, send: () => {},
         orbHint: mac ? '. Click to see the next state' : '. Tap to see the next state',
         hint: mac ? 'Space bar: tap to mute, hold to talk' : 'Hold Mute to talk · tap the circle to see her states' }
@@ -595,6 +595,9 @@ function realVals(st, ctx, D) {
       pickUp: () => { const r = st.cRing; app.setState({ incoming: false, cRing: null }); app.startCall(r ? r.agent : 'donna', r ? { ring: r.n } : null); },
       decline: () => { const r = st.cRing; app.setState({ incoming: false, cRing: null }); say(((r && AG[r.agent]) || AG.donna).name + ' will text you instead'); },
       cl: {
+        // Call Donna about this: the open appointment, the open to-do item (their ids go with the call)
+        aboutAppt: () => app.startCall('donna', st.apptId ? { about: String(st.apptId) } : null),
+        aboutTodo: () => app.startCall('donna', st.tdItem ? { about_todo: String(st.tdItem) } : null),
         elapsed, started: st.cStarted ? clock(st.cStarted) : 'just now', ask: ask ? ask.text : '',
         retry: () => { if (st.cLineDown) connect(app); else app.api.get('api/busy').catch(() => {}); },
         msgOn: !!msg, msg, againOn: st.cAgain && st.cs === 'failed', again: () => connect(app),

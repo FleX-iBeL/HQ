@@ -92,7 +92,9 @@ export async function load(app) {
   app.setState({ voiceIds, free: store.get('hq-free') === 'on', sound: store.get('hq-sound') !== 'off',
     look: look === 'light' || look === 'dark' ? look : 'system', tourSeen: json('hq-tour-seen', []) });
   put(app, {});
-  await Promise.all([read(app, 'features', 'api/features'), read(app, 'agents', 'api/agents'), read(app, 'tour', 'tour.json'), loadWeather(app, false)]);
+  const [, , , wx] = await Promise.all([read(app, 'features', 'api/features'), read(app, 'agents', 'api/agents'), read(app, 'tour', 'tour.json'), loadWeather(app, false)]);
+  // The server only keeps the weather once something asked for it fresh: read it fresh once, so the chip on home has degrees.
+  if (wx && !wx.now && !wx.off && !wx.error) loadWeather(app, true);
   // The weather is read again every 15 minutes while the page is shown (the server only reads
   // the weather service again when its last read is over 15 minutes old).
   if (!wxTimer && typeof setInterval !== 'undefined') wxTimer = setInterval(() => { if (typeof document === 'undefined' || !document.hidden) loadWeather(app, true); }, 15 * 60000);

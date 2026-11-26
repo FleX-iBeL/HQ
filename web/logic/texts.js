@@ -190,7 +190,8 @@ const SAY = {
   oldkey: 'This phone signed up with an old key, so her texts can’t reach it. Tap the bell to fix that.',
   post: 'HQ can’t reach your phone right now. It tries again next time you open this.',
   check: 'Her texts couldn’t be checked on this phone. It tries again next time you open this.',
-  home: 'Add HQ to your home screen to get her texts.'
+  home: 'Add HQ to your home screen to get her texts.',
+  beside: 'Her texts still come through the current HQ app until HQ2 takes over.'
 };
 const iPhone = () => typeof navigator !== 'undefined' && /iPhone|iPad/.test(navigator.userAgent);
 const standalone = () => typeof navigator !== 'undefined' && (navigator.standalone === true || !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches));
@@ -256,6 +257,13 @@ async function pushLook(app, r, tap) {
   else if (!r.posted) r.problem = 'post';
 }
 async function pushCheck(app, tap) {
+  // Next to the current HQ (the server says beside), that one keeps the phones and sends her texts:
+  // this page signs nothing up and reports nothing.
+  const k0 = await app.api.get('/direct/key').catch(() => null);
+  if (k0 && k0.beside) {
+    patch(app, (o) => Object.assign({}, o, { push: { problem: 'beside', permission: '' } }));
+    return { problem: 'beside' };
+  }
   const r = { kind: 'page', origin: '', page: '', frame: false, top: '', standalone: false, permission: 'none', registered: false,
     scope: '', active: '', waiting: false, controlled: false, subscription: '', keyMatch: null, made: false, posted: false, problem: '', errors: {}, ua: '' };
   try {
@@ -278,6 +286,7 @@ async function pushCheck(app, tap) {
 async function bell(app) {
   const p = app.state.data[NAME] && app.state.data[NAME].push;
   if (p && p.problem === '') { app.say('Her texts reach this phone.'); return; }
+  if (p && p.problem === 'beside') { app.say(SAY.beside); return; }
   if (p && p.problem === 'nosupport') { app.say(iPhone() && !standalone() ? SAY.home : 'This browser can’t get her texts.'); return; }
   try { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); } catch (e) { /* asked */ }
   const r = await pushCheck(app, true);
@@ -297,6 +306,21 @@ function openAgent(app) {
     if (ORDER.includes(st.screen)) return st.screen;
   }
   return null;
+}
+// The first time this device opens HQ2 there is no mark yet of what was read: everything up to
+// now counts as read (it was read in the other HQ app), so a chat doesn't open with a hundred new.
+function firstSeen(app) {
+  const D = app.state.data[NAME];
+  if (!D) return;
+  for (const k of ORDER) {
+    let had = true;
+    try { had = localStorage.getItem(SEEN[k]) != null; } catch (e) { /* no storage: leave it */ }
+    const line = D.lines[k];
+    if (had || !line || !line.ok) continue;
+    const at = line.msgs.length ? line.msgs[line.msgs.length - 1].at : 0;
+    writeSeen(k, at);
+    patch(app, (o) => Object.assign({}, o, { seen: Object.assign({}, o.seen, { [k]: at }) }));
+  }
 }
 function markSeen(app) {
   const k = openAgent(app);
@@ -376,6 +400,7 @@ export async function load(app) {
     if (typeof location !== 'undefined' && !new URLSearchParams(location.search).has('app')) pushCheck(app, false);
   }
   await Promise.all([lookAll(app), fetchCalls(app)]);
+  firstSeen(app);
   markSeen(app);
   scrollEnd(true);
 }

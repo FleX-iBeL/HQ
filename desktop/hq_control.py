@@ -29,8 +29,14 @@ try:
 except Exception:  # the app must still show something
     hqpaths = incidents = None
 
-STATUS = "http://127.0.0.1:4748"
-CALL_PORT = 7860
+# This HQ's own two ports (app/start.sh: HQ_STATUS_PORT 4758, HQ_PORT 7870), never another HQ's on this computer.
+STATUS_PORT = int(os.environ.get("HQ_STATUS_PORT") or 4758)
+CALL_PORT = int(os.environ.get("HQ_PORT") or 7870)
+STATUS = f"http://127.0.0.1:{STATUS_PORT}"
+# HQ_BESIDE=1: this HQ runs next to another HQ on the same computer, which keeps the routine, the watchdog and the
+# texts; here Turn everything on only starts this HQ's own call line and status server.
+BESIDE = os.environ.get("HQ_BESIDE") == "1"
+START = os.path.join(HQ, "app", "start.sh")
 # The helper app; until it is rebuilt under its new name (H54, 11 October 2026), the old one still runs.
 HELPER_APPS = [os.path.expanduser("~/Applications/HQ2 Routine.app")]
 HELPER_APP = next((a for a in HELPER_APPS if os.path.isdir(a)), HELPER_APPS[0])
@@ -169,9 +175,14 @@ def plan(data):
     """What's off and how it would be turned on: [(key, what, command)]. Only things that are really off:
     a routine that runs is never stopped or restarted from here."""
     todo = []
-    if data is None and not listening(4748):
-        todo.append(("phone", "Started the status page",
-                     ["node", os.path.join(HQ, "status", "server.mjs"), "--quiet"]))
+    # The status page and the call line both start through this HQ's own app/start.sh, which starts only what
+    # isn't listening on this HQ's ports (it never stops or restarts anything).
+    if data is None and not listening(STATUS_PORT):
+        todo.append(("phone", "Started the status page", [START]))
+    if not listening(CALL_PORT):
+        todo.append(("call", "Started the call line", [START]))
+    if BESIDE:
+        return todo
     if not helper_pids() and os.path.isdir(HELPER_APP):
         todo.append(("helper", "Started the routine helper", ["/usr/bin/open", "-g", HELPER_APP]))
     label = watchdog_label()
@@ -183,8 +194,6 @@ def plan(data):
         todo.append(("watchdog", "Loaded the watchdog", ["/bin/launchctl", "load", plist]))
     elif wd_late and watchdog_loaded(label):
         todo.append(("watchdog", "Woke the watchdog up", ["/bin/launchctl", "kickstart", f"gui/{os.getuid()}/{label}"]))
-    if not listening(CALL_PORT):
-        todo.append(("call", "Started the call line", [os.path.join(HQ, "app", "start.sh")]))
     # H59: a user's own part in local/ goes first (start-status-page, start-helper, start-watchdog, start-call-line).
     own = {"phone": "start-status-page", "helper": "start-helper", "watchdog": "start-watchdog", "call": "start-call-line"}
     if hqpaths:
@@ -194,12 +203,17 @@ def plan(data):
 
 def fix(data, dry=False):
     done = []
+    started = False
     for key, what, cmd in plan(data):
         if dry:
-            done.append({"key": key, "what": what, "ok": None})
+            done.append({"key": key, "what": what, "ok": None, "would_run": cmd})
             continue
+        if cmd == [START] and started:  # one start.sh starts both
+            done.append({"key": key, "what": what, "ok": True})
+            continue
+        started = started or cmd == [START]
         try:
-            if cmd[0] == "node" or cmd[0].endswith("start.sh") or (hqpaths and hqpaths.LOCAL in " ".join(cmd)):
+            if cmd[0].endswith("start.sh") or (hqpaths and hqpaths.LOCAL in " ".join(cmd)):
                 # Detached, so it keeps running when the app quits.
                 subprocess.Popen(cmd, cwd=HQ, env={**os.environ, "PATH": PATH}, stdin=subprocess.DEVNULL,
                                  stdout=open(os.path.join(HQ, "scratch", f"desktop-{key}.log"), "a"),

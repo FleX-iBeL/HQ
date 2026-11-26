@@ -33,7 +33,7 @@ The core owns these files, and nobody else edits them: `logic/core.js`, `logic/u
   - `state.data.<NAME>` once you set `export const WIRED = true`.
 - While `state.data.<NAME>` is missing, your `vals` isn't called. Your holes stay empty, so the template shows its own empty state or nothing. Export `LOADING_OK = true` if you'd rather handle `D == null` yourself (for example, to show "Loading").
 - Read the real data from `D` and keep the shaping. The demo module shows the shape your shaping expects. Either make the server's answer fit that shape in `load`, or change your shaping.
-- `export async function load(app)`: fetch and store. It is called at mount, and again when the app is visible again or comes back online.
+- `export async function load(app)`: fetch and store. It is called once at mount, again when the server answers after being away, and on a return to the foreground only when that area's last load is over a minute old. A load asked while the area's own load still runs is dropped. A GET asked while the same GET is on its way gets that same answer (`api.js`), so two areas reading one endpoint cost one request. Any poll of your own stops while `document.hidden`.
   ```js
   export async function load(app) { app.setData('todo', await app.api.get('api/todo')); }
   ```
@@ -44,7 +44,18 @@ The core owns these files, and nobody else edits them: `logic/core.js`, `logic/u
   - A failed answer throws `ApiError { status, path, message, body }`.
   - A request that can't reach the server sets the app offline, and HQ shows its offline banner. Outside demo mode that banner is driven by real failures, not by the review switch.
 - After a change: post it, then `load(app)` again, or patch `state.data` with `app.setData(NAME, (old) => …)`.
+- Say what happened with `app.say(text, undoFn)`. With a function the toast shows Undo (for 8 seconds), which runs it and clears the toast; without one there's no Undo. In demo mode the prototypes' own rule decides.
+- The time: `state.clockNow` changes once a minute, on the minute, while the page is shown, so anything that shows the time renders again.
 - To-do item ids: the prototypes open the same example for every bucket item and every past game. `bucketId` (lists) and `gameId` (pepper) in state already say which one is open. Use them to pick the real item.
+
+## What the core shows from several areas
+
+Home, the spaces and the shells show words that come from several areas or the clock: they are under `hv` (core.js, `shellWords`), with the design's own words in demo mode. Each area feeds them through what it already gives:
+
+- An agent's card (`card(st, D)`: kicker, headline, sub, line) for Donna (agenda), Pepper and Moneypenny. A card may say `actionOn: false` to hide the button under it in her space, and `act: (app) => …` for what that button does.
+- Space rows and home lines, keyed or as a list. A keyed row from another area takes the place of a list's row with the same label, else it comes after it (so texts and past calls fill Pepper's and Moneypenny's rows).
+- `nudges` and `nudgeCount` (inbox), `wxChip` and `setv.weather` (settings), `mpv.banner` and `mpv.usage.bars` (mp), the call's state (`cRing`, `cStarted`), and the texts' lines (Thread's labels).
+- The agents' names, colours and what each is for come from `/api/agents` (read by the call area); the design's values stay where the server says nothing.
 
 ## Adding a hole
 

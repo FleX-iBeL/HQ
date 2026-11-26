@@ -22,6 +22,7 @@ export class ApiError extends Error {
 }
 
 const listeners = new Set();
+let lastOk = 0;
 let offline = typeof navigator !== 'undefined' && navigator.onLine === false;
 
 function setOffline(v) {
@@ -42,6 +43,7 @@ async function request(method, path, body, tag) {
     throw new ApiError(0, path, 'The server can’t be reached', null);
   }
   setOffline(false);
+  lastOk = Date.now();
   const text = await r.text();
   let data = text;
   try { data = text ? JSON.parse(text) : null; } catch (e) { /* not JSON: keep the text */ }
@@ -52,8 +54,21 @@ async function request(method, path, body, tag) {
   return data;
 }
 
+// A GET asked again while the same GET is still on its way gets that same answer: one request.
+const inFlight = new Map();
+function getOnce(path) {
+  if (inFlight.has(path)) return inFlight.get(path);
+  const p = request('GET', path);
+  inFlight.set(path, p);
+  const done = () => { if (inFlight.get(path) === p) inFlight.delete(path); };
+  p.then(done, done);
+  return p;
+}
+
 export const api = {
-  get: (path) => request('GET', path),
+  get: (path) => getOnce(path),
+  // when the server last answered (ms), for "This is from 14:02." while it can't be reached
+  get lastOk() { return lastOk; },
   post: (path, body, tag) => request('POST', path, body === undefined ? {} : body, tag),
   get offline() { return offline; },
   onOffline(fn) { listeners.add(fn); return () => listeners.delete(fn); }

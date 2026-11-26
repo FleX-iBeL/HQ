@@ -129,6 +129,8 @@ def _backup() -> bool:
     """This HQ is the backup of a pair (role.py); a test or a lone HQ is the main."""
     if os.environ.get("HQ_ROLE_HERE"):
         return False
+    if os.environ.get("HQ_BESIDE") == "1":  # next to the current HQ: what the page reads stays in this HQ's own file
+        return True
     try:
         import role
         return role.is_backup()

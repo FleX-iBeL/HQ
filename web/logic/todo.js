@@ -275,7 +275,12 @@ function realVals(st, ctx, D) {
     a: x.name, b: '',
     pick: () => { app.setState({ sheet: null }); if (it) send(app, { move: it.id, to: x.key }).then((r) => { if (r) app.setState({ tdList: x.key, tdItem: r.id || it.id }); }); }
   }));
+  // The overview's add box: HQ adds into a named list, so Enter asks which one first.
+  const pickRows = listsOf(d).filter((x) => !['done', 'letgo', 'grocoff'].includes(x.kind)).map((x) => ({
+    a: x.name, b: '', pick: () => { const t = app.state.tdPending; app.setState({ sheet: null, tdPending: '' }); if (t) send(app, { add: t, list: x.key }); }
+  }));
   const sheets = {
+    pickList: { title: 'Which list?', rows: pickRows },
     plan: { title: 'Plan it in a block', rows: planRows },
     repeat: { title: 'Comes back', rows: repRows },
     move: { title: iClosed ? 'Back on a list' : 'Move to another list', rows: moveRows }
@@ -296,7 +301,7 @@ function realVals(st, ctx, D) {
     agent: { donna: { rows, homeLines } },
     sheets,
     titles: { todoList: listTitle },
-    submit: { todoGro: addGro },
+    submit: { todoGro: addGro, todoOverview: (text) => { if (!d) return; app.setState({ tdPending: text, sheet: 'pickList' }); } },
     values: {
       boxes, item, itemDeco: 'none', tickLabel: 'Tick it off',
       tickItem: () => { if (!it) return; send(app, iGro ? { tick: it.id } : { done: it.id }, (x) => without(x, it.id)); app.back(); },

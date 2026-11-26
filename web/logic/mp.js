@@ -346,9 +346,11 @@ export const card = (st, D) => {
   const top = h[0];
   const hl = health(D.routines);
   const running = hl && !hl.ok ? hl.word + '.' : 'Everything is running.';
-  if (top && dayWords(top.date) === 'today') return { kicker: 'New hand-over', headline: top.title, sub: 'Ready for you and Claude Code', line: running + ' A hand-over is waiting for you.' };
+  // Read the hand-over under her card: the newest one; no hand-over, no button
+  const act = top ? { actionOn: true, act: (app) => openHandover(app, top.name) } : { actionOn: false };
+  if (top && dayWords(top.date) === 'today') return Object.assign({ kicker: 'New hand-over', headline: top.title, sub: 'Ready for you and Claude Code', line: running + ' A hand-over is waiting for you.' }, act);
   const w = working(D.status);
-  return { kicker: 'Status', headline: hl && !hl.ok ? hl.word : 'Everything is running', sub: w ? w.word + (w.headline ? ': ' + w.headline : '') : '', line: running };
+  return Object.assign({ kicker: 'Status', headline: hl && !hl.ok ? hl.word : 'Everything is running', sub: w ? w.word + (w.headline ? ': ' + w.headline : '') : '', line: running }, act);
 };
 
 export function vals(st, ctx, D) {
@@ -472,6 +474,7 @@ export function vals(st, ctx, D) {
     updateBtn: startUpdate, checkNow: check, reloadPage: isDemo ? proto.reload : () => { if (typeof location !== 'undefined') location.reload(); },
     updateSub: U ? U.sub : '', healthSub: H ? H.word.toLowerCase() : 'routines, the laptop, incidents',
     turnOn,
+    pickedUp: isDemo ? () => app.back() : () => { app.back(); app.say('HQ doesn’t keep track of picked-up hand-overs yet.'); },
     retry: isDemo ? () => {} : () => load(app)
   };
 

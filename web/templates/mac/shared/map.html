@@ -1,5 +1,5 @@
 <sc-if value="{{ s.map }}">
-<sc-if value="{{ pp.m.hasLayers }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">From the life you want in three to five years, down to this week. Tap a layer to work on it with Pepper.</span></sc-if>
+<sc-if value="{{ pp.m.hasLayers }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">From the life you want in three to five years, down to this week. Tap a layer to work on it with {{ hv.pepperName }}.</span></sc-if>
 <sc-if value="{{ pp.m.note }}"><span class="muted" style="font-size: 14px; line-height: 20px; margin: 0 4px">{{ pp.m.note }}</span></sc-if>
 <sc-if value="{{ pp.m.retryOn }}"><button class="pill" onClick="{{ pp.retry }}" style="align-self: flex-start; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Try again</button></sc-if>
 <sc-if value="{{ pp.m.startOn }}"><button class="pill" onClick="{{ pp.m.start }}" style="background: #c2410c; color: #ffffff">Start the first session</button></sc-if>

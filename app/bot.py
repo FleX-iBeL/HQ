@@ -572,6 +572,10 @@ if __name__ == "__main__":
     def _notes_both():
         # H124: Donna's own notes come along, shown under his (read here, cleared with clear_hers).
         out = _notes.read()
+        try:  # the cleared ones too (the newest 30), for the page's fold; each can come back (restore)
+            out["cleared"] = _notes.cleared()[:30]
+        except Exception:
+            out["cleared"] = []
         try:
             import pings as _pings
             out["hers"] = {"name": _pings.agent_name(), "items": _pings.her_notes(),
@@ -626,7 +630,8 @@ if __name__ == "__main__":
 
     @app.get("/api/calendar", include_in_schema=False)
     async def calendar_read(request: Request):
-        if request.query_params.get("fresh") == "1" and not config.FREE_ONLY:
+        # next to the current HQ (HQ_BESIDE=1) the calendar copy is the current HQ's to read again, never this one's
+        if request.query_params.get("fresh") == "1" and not config.FREE_ONLY and os.environ.get("HQ_BESIDE") != "1":
             await asyncio.to_thread(_agenda_api.refresh)
         return JSONResponse(_agenda_api.read(), headers=_NO_CACHE)
 
@@ -972,7 +977,8 @@ if __name__ == "__main__":
     async def lists_read():
         if config.FREE_ONLY:
             return JSONResponse({"off": "Free", "lists": []}, headers=_NO_CACHE)
-        await asyncio.to_thread(_lists.settle)  # an old wishlist table in the to-do file moves over by itself
+        if os.environ.get("HQ_BESIDE") != "1":  # next to the current HQ, that one moves it
+            await asyncio.to_thread(_lists.settle)  # an old wishlist table in the to-do file moves over by itself
         return JSONResponse(await asyncio.to_thread(_lists.read), headers=_NO_CACHE)
 
     @app.post("/api/lists", include_in_schema=False)
@@ -1042,7 +1048,7 @@ if __name__ == "__main__":
         if config.FREE_ONLY:
             return JSONResponse({"off": "Free", "on": False}, headers=_NO_CACHE)
         from policy import is_backup as _is_backup
-        if not await asyncio.to_thread(_is_backup):
+        if os.environ.get("HQ_BESIDE") != "1" and not await asyncio.to_thread(_is_backup):
             try:
                 await asyncio.to_thread(_coaching.refresh)
             except Exception:

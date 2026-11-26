@@ -13,6 +13,8 @@
 #                                 this HQ has no pairing of its own, so a write on the backup still goes to the main
 #   HQ_SUPPORT=DIR                this HQ's own memory (default: scratch/support inside this HQ while it's tried out)
 #   HQ_UPDATE_LOOK=0              no look on GitHub for a newer version in the background (default 0 here)
+#   HQ_BESIDE=1                   next to the current HQ on this computer (the default): see below
+#   HQ_MAPS_KEY_FILE, HQ_FIX_DRY  the maps key's file (a test's own), Turn everything on only says what it would do
 #   HQ_MODEL=haiku, HQ_PLAIN=1, HQ_WRAP_UP=off    as before: another model, the plain Claude, no after-call work
 #   HQ_WORKSPACE, HQ_PID_FILE, HQ_LOG, HQ_STATUS_PID_FILE, HQ_STATUS_LOG, HQ_DIRECT_DRY, HQ_NO_OUTSIDE, HQ_STATUS_TRIAL,
 #                                 HQ_TODO_UNDO, HQ_LISTS_UNDO, HQ_GAMES_UNDO
@@ -31,6 +33,11 @@ PATH="$PATH:/usr/sbin:/sbin"   # lsof is in /usr/sbin on a Mac
 if [[ -z "$HQ_ROLE_READ" && ! -r "$SUPPORT/role.json" && -r "$HOME/Library/Application Support/HQ/role.json" ]]; then
   HQ_ROLE_READ="$HOME/Library/Application Support/HQ"
 fi
+# HQ_BESIDE=1 (the default for now): this HQ runs next to the current HQ on this computer, on the same live workspace.
+# The current HQ keeps sending the texts and pushes, the mail check, the reminders and the sync; this one writes nothing
+# by itself into the live workspace or the other HQ's folders (the texts' phone list, the page's reports, the weather it
+# reads for the page stay in this HQ's own scratch). HQ_BESIDE=0 once this HQ takes over.
+BESIDE="${HQ_BESIDE:-1}"
 PY="$ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || PY=/usr/bin/python3
 OWN_ENV=(HQ_HOST=127.0.0.1 HQ_PORT="$PORT" HQ_STATUS_PORT="$SPORT" HQ_SUPPORT="$SUPPORT" HQ_UPDATE_LOOK="${HQ_UPDATE_LOOK:-0}"
@@ -41,7 +48,8 @@ OWN_ENV=(HQ_HOST=127.0.0.1 HQ_PORT="$PORT" HQ_STATUS_PORT="$SPORT" HQ_SUPPORT="$
          ${HQ_STATUS_LOG:+HQ_STATUS_LOG="$HQ_STATUS_LOG"} ${HQ_DIRECT_DRY:+HQ_DIRECT_DRY="$HQ_DIRECT_DRY"}
          ${HQ_NO_OUTSIDE:+HQ_NO_OUTSIDE="$HQ_NO_OUTSIDE"} ${HQ_STATUS_TRIAL:+HQ_STATUS_TRIAL="$HQ_STATUS_TRIAL"}
          ${HQ_TODO_UNDO:+HQ_TODO_UNDO="$HQ_TODO_UNDO"} ${HQ_LISTS_UNDO:+HQ_LISTS_UNDO="$HQ_LISTS_UNDO"}
-         ${HQ_GAMES_UNDO:+HQ_GAMES_UNDO="$HQ_GAMES_UNDO"})
+         ${HQ_GAMES_UNDO:+HQ_GAMES_UNDO="$HQ_GAMES_UNDO"} ${HQ_MAPS_KEY_FILE:+HQ_MAPS_KEY_FILE="$HQ_MAPS_KEY_FILE"}
+         ${HQ_FIX_DRY:+HQ_FIX_DRY="$HQ_FIX_DRY"} HQ_BESIDE="$BESIDE")
 
 # The status server first (status/phone.sh starts it when nothing listens on its port, and keeps its own pid).
 env -i HOME="$HOME" USER="$USER" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" LANG=en_US.UTF-8 \

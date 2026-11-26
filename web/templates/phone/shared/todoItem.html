@@ -16,6 +16,6 @@
 <button class="pill" onClick="{{ sheetMove }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">{{ todoX.moveLabel }}</button>
 <sc-if value="{{ todoX.canLetGo }}"><button class="pill" onClick="{{ letGo }}" style="background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Let it go</button></sc-if>
 </div>
-<button class="row card" onClick="{{ call.donna }}" style="border-radius: 20px"><span class="grow" style="font-size: 15px; font-weight: 600">Call Donna about this</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+<button class="row card" onClick="{{ cl.aboutTodo }}" style="border-radius: 20px"><span class="grow" style="font-size: 15px; font-weight: 600">Call {{ hv.donnaName }} about this</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
 </sc-if>
 </sc-if>

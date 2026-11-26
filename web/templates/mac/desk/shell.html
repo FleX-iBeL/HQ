@@ -3,12 +3,14 @@
 <div style="height: 60px; flex-shrink: 0; padding: 0 32px; display: flex; align-items: center; gap: 18px">
 <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #ff5f57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #febc2e"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28c840"></span></div>
 <button onClick="{{ home }}" style="border: none; background: transparent; padding: 6px 0; font: 700 18px Sora, Inter, sans-serif; letter-spacing: -0.02em; color: #0f172a; cursor: pointer">HQ</button>
-<span class="muted" style="font-size: 14px">Thursday 26 November</span>
+<span class="muted" style="font-size: 14px">{{ hv.dayLong }}</span>
 <sc-if value="{{ showMini }}">
-<button onClick="{{ nav.call }}" style="height: 38px; padding: 0 16px 0 6px; display: flex; align-items: center; gap: 10px; border: none; border-radius: 19px; background: {{ ca.color }}; color: {{ ca.ink }}; font: 600 13px Inter, sans-serif; cursor: pointer"><span class="face" style="width: 28px; height: 28px; background: rgba(255,255,255,0.25); font-size: 12px">{{ ca.initial }}</span>On a call with {{ ca.name }} · {{ phase }} · Open</button>
+<button onClick="{{ nav.call }}" style="height: 38px; padding: 0 16px 0 6px; display: flex; align-items: center; gap: 10px; border: none; border-radius: 19px; background: {{ ca.color }}; color: {{ ca.ink }}; font: 600 13px Inter, sans-serif; cursor: pointer"><span class="face" style="width: 28px; height: 28px; background: rgba(255,255,255,0.25); font-size: 12px">{{ ca.initial }}</span>On a call with {{ ca.name }} · {{ phase }}{{ hv.miniTime }} · Open</button>
 </sc-if>
 <div style="flex-grow: 1"></div>
-<button onClick="{{ nav.weather }}" style="height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border: none; border-radius: 18px; background: #ffffff; color: #0f172a; font: 600 13px Inter, sans-serif; box-shadow: 0 0 0 1px #e2e8f0 inset; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9"></path><path d="M16 14v6M8 14v6M12 16v6"></path></svg>7° · rain from 16:00</button>
+<sc-if value="{{ offline }}"><div style="height: 36px; padding: 0 6px 0 14px; display: flex; align-items: center; gap: 10px; border-radius: 18px; background: #fef3c7; color: #78350f; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 4px; background: #d97706"></span>HQ doesn’t answer right now.{{ hv.since }}<button class="small" onClick="{{ goOnline }}" style="background: #ffffff">Try again</button></div></sc-if>
+<sc-if value="{{ free }}"><span style="height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border-radius: 18px; background: #0f172a; color: #ffffff; font-size: 13px"><b style="font-size: 11px; letter-spacing: 0.06em">FREE</b>Plain Claude: none of your files, nothing saved.</span></sc-if>
+<button onClick="{{ nav.weather }}" style="height: 36px; padding: 0 14px; display: flex; align-items: center; gap: 8px; border: none; border-radius: 18px; background: #ffffff; color: #0f172a; font: 600 13px Inter, sans-serif; box-shadow: 0 0 0 1px #e2e8f0 inset; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16.2A4.5 4.5 0 0 0 17.5 8h-1.8A7 7 0 1 0 4 14.9"></path><path d="M16 14v6M8 14v6M12 16v6"></path></svg>{{ hv.wxLong }}</button>
 <button class="iconbtn" aria-label="Tutorial" onClick="{{ nav.tutorial }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg></button>
 <button class="iconbtn" aria-label="Settings" onClick="{{ nav.settings }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg></button>
 </div>
@@ -28,7 +30,7 @@
 </button>
 </sc-for>
 <div class="card" style="margin-top: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
-<div class="top" style="margin-bottom: 4px"><h2 class="h grow" style="font-size: 15px; letter-spacing: -0.01em">Today</h2><span class="muted" style="font-size: 12px">now 14:20</span></div>
+<div class="top" style="margin-bottom: 4px"><h2 class="h grow" style="font-size: 15px; letter-spacing: -0.01em">Today</h2><span class="muted" style="font-size: 12px">{{ hv.nowAt }}</span></div>
 <sc-for list="{{ railToday }}" as="t"><button onClick="{{ t.open }}" style="display: flex; gap: 10px; padding: 6px 0; border: none; background: transparent; text-align: left; font: inherit; cursor: pointer; color: {{ t.fc }}"><span style="width: 42px; font-size: 13px; font-weight: 600; color: {{ t.tc }}">{{ t.time }}</span><span style="font-size: 14px">{{ t.longTitle }}</span></button></sc-for>
 </div>
 </nav>
@@ -151,9 +153,9 @@
 
 <sc-if value="{{ sheetOn }}">
 <div style="position: absolute; inset: 0; z-index: 20; background: rgba(15,23,42,0.4); display: flex; align-items: center; justify-content: center">
-<div role="dialog" aria-label="{{ sh.title }}" style="width: 480px; box-sizing: border-box; padding: 10px 16px 34px; border-radius: 28px; background: #f8fafc; display: flex; flex-direction: column; gap: 12px">
+<div role="dialog" aria-label="{{ sh.title }}" style="width: 480px; box-sizing: border-box; padding: 10px 16px 34px; border-radius: 28px; background: #f8fafc; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px">
 <span aria-hidden="true" style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #cbd5e1"></span>
-<div class="top"><h2 class="h grow" style="font-size: 18px">{{ sh.title }}</h2><button class="small" onClick="{{ closeSheet }}">Close</button></div>
+<div class="top" style="position: sticky; top: -10px; z-index: 1; padding: 4px 0; background: inherit"><h2 class="h grow" style="font-size: 18px">{{ sh.title }}</h2><button class="small" onClick="{{ closeSheet }}">Close</button></div>
 <div class="list"><sc-for list="{{ sh.rows }}" as="r"><button class="row" onClick="{{ r.pick }}"><span class="grow col"><span style="font-size: 15px; font-weight: 600">{{ r.a }}</span><span class="muted" style="font-size: 13px">{{ r.b }}</span></span></button></sc-for></div>
 </div>
 </div>
@@ -162,10 +164,10 @@
 <sc-if value="{{ toastOn }}"><div role="status" style="position: absolute; right: 32px; bottom: 32px; width: 420px; z-index: 30; padding: 10px 10px 10px 18px; border-radius: 18px; background: #0f172a; color: #ffffff; display: flex; align-items: center; gap: 12px; box-shadow: 0 8px 24px rgba(15,23,42,0.25)"><span class="grow" style="font-size: 14px; line-height: 20px">{{ toast }}</span><sc-if value="{{ toastUndo }}"><button onClick="{{ undo }}" style="height: 36px; padding: 0 14px; border: none; border-radius: 18px; background: rgba(255,255,255,0.16); color: #ffffff; font: 600 13px Inter, sans-serif; cursor: pointer">Undo</button></sc-if></div></sc-if>
 
 <sc-if value="{{ incoming }}">
-<div role="dialog" aria-label="Donna is calling" style="position: absolute; inset: 0; z-index: 40; box-sizing: border-box; padding: 120px 480px 120px; background: #f5f3ff; display: flex; flex-direction: column; align-items: center; gap: 18px">
-<span class="face" style="width: 160px; height: 160px; background: #6d28d9; color: #ffffff; font-size: 60px; box-shadow: 0 0 0 18px rgba(109,40,217,0.15)">D</span>
-<h1 class="h" style="font-size: 30px">Donna is calling</h1>
-<span class="muted" style="font-size: 15px; text-align: center; line-height: 22px">About the dentist: it’s nearly time to leave.</span>
+<div role="dialog" aria-label="{{ hv.ring.title }}" style="position: absolute; inset: 0; z-index: 40; box-sizing: border-box; padding: 120px 480px 120px; background: {{ hv.ring.tint }}; display: flex; flex-direction: column; align-items: center; gap: 18px">
+<span class="face" style="width: 160px; height: 160px; background: {{ hv.ring.color }}; color: {{ hv.ring.ink }}; font-size: 60px; box-shadow: 0 0 0 18px {{ hv.ring.halo }}">{{ hv.ring.initial }}</span>
+<h1 class="h" style="font-size: 30px">{{ hv.ring.title }}</h1>
+<span class="muted" style="font-size: 15px; text-align: center; line-height: 22px">{{ hv.ring.line }}</span>
 <div style="flex-grow: 1"></div>
 <div style="width: 100%; display: flex; gap: 12px"><button class="pill grow" onClick="{{ decline }}" style="height: 60px; border-radius: 30px; background: #ffffff; color: #0f172a; box-shadow: 0 0 0 1px #e2e8f0 inset">Not now</button><button class="pill grow" onClick="{{ pickUp }}" style="height: 60px; border-radius: 30px; background: #16a34a; color: #ffffff">Pick up</button></div>
 </div>
@@ -177,7 +179,7 @@
 <span class="top"><span style="padding: 2px 8px; border-radius: 8px; background: #f1f5f9; font-size: 11px; font-weight: 700; color: #475569">DEMO</span><span class="muted grow" style="font-size: 12px">Home · {{ tourCount }}</span><button class="small" aria-label="Close the tour" onClick="{{ tourClose }}">Close</button></span>
 <span class="h" style="font-size: 20px">{{ tourTitle }}</span>
 <span style="font-size: 15px; line-height: 22px">{{ tourText }}</span>
-<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ tourBack }}" style="background: #f1f5f9; color: #0f172a">Back</button><button class="pill grow" onClick="{{ demoCall.donna }}" style="background: #f5f3ff; color: #6d28d9">Ask Donna</button><button class="pill grow" onClick="{{ tourNext }}" style="background: #0f172a; color: #ffffff">{{ tourNextLabel }}</button></div>
+<div style="display: flex; gap: 8px"><button class="pill grow" onClick="{{ tourBack }}" style="background: #f1f5f9; color: #0f172a">Back</button><button class="pill grow" onClick="{{ demoCall.donna }}" style="background: #f5f3ff; color: #6d28d9">Ask {{ hv.donnaName }}</button><button class="pill grow" onClick="{{ tourNext }}" style="background: #0f172a; color: #ffffff">{{ tourNextLabel }}</button></div>
 </div>
 </div>
 </sc-if>

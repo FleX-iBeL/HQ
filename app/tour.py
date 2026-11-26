@@ -1,6 +1,6 @@
 """H74: the get-started tutorial's demo call.
 
-The tutorial (the question mark on the call page) shows the pieces in app/web/tour.json on the real screens. From
+The tutorial (the question mark on the call page) shows the pieces in app/tour.json on the real screens. From
 there a demo call can be started with Donna or Pepper: a safe playground. It runs the Free way (call.py: an empty
 folder, nothing of the user's, nothing saved, no after-call work), on Opus for both (his words, 17 October 2026:
 "Maybe they need to both have Opus. Not Sonnet. Because people are going to have a lot of questions"), with no tools
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-TOUR = Path(__file__).resolve().parent / "web" / "tour.json"
+TOUR = Path(__file__).resolve().parent / "tour.json"
 MODEL = "opus"
 
 

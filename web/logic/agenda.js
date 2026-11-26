@@ -257,8 +257,9 @@ export function vals(st, ctx, D) {
     : { title: st.apptId && ready ? 'Not in your calendar any more' : '', when: '', where: '' };
   const mark = (want) => () => {
     if (!e || !e.mark_id) return;
-    const to = e.mark === want ? '' : want;
-    change(app, 'api/calendar/mark', { id: e.mark_id, mark: to }, patchEvent(e.id, (x) => Object.assign({}, x, { mark: to })), 'Couldn’t mark that. Try again.');
+    const was = e.mark || '', to = was === want ? '' : want, id = e.id, mid = e.mark_id;
+    const put = (m) => change(app, 'api/calendar/mark', { id: mid, mark: m }, patchEvent(id, (x) => Object.assign({}, x, { mark: m })), 'Couldn’t mark that. Try again.');
+    put(to).then((r) => { if (r) app.say(to === 'done' ? 'Marked as done' : to === 'x' ? 'Marked: didn’t happen as planned' : 'Mark taken off', () => put(was)); });
   };
   const toggleBell = () => {
     if (!e) return;
@@ -285,7 +286,7 @@ export function vals(st, ctx, D) {
   }
   const apptNoteRows = ((e && e.appt_notes) || []).map((n) => ({ t: n.text, clear: () => {
     change(app, 'api/calendar/note', { id: key, clear: n.id }, patchEvent(e.id, (x) => Object.assign({}, x, { appt_notes: (x.appt_notes || []).filter((y) => y.id !== n.id) })), 'Couldn’t clear the note. Try again.')
-      .then((r) => { if (r) app.say('Note cleared'); });
+      .then((r) => { if (r) app.say('Note cleared', () => change(app, 'api/calendar/note', { id: key, add: n.text }, null, 'Couldn’t bring the note back. Try again.')); });
   } }));
   const addApptNote = (text) => {
     if (!e) return;

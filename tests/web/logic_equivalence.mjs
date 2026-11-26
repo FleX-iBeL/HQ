@@ -22,23 +22,33 @@ function original(file) {
 // Ours merges state at once too (DCLogic.setState), and renders nothing without a mount.
 const OursStub = Ours;
 
-// ours points at ?design=, the prototype at the other file; and what ours adds for real use:
-// the text boxes' drafts, the demo flag, and handlers on the past games
-// texts: its own holes (tx…, continueCall) and the bubbles' item kind (txText, txPill)
-// pepper: its real screens read everything under pp; in demo mode pp is shaped from made-up sample data
-const IGNORE = /^designs\.\d+\.href$|^(drafts|typed|enter)(\.|$)|^demoMode$|^pastGames\.\d+\.(open|id)$|^(bucket|wish)\.\d+\.id$|^bucket\.\d+\.open$|^cl(\.|$)|^tx[A-Z]|^continueCall$|^bubbles\.\d+\.tx|^pp(\.|$)/;
-// agenda and inbox: the holes their real screens add (the filter's kinds, the kind editor's name box and swatches,
-// the line under the agenda, the appointment's own description, travel's second line and link, empty and failed
-// lines, his notes' Clear, the mail list); in demo mode they carry the design's own words
-const IGNORE_AGENDA_INBOX = /^kindRows\.\d+\.(op|toggle|typed|swatches)(\.|$)|^filterKinds(\.|$)|^(agendaHead|agendaLooked|agendaEmpty|agendaEmptyText|agendaFailed|agendaRetry|apptTimed|apptGoogle|hasGoogle|resetKinds|hasTravel|travelSub|hasTravelSub|travelLink|hasTravelLink|travelLinkText)$|^myNotes\.\d+\.clear$|^(myNotesEmpty|herNotesEmpty|nudgesEmpty|eyesEmpty|hasCleared|notesLoading|notesFailed|notesRetry|mailItems|mailEmpty|mailLoading|mailFailed|mailRetry|mailRest)(\.|$)/;
-// cl.*: the call's holes added for the real call (timer, messages, hold-to-talk, the typed line); in demo mode they carry the design's words
-// todoX.* and listX.*: what the to-do and lists screens read beyond the prototype's values (counts, empty and loading
-// lines, an item's real fields and folds); in demo mode they carry the design's own words
-const IGNORE_TODO_LISTS = /^(todoX|listX)(\.|$)/;
-// mpv.* and setv.*: what Moneypenny's screens and the settings screens read beyond the prototype's values (the status
-// timeline, usage, health, sessions, hand-over text, features, voices, sound, weather); wxChip: the weather chip's
-// degrees for home. In demo mode they carry the design's own words
-const IGNORE_MP_SETTINGS = /^(mpv|setv)(\.|$)|^wxChip$/;
+// The values ours adds to the prototypes' own, left out of the comparison. In demo mode they
+// all carry the design's own words; each line says whose they are and why.
+const IGNORE = [
+  // the core: the design switch's link, the text boxes' drafts, the demo flag, and the words
+  // home, the spaces and the shells show from several areas or the clock (hv.*)
+  /^designs\.\d+\.href$/, /^(drafts|typed|enter)(\.|$)/, /^demoMode$/, /^hv(\.|$)/,
+  // pepper: past games' handlers, and its real screens' values under pp
+  /^pastGames\.\d+\.(open|id)$/, /^pp(\.|$)/,
+  // lists: the items' ids and handlers
+  /^(bucket|wish)\.\d+\.id$/, /^bucket\.\d+\.open$/,
+  // the call: its holes for the real call (timer, messages, hold-to-talk, the typed line, call about this)
+  /^cl(\.|$)/,
+  // texts: its own holes, continue a call, and the bubbles' item kind
+  /^tx[A-Z]/, /^continueCall$/, /^bubbles\.\d+\.tx/,
+  // agenda and inbox: the filter's kinds, the kind editor's name box and swatches, the line under the
+  // agenda, the appointment's own description, travel's second line and link, empty and failed lines,
+  // his notes' Clear, the mail list
+  /^kindRows\.\d+\.(op|toggle|typed|swatches)(\.|$)/, /^filterKinds(\.|$)/,
+  /^(agendaHead|agendaLooked|agendaEmpty|agendaEmptyText|agendaFailed|agendaRetry|apptTimed|apptGoogle|hasGoogle|resetKinds|hasTravel|travelSub|hasTravelSub|travelLink|hasTravelLink|travelLinkText)$/,
+  /^myNotes\.\d+\.clear$/, /^(myNotesEmpty|herNotesEmpty|nudgesEmpty|eyesEmpty|hasCleared|notesLoading|notesFailed|notesRetry|mailItems|mailEmpty|mailLoading|mailFailed|mailRetry|mailRest)(\.|$)/,
+  // to-do and lists: counts, empty and loading lines, an item's real fields and folds
+  /^(todoX|listX)(\.|$)/,
+  // Moneypenny's and the settings screens: status timeline, usage, health, sessions, hand-over text,
+  // features, voices, sound, weather; and the weather chip's degrees for home
+  /^(mpv|setv)(\.|$)/, /^wxChip$/
+];
+const ignored = (k) => IGNORE.some((re) => re.test(k));
 function flat(v, p, out, fns) {
   if (typeof v === 'function') { out[p] = '[fn]'; fns[p] = v; return; }
   if (v && typeof v === 'object') { for (const k of Object.keys(v)) flat(v[k], p ? p + '.' + k : k, out, fns); if (!Object.keys(v).length) out[p] = Array.isArray(v) ? '[]' : '{}'; return; }
@@ -63,7 +73,7 @@ for (const design of ['Desk', 'Spotlight', 'Thread']) {
       const x = look(a.renderVals()), y = look(b.renderVals());
       const keys = new Set(Object.keys(x.out).concat(Object.keys(y.out)));
       for (const k of keys) {
-        if (IGNORE.test(k) || IGNORE_AGENDA_INBOX.test(k) || IGNORE_TODO_LISTS.test(k) || IGNORE_MP_SETTINGS.test(k)) continue;
+        if (ignored(k)) continue;
         if (JSON.stringify(x.out[k]) !== JSON.stringify(y.out[k])) mismatch.push(step + ': ' + k + ' = ' + JSON.stringify(x.out[k]) + ' / ours ' + JSON.stringify(y.out[k]));
       }
       return { x, y };

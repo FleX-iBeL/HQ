@@ -621,7 +621,8 @@ def push(text: str, title: str | None = None, extra: dict | None = None) -> list
     import urllib.request
     import urllib.error
     subs = subscriptions()
-    if not subs or os.environ.get("HQ_DIRECT_DRY") == "1" and not os.environ.get("HQ_DIRECT_PUSH_TO"):
+    # next to the current HQ (HQ_BESIDE=1) that one sends every push; this one never does
+    if not subs or os.environ.get("HQ_BESIDE") == "1" or os.environ.get("HQ_DIRECT_DRY") == "1" and not os.environ.get("HQ_DIRECT_PUSH_TO"):
         return []
     k = keys()
     team = on_team_line()  # H266: her own line opens her own chat, and her texts don't replace Donna's on the lock screen

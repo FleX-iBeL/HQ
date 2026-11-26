@@ -76,13 +76,13 @@ export function vals(st, ctx, D) {
     .then((ok) => { if (ok) app.say('Done. She stopped nudging'); });
   const nudges = nudging.map((x) => ({ title: x.text, sub: x.paused ? 'Paused for now' : 'She’s nudging you until it’s done', label: 'Done', deco: 'none', fc: '#0f172a', toggle: nudgeDone(x) }));
   const nudgeRows = nudging.map((x) => ({ t: x.text, when: x.paused ? 'Paused for now' : 'Nudging you until it’s done',
-    bell: () => {}, bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9', bellAria: x.paused ? 'Paused for now' : 'Nudging you',
+    bell: () => app.say('HQ can’t pause one nudge yet. Tap Done when it’s done, or ask Donna.'), bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9', bellAria: x.paused ? 'Paused for now' : 'Nudging you',
     done: nudgeDone(x), doneLabel: 'Done' }));
 
   // Newest first, as the design lists them.
   const myNotes = ready ? notes.items.slice().reverse().map((it) => ({ id: it.id, t: it.text, when: when(it.when, true),
     clear: () => notesChange(app, { clear: it.id }, (n) => Object.assign({}, n, { items: n.items.filter((y) => y.id !== it.id) }), 'Couldn’t clear that note. Try again.')
-      .then((ok) => { if (ok) app.say('Cleared the note'); }) })) : [];
+      .then((ok) => { if (ok) app.say('Cleared the note', () => notesChange(app, { restore: it.id }, null, 'Couldn’t bring that note back. Try again.')); }) })) : [];
   const addNote = (text) => notesChange(app, { add: text }, (n) => Object.assign({}, n, { items: n.items.concat([{ id: 'new-' + Date.now(), when: '', text }]) }), 'Couldn’t save that note. Try again.');
   // Only Donna keeps notes of her own in HQ; Pepper's and Moneypenny's lists are empty until HQ keeps theirs.
   const herNotes = st.space === 'donna' && Array.isArray(hers.items) ? hers.items.map((it) => ({ t: it.text, when: when(it.when, false) })) : [];

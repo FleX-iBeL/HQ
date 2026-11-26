@@ -447,6 +447,8 @@ async function temperatureHistory(hours, file = '.status/temperature-history.jso
 // his texts (in the background, so the page doesn't wait). Every POST needs the x-hq header, so a page from
 // elsewhere can't text her or sign a phone up; the server itself is only on this computer and the tailnet.
 const DIRECT_DIR = process.env.HQ_DIRECT_DIR ?? join(dirname(ROADMAP), 'direct-line');
+// HQ_BESIDE=1: this HQ runs next to the current HQ on this computer, which keeps the texts' phones and sends the pushes.
+const BESIDE = process.env.HQ_BESIDE === '1';
 const DIRECT_PY = existsSync(join(root, '.venv/bin/python')) ? join(root, '.venv/bin/python') : '/usr/bin/python3';
 const DIRECT_TOOL = join(root, 'app/direct_line.py');
 // H266: Moneypenny's own line, /direct?line=team: her thread next to Donna's, the same phones and key.
@@ -499,14 +501,18 @@ async function directRoute(path0, req, res) {
     const own = teamInfo && teamInfo.id !== (directInfo?.id ?? 'donna');
     return json(200, { agent: teamInfo, line: own ? 'team' : 'direct', messages: await directThread(own ? TEAM_DIR : DIRECT_DIR) });
   }
+  if (path0 === '/direct/key' && BESIDE) return json(200, { key: '', beside: true });
   if (path0 === '/direct.json' || path0 === '/direct/key') {
     if (!directInfo || !directInfo.key) directInfo = (await agentInfo(['info'])) || directInfo;
     if (path0 === '/direct/key') return json(directInfo ? 200 : 500, { key: directInfo?.key ?? '' });
-    return json(200, { agent: directInfo, line: 'direct', messages: await directThread() });
+    return json(200, { agent: directInfo, line: 'direct', beside: BESIDE, messages: await directThread() });
   }
   if (req.method !== 'POST' || req.headers['x-hq'] !== 'direct') return res.writeHead(403).end('Only the HQ page can text her');
   let body = {};
   try { body = JSON.parse(await readBody(req)); } catch {}
+  // Next to the current HQ (HQ_BESIDE=1) that one keeps the phones' list and sends every text and push: a sign-up or a
+  // report from this page answers OK and changes nothing.
+  if (BESIDE && (path0 === '/direct/subscribe' || path0 === '/direct/report')) return json(200, { ok: true, beside: true });
   if (path0 === '/direct/subscribe') {
     const out = await directTool(['subscribe'], JSON.stringify(body));
     if (out) directInfo = null;

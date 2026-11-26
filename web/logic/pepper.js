@@ -283,8 +283,9 @@ async function postGames(app, body, patch) {
   try {
     const d = await app.api.post('api/games', body, 'games');
     app.setData(NAME, (old) => Object.assign({}, old, { games: d }));
-    app.setState({ ppUndo: !!d.undo && !body.undo, ppSaid: d.said || '', ppBusy: false });
-    if (d.said) app.say(clean(d.said));
+    app.setState({ ppUndo: false, ppSaid: d.said || '', ppBusy: false });
+    // its Undo is the toast's: the last change, as the server keeps it
+    if (d.said) app.say(clean(d.said), d.undo && !body.undo ? () => postGames(app, { undo: true }) : null);
   } catch (e) {
     app.setState({ ppBusy: false });
     app.say(why(e));
@@ -417,6 +418,8 @@ function shapeReal(st, ctx, D, isDemo) {
   else if (playingG) card = { kicker: 'The six-week game', headline: playingG.name, sub: gameShort(playingG), line: herLine };
   else if (openLayer) card = { kicker: 'The map', headline: plainName(openLayer.name), sub: ((openLayer.counts || {}).answered || 0) + ' of ' + openLayer.total + ' answered', line: '' };
   else card = { kicker: 'Life coaching', headline: C.map ? 'The map is done' : 'Start your map', sub: '', line: '' };
+  // the Start-the-check-in button under her card shows only while a check-in is due
+  card.actionOn = dueC.length > 0;
   const homeLines = [];
   if (C && !cOff) {
     if (dueC.length > 1) homeLines.push({ t: NUM[Math.min(dueC.length, 6)] + ' check-ins due', c: '#b42318', w: '600' });
