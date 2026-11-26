@@ -4,6 +4,7 @@
 // Conventions: see ../WIRING.md. vals(st, ctx, D): D is the demo module or the real data
 // (GET api/todo as the server gives it; changes go to POST api/todo with x-hq: todo).
 import * as demo from './demo/todo.js';
+import { holdRenders, rerenderAll } from '../engine.js';
 import { chip, flip, tick } from './util.js';
 
 export const NAME = 'todo';
@@ -104,7 +105,7 @@ function blockWhen(b) {
   return s.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + t(s) + ' to ' + t(e) + (b.calendar && b.calendar !== 'Main' ? ' · ' + b.calendar : '');
 }
 
-// ---- the drag that changes the order (the grip) ----------------------------------------
+// ---- the drag that changes the order (the grip, or a long press on the row) ---------------
 
 function scroller(node) {
   for (let n = node.parentElement; n; n = n.parentElement) {
@@ -113,20 +114,38 @@ function scroller(node) {
   }
   return document.scrollingElement;
 }
-// A finger or the mouse on the grip drags its row; the others make room. done(from, to)
-// gets the places in the rows as shown. Near the screen's top or bottom the list scrolls along.
-function startDrag(e, done) {
-  if (e.button !== 0) return;
-  e.preventDefault();
-  const grip = e.currentTarget, row = grip.closest('.row'), box = row && row.parentNode;
+const HOLD_MS = 300, SLOP = 8, EASE_MS = 160;
+let dragging = null, eatClick = false, hooked = false;
+// While a row is dragged the page must not scroll under the finger (a touch that began on the row, not
+// on the grip, has no touch-action of its own), and the click that ends a long press opens nothing.
+function hookOnce() {
+  if (hooked || typeof document === 'undefined') return;
+  hooked = true;
+  document.addEventListener('touchmove', (e) => { if (dragging) e.preventDefault(); }, { passive: false });
+  document.addEventListener('click', (e) => { if (eatClick) { eatClick = false; e.preventDefault(); e.stopPropagation(); } }, true);
+  document.addEventListener('contextmenu', (e) => { if (dragging || pressing) e.preventDefault(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dragging) { e.preventDefault(); dragging.cancel(); } }, true);
+}
+let pressing = null;
+// The row under the finger is lifted and follows it; the others slide to open a gap; near the top or
+// bottom of the list's scroller the list scrolls along. On release the row settles into the gap and
+// done(from, to) gets the places as shown. Escape, a pointer cancel, or the pointer far to the side
+// of the list puts everything back. No render reaches the list while it moves.
+function drag(row, pointer, y, done) {
+  const box = row && row.parentNode;
   if (!box) return;
   const rows = [...box.children].filter((r) => r.classList.contains('row'));
   const from = rows.indexOf(row); if (from < 0) return;
-  try { grip.setPointerCapture(e.pointerId); } catch (_) { /* not supported */ }
+  hookOnce();
+  const release = holdRenders();
+  try { row.setPointerCapture(pointer); } catch (_) { /* fine without */ }
   const sc = scroller(box), tops = rows.map((r) => r.offsetTop), hs = rows.map((r) => r.offsetHeight);
-  const d = { y: e.clientY, y0: e.clientY, s0: sc.scrollTop, to: from, raf: 0 };
-  row.style.position = 'relative'; row.style.zIndex = '2'; row.style.background = '#f8fafc';
-  for (const r of rows) if (r !== row) r.style.transition = 'transform .15s ease-out';
+  const gap = rows.length > 1 ? Math.max(0, (rows[1].offsetTop - rows[0].offsetTop) - hs[0]) : 0;
+  const d = { y, y0: y, x: 0, s0: sc.scrollTop, to: from, raf: 0, out: false };
+  const lift = { position: 'relative', zIndex: '3', background: '#ffffff', boxShadow: '0 10px 28px rgba(15,23,42,0.18)', transition: 'box-shadow .15s ease-out' };
+  Object.assign(row.style, lift);
+  for (const r of rows) if (r !== row) r.style.transition = 'transform .16s ease-out';
+  const shiftOf = (i) => (i > from && i <= d.to) ? -(hs[from] + gap) : (i < from && i >= d.to) ? hs[from] + gap : 0;
   const layout = () => {
     const dy = d.y - d.y0 + (sc.scrollTop - d.s0), mid = tops[from] + dy + hs[from] / 2;
     let to = from;
@@ -134,31 +153,79 @@ function startDrag(e, done) {
       if (i < from && mid < tops[i] + hs[i] / 2) { to = i; break; }
       if (i > from && mid > tops[i] + hs[i] / 2) to = i;
     }
-    d.to = to;
-    row.style.transform = 'translateY(' + dy + 'px)';
-    rows.forEach((r, i) => {
-      if (r === row) return;
-      const sh = (i > from && i <= to) ? -hs[from] : (i < from && i >= to) ? hs[from] : 0;
-      r.style.transform = sh ? 'translateY(' + sh + 'px)' : '';
-    });
+    d.to = d.out ? from : to;
+    row.style.transform = 'translateY(' + dy + 'px) scale(1.02)';
+    row.style.opacity = d.out ? '0.6' : '';
+    rows.forEach((r, i) => { if (r !== row) { const sh = shiftOf(i); r.style.transform = sh ? 'translateY(' + sh + 'px)' : ''; } });
   };
   const edge = () => {
-    const vh = window.innerHeight, zone = 56;
-    const v = d.y < zone ? -Math.ceil((zone - d.y) / 6) : d.y > vh - zone ? Math.ceil((d.y - vh + zone) / 6) : 0;
-    if (v) { sc.scrollTop += v; layout(); }
+    const r = sc === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : sc.getBoundingClientRect();
+    const zone = 56;
+    const v = d.y < r.top + zone ? -Math.ceil((r.top + zone - d.y) / 6) : d.y > r.bottom - zone ? Math.ceil((d.y - r.bottom + zone) / 6) : 0;
+    if (v) { const was = sc.scrollTop; sc.scrollTop += v; if (sc.scrollTop !== was) layout(); }
     d.raf = requestAnimationFrame(edge);
   };
   d.raf = requestAnimationFrame(edge);
-  const move = (ev) => { d.y = ev.clientY; layout(); };
-  const stop = (ev) => {
-    grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', stop); grip.removeEventListener('pointercancel', stop);
+  const boxRect = box.getBoundingClientRect();
+  const move = (ev) => { if (ev.pointerId !== pointer) return; ev.preventDefault(); d.y = ev.clientY; d.out = ev.clientX < boxRect.left - 120 || ev.clientX > boxRect.right + 120; layout(); };
+  const off = () => {
+    document.removeEventListener('pointermove', move, true); document.removeEventListener('pointerup', up, true); document.removeEventListener('pointercancel', cancel, true);
     cancelAnimationFrame(d.raf);
-    for (const r of rows) { r.style.transition = ''; r.style.transform = ''; }
-    row.style.position = ''; row.style.zIndex = ''; row.style.background = '';
-    const to = ev.type === 'pointercancel' ? from : d.to;
-    if (to !== from) done(from, to);
+    dragging = null;
   };
-  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', stop); grip.addEventListener('pointercancel', stop);
+  const clear = () => {
+    for (const r of rows) { r.style.transition = ''; r.style.transform = ''; }
+    for (const k of ['position', 'zIndex', 'background', 'boxShadow', 'transition', 'transform', 'opacity']) row.style[k] = '';
+  };
+  const cancel = () => { off(); d.to = from; clear(); release(); };
+  const up = (ev) => {
+    if (ev.pointerId !== pointer) return;
+    off();
+    const to = d.to;
+    // settle into the gap, then the list takes the new order in one go
+    let target = 0;
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i++) if (i !== from) target += (to > from ? 1 : -1) * (hs[i] + gap);
+    row.style.transition = 'transform ' + EASE_MS + 'ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow .15s ease-out';
+    row.style.transform = 'translateY(' + target + 'px)';
+    row.style.boxShadow = '';
+    setTimeout(() => {
+      if (to !== from) done(from, to);
+      rerenderAll();
+      clear();
+      release();
+    }, EASE_MS);
+  };
+  document.addEventListener('pointermove', move, true); document.addEventListener('pointerup', up, true); document.addEventListener('pointercancel', cancel, true);
+  dragging = { cancel };
+  layout();
+}
+// The grip: the drag starts at once.
+function startDrag(e, done) {
+  if (e.button !== 0 || dragging) return;
+  e.preventDefault();
+  eatClick = false;
+  drag(e.currentTarget.closest('.row'), e.pointerId, e.clientY, done);
+}
+// The row itself: held still for about 300 ms it is picked up; a tap still opens it, a swipe still scrolls.
+function pressRow(e, done) {
+  if (e.button !== 0 || dragging || pressing) return;
+  if (e.target.closest('input, textarea, [role="button"][aria-label^="Change the order"], button[aria-label^="Tick off"], .small')) return;
+  hookOnce();
+  const row = e.currentTarget, id = e.pointerId, x0 = e.clientX, y0 = e.clientY;
+  let y = y0;
+  const stop = () => {
+    clearTimeout(pressing && pressing.t);
+    document.removeEventListener('pointermove', mv, true); document.removeEventListener('pointerup', stop, true); document.removeEventListener('pointercancel', stop, true);
+    pressing = null;
+  };
+  const mv = (ev) => { if (ev.pointerId !== id) return; y = ev.clientY; if (Math.abs(ev.clientX - x0) > SLOP || Math.abs(ev.clientY - y0) > SLOP) stop(); };
+  pressing = { t: setTimeout(() => {
+    stop();
+    eatClick = true;
+    try { if (navigator.vibrate) navigator.vibrate(15); } catch (_) { /* no buzz */ }
+    drag(row, id, y, done);
+  }, HOLD_MS) };
+  document.addEventListener('pointermove', mv, true); document.addEventListener('pointerup', stop, true); document.addEventListener('pointercancel', stop, true);
 }
 
 // ---- the values ------------------------------------------------------------------------
@@ -216,6 +283,7 @@ function realVals(st, ctx, D) {
     tick: () => send(app, l.kind === 'groceries' ? { tick: it.id } : { done: it.id }, (x) => without(x, it.id)),
     back: () => app.setState({ tdItem: it.id, sheet: 'move' }),
     grip: (e) => startDrag(e, (from, to) => place(it, to + 1)),
+    press: sortable ? (e) => pressRow(e, (from, to) => place(it, to + 1)) : null,
     gripKey: (e) => {
       if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); place(it, i); }
       else if (e.key === 'ArrowDown' && i < shown.length - 1) { e.preventDefault(); place(it, i + 2); }
@@ -239,7 +307,7 @@ function realVals(st, ctx, D) {
     app.setState({ tdAdd: '' });
     send(app, { add: t, list: l.key });
   };
-  const addInput = (e) => { const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; app.setState({ tdAdd: ta.value }); };
+  const addInput = (e) => { const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; app.quietState({ tdAdd: ta.value }, ta); };
 
   // One item
   const [il, it] = findItem(d, st.tdItem);

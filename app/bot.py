@@ -676,6 +676,8 @@ if __name__ == "__main__":
             ask = await request.json()
         except Exception:
             ask = None
+        if os.environ.get("HQ_BESIDE") == "1":  # next to the current HQ, its own page keeps where the phone is
+            return JSONResponse({"ok": True, "kept": False}, headers=_NO_CACHE)
         import travel as _travel
         out = _travel.set_here(ask.get("lat"), ask.get("lon")) if isinstance(ask, dict) else {"ok": False}
         return JSONResponse(out, status_code=200 if out["ok"] else 400, headers=_NO_CACHE)

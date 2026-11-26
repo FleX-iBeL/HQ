@@ -1,6 +1,6 @@
 // Engine tests, run in a browser by web/tests.html. Each test mounts a small template in
 // a scratch container, renders, changes state, renders again, and checks the live DOM.
-import { compile, mount, DCLogic } from '../engine.js';
+import { compile, mount, DCLogic, setStyleLens, rerenderAll, typedIn } from '../engine.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -204,6 +204,41 @@ test('hint-* attributes are dropped; a handler error goes to onError with its na
   ok(!b.hasAttribute('hint-x'), 'hint dropped');
   b.click();
   eq(errs.join(), 'boom:bang');
+});
+
+test('the style lens rewrites style values, only when they change, and clears', () => {
+  const { box, set, app } = setup('<p style="color: {{ c }}">x</p><i style="margin: 0">y</i>', (st) => ({ c: st.c }), { c: 'red' });
+  const p = box.querySelector('p'), i = box.querySelector('i');
+  let calls = 0, writes = 0;
+  const orig = p.setAttribute.bind(p);
+  p.setAttribute = (n, v) => { if (n === 'style') writes++; orig(n, v); };
+  try {
+    setStyleLens((s) => { if (s === 'color: red') calls++; return s.replace('red', 'blue'); });
+    rerenderAll();
+    eq(p.getAttribute('style'), 'color: blue', 'lensed'); eq(i.getAttribute('style'), 'margin: 0', 'untouched value');
+    eq(writes, 1, 'one write');
+    app.render(); app.render();
+    eq(writes, 1, 'no rewrite when the lensed value is the same');
+    eq(calls, 1, 'memoised');
+    set({ c: 'green' });
+    eq(p.getAttribute('style'), 'color: green', 'new value through the lens');
+    setStyleLens(null); set({ c: 'red' });
+    eq(p.getAttribute('style'), 'color: red', 'cleared');
+  } finally { setStyleLens(null); }
+});
+
+test('typedIn: a draft kept without a render is neither written back nor missed when cleared', () => {
+  const { box, set, app, c } = setup('<input value="{{ d }}">', (st) => ({ d: st.d }), { d: '' });
+  const inp = box.querySelector('input');
+  inp.value = 'abc'; typedIn(inp);
+  let writes = 0; const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  Object.defineProperty(inp, 'value', { get() { return desc.get.call(this); }, set(v) { writes++; desc.set.call(this, v); }, configurable: true });
+  set({ d: 'abc' });
+  eq(writes, 0, 'same text not written back');
+  inp.value = 'abcd'; writes = 0; typedIn(inp); c.state.d = 'abcd'; app.render();
+  eq(writes, 0, 'a render with the draft kept in place writes nothing');
+  set({ d: '' });
+  eq(desc.get.call(inp), '', 'cleared');
 });
 
 export async function run(out) {

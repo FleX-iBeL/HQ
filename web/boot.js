@@ -3,7 +3,8 @@
 // is picked again on resize or rotate; the design comes from ?design= (for testing),
 // else localStorage hq-design, else the manifest's default. Switching either mounts the
 // other templates with the same component, so the state is kept.
-import { compile, mount } from './engine.js';
+import { compile, mount, setStyleLens, rerenderAll } from './engine.js';
+import * as theme from './theme.js';
 import { Component } from './app.js';
 
 const PHONE_BELOW = 820;
@@ -80,13 +81,15 @@ function useDesign(design) {
 }
 
 async function boot() {
+  // Light or dark: the lens goes in before the first render (index.html already set the page).
+  theme.init({ setStyleLens, rerenderAll });
   manifest = JSON.parse(await text('templates/manifest.json'));
   const design = pickDesign();
   // Demo mode: ?demo=1 (or localStorage hq-demo = 1) shows the design-review rows in Settings.
   let demo = new URLSearchParams(location.search).get('demo') === '1';
   try { demo = demo || localStorage.getItem('hq-demo') === '1'; } catch (e) { /* no storage */ }
   component = new Component({ design, device: deviceFor(), onDesign: useDesign, demo });
-  Object.assign(window.HQ, { component, manifest, useDesign, show, now: () => now, app: null });
+  Object.assign(window.HQ, { theme, component, manifest, useDesign, show, now: () => now, app: null });
   await show(deviceFor(), design);
   let wait = 0;
   const again = () => { clearTimeout(wait); wait = setTimeout(() => { const d = deviceFor(); if (d !== now.device) show(d, now.design); }, 120); };

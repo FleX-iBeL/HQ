@@ -1,0 +1,50 @@
+/* Light and dark for the stylesheets: the colours the stylesheets use, as variables, light
+   on :root and dark under [data-theme="dark"]. The dark values are the same as theme.js's
+   table gives for that colour in that role (tools/colour_inventory.mjs checks it).
+   Inline styles in the templates are mapped by theme.js; this file is only what the
+   stylesheets and the browser itself draw. Loaded from index.html, before the design's. */
+:root {
+  --hq-ground: #f8fafc;              /* the page */
+  --hq-card: #ffffff;                /* cards, lists, buttons, text boxes */
+  --hq-raised: #f1f5f9;              /* the small grey buttons, bar tracks */
+  --hq-hair: #e2e8f0;                /* the ring round a card */
+  --hq-hair-soft: #f1f5f9;           /* the line between rows */
+  --hq-ink: #0f172a;                 /* text */
+  --hq-ink-2: #475569;               /* secondary text, links */
+  --hq-placeholder: #94a3b8;
+  --hq-float: rgba(15,23,42,.04);    /* the shadow under a card */
+  --hq-select: rgba(109,40,217,0.18);
+}
+[data-theme="dark"] {
+  --hq-ground: #0b1017;
+  --hq-card: #131a24;
+  --hq-raised: #1c2431;
+  --hq-hair: #273142;
+  --hq-hair-soft: #1f2835;
+  --hq-ink: #e7ecf3;
+  --hq-ink-2: #a7b2c2;
+  --hq-placeholder: #8794a8;
+  --hq-float: rgba(0,0,0,0.088);
+  --hq-select: rgba(139,92,246,0.42);
+  color-scheme: dark;
+}
+
+html { background: var(--hq-ground); }
+
+/* What the browser draws itself, in dark. */
+[data-theme="dark"] ::placeholder { color: var(--hq-placeholder); opacity: 1; }
+[data-theme="dark"] input, [data-theme="dark"] textarea, [data-theme="dark"] select { caret-color: var(--hq-ink); }
+[data-theme="dark"] ::selection { background: var(--hq-select); color: #ffffff; }
+[data-theme="dark"] * { scrollbar-color: #334052 transparent; }
+[data-theme="dark"] ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #334052; border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+[data-theme="dark"] input[type="range"], [data-theme="dark"] input[type="checkbox"], [data-theme="dark"] input[type="radio"] { accent-color: #8b5cf6; }
+/* A date or time box's own picker icon would be black on dark. */
+[data-theme="dark"] ::-webkit-calendar-picker-indicator { filter: invert(0.85); }
+/* Autofill paints its own light yellow; keep the box dark. */
+[data-theme="dark"] input:-webkit-autofill { -webkit-text-fill-color: var(--hq-ink); box-shadow: 0 0 0 40px var(--hq-card) inset; }
+
+/* The switches' knob is a white dot in the design, which the lens would read as a white
+   surface and make dark. In dark it stays light. Matched by its inline style's text, as
+   fluid-*.css does. */
+[data-theme="dark"] [style^="width: 22px; height: 22px; border-radius: 11px; background:"] { background: #e7ecf3 !important; }

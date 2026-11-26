@@ -4,7 +4,7 @@
    their exact text, so these rules need !important. Hand-written; the split never
    touches this file. */
 :root { --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
-html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #f8fafc; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--hq-ground); }
 #app { height: 100vh; height: 100dvh; }
 
 /* The root: the whole screen, not 390 x 844. */

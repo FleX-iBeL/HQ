@@ -4,7 +4,7 @@
    panel takes the rest, and its content keeps the design's 760 px reading width.
    Inline styles are matched by their exact text, so these rules need !important.
    Hand-written; the split never touches this file. */
-html, body { margin: 0; height: 100%; overflow: hidden; background: #f8fafc; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--hq-ground); }
 #app { height: 100vh; height: 100dvh; min-width: 1024px; min-height: 640px; }
 @media (max-width: 1023px) { html, body { overflow: auto; } }
 

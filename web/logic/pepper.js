@@ -69,7 +69,7 @@ function box(st, app, name, done) {
   const set = (v) => app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { [name]: v }) }));
   const go = (text) => { const t = (text || '').trim(); if (!t) return; set(''); done(t); };
   return {
-    value, input: (e) => set(e.target.value),
+    value, input: (e) => app.keepDraft(name, e.target),
     key: (e) => { if (e.key !== 'Enter' || e.isComposing) return; e.preventDefault(); go(e.target.value); },
     keep: () => go(app.state && app.state.drafts ? app.state.drafts[name] : value)
   };

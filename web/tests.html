@@ -15,7 +15,7 @@
 </head>
 <body>
 <h1>HQ tests</h1>
-<p><a href="tests.html">Engine tests</a> · <a href="tests.html?smoke">Smoke: all six combinations, every screen, every button</a></p>
+<p><a href="tests.html">Engine tests</a> · <a href="tests.html?smoke">Smoke: all six combinations, every screen, every button</a> · <a href="tests.html?smoke&amp;theme=dark">the same in dark</a></p>
 <div class="sum" id="sum">Running…</div>
 <ul id="out"></ul>
 <div id="scratch"></div>
@@ -40,7 +40,9 @@ if (!new URLSearchParams(location.search).has('smoke')) {
   for (const device of ['phone', 'mac']) {
     const frame = document.createElement('iframe');
     frame.width = WIDTH[device][0]; frame.height = WIDTH[device][1];
-    frame.src = 'index.html?demo=1'; // demo mode: the design-review rows are clicked too
+    // demo mode: the design-review rows are clicked too; ?smoke&theme=dark runs it in dark
+    const theme = new URLSearchParams(location.search).get('theme');
+    frame.src = 'index.html?demo=1' + (theme === 'dark' || theme === 'light' ? '&theme=' + theme : '');
     document.body.appendChild(frame);
     await new Promise((r) => frame.onload = r);
     const w = frame.contentWindow;

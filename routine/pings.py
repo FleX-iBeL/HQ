@@ -925,7 +925,9 @@ def _game_due(s: dict, t: float, evs: list[dict] | None = None) -> list[tuple[st
 
 def nudge_items() -> list[dict]:
     """For the app: the open nudges, each with its bell (no numbers of how often: that's hers)."""
-    return [{"n": x["n"], "text": x["text"], "paused": bool(x.get("paused"))} for x in open_nudges()]
+    return [{"n": x["n"], "text": x["text"], "paused": bool(x.get("paused")), "item": x.get("item") or "",
+             "reason": x.get("reason") or "", "matters": x.get("matters") or "normal", "added": x.get("added") or "",
+             "next": x.get("next") or "", "deadline": x.get("deadline") or ""} for x in open_nudges()]
 
 
 def _nudge_line(x: dict) -> str:

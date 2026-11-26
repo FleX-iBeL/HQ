@@ -14,7 +14,7 @@
 <sc-if value="{{ s.donna }}">
 <div class="list">
 <sc-for list="{{ nudges }}" as="n">
-<div class="row" style="cursor: default"><span class="grow col"><span style="font-size: 15px; font-weight: 600; text-decoration: {{ n.deco }}; color: {{ n.fc }}">{{ n.title }}</span><span class="muted" style="font-size: 13px">{{ n.sub }}</span></span><button class="small" onClick="{{ n.toggle }}">{{ n.label }}</button></div>
+<div class="row" role="button" tabindex="0" onClick="{{ n.open }}" onKeyDown="{{ n.key }}" style="cursor: pointer"><span class="grow col"><span style="font-size: 15px; font-weight: 600; text-decoration: {{ n.deco }}; color: {{ n.fc }}">{{ n.title }}</span><span class="muted" style="font-size: 13px">{{ n.sub }}</span></span><button class="small" onClick="{{ n.toggle }}">{{ n.label }}</button></div>
 </sc-for>
 </div>
 </sc-if>

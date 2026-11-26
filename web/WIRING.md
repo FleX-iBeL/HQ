@@ -75,7 +75,7 @@ In the template:
 <input value="{{ drafts.NAME }}" onInput="{{ typed.NAME }}" onKeyDown="{{ enter.NAME }}">
 ```
 
-In your module, return `submit: { NAME: (text) => … }`. The core keeps the draft in `state.drafts.NAME`. Enter hands your function the trimmed text and clears the box. NAME must be unique across the app, so start it with your area (`todoAdd`, `inboxNote`). The bucketlist and wishlist boxes (`bucket`, `wish`) are the examples.
+In your module, return `submit: { NAME: (text) => … }`. The core keeps the draft in `state.drafts.NAME` without a render per keystroke (the box already shows the text), so read a draft from `app.state.drafts` in a handler. A box of your own that keeps what is typed in state uses `app.keepDraft(NAME, e.target)` (or `app.quietState(patch, e.target)`), never a `setState` per keystroke. Enter hands your function the trimmed text and clears the box. NAME must be unique across the app, so start it with your area (`todoAdd`, `inboxNote`). The bucketlist and wishlist boxes (`bucket`, `wish`) are the examples.
 
 ## Lists that change: the key rule
 

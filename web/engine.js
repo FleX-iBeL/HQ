@@ -43,6 +43,56 @@ const HOLE = /\{\{\s*([^}]*?)\s*\}\}/g;
 const WHOLE = /^\{\{\s*([^}]*?)\s*\}\}$/;
 const PROPS = new Set(['value', 'checked', 'selected']);
 
+/* The style lens: when set, every style attribute value goes through it before it is
+ * compared and written, so a theme can rewrite colours in inline styles. Results are
+ * memoised per input string until the lens changes. */
+let styleLens = null;
+let lensMemo = new Map();
+const mounted = new Set();
+function lensed(v) {
+  if (!styleLens || typeof v !== 'string' || !v) return v;
+  let out = lensMemo.get(v);
+  if (out === undefined) {
+    try { out = styleLens(v); } catch (err) { console.error(err); out = v; }
+    if (typeof out !== 'string') out = v;
+    if (lensMemo.size > 5000) lensMemo.clear();
+    lensMemo.set(v, out);
+  }
+  return out;
+}
+/* setStyleLens(fn) sets the lens (null clears it). It does not re-render by itself:
+ * call rerenderAll() after it (app.flush() and forceUpdate() do not: flush only renders
+ * when a frame is pending, and forceUpdate schedules a render of one component). */
+export function setStyleLens(fn) {
+  styleLens = typeof fn === 'function' ? fn : null;
+  lensMemo = new Map();
+}
+/* rerenderAll() renders every mounted app now, so a changed lens reaches every node.
+ * Only attributes whose lensed value changed are rewritten. */
+/* typedIn(node): the person typed in this input; what it holds now counts as the value last
+ * rendered, so a draft kept outside the render (no re-render per keystroke) is not written
+ * back, and a later render that clears the draft does clear the box. */
+export function typedIn(node) {
+  if (!node || !('value' in node)) return;
+  node.__a = Object.assign({}, node.__a || {}, { value: node.value });
+}
+export function rerenderAll() { for (const r of [...mounted]) r(); }
+/* holdRenders(): scheduled renders (setState, forceUpdate) wait until the returned release() is
+ * called, then one render runs if any was asked. For a drag or a gesture, so nothing re-renders
+ * the nodes under the finger. A direct render() or rerenderAll() still runs. Holds nest. */
+let holds = 0;
+const waiting = new Set();
+export function holdRenders() {
+  holds++;
+  let done = false;
+  return () => {
+    if (done) return; done = true;
+    if (--holds > 0) return;
+    const list = [...waiting]; waiting.clear();
+    for (const sched of list) sched();
+  };
+}
+
 let decoder = null;
 function decode(s) {
   if (s.indexOf('&') < 0) return s;
@@ -171,7 +221,7 @@ function build(kids, scope, sfx, out) {
       }
     } else {
       const v = { k: n.id + sfx, name: n.name, svg: n.svg, attrs: {}, on: {}, src: {}, kids: [] };
-      for (const a of n.attrs) v.attrs[a.n] = a.get(scope);
+      for (const a of n.attrs) v.attrs[a.n] = a.n === 'style' && styleLens ? lensed(a.get(scope)) : a.get(scope);
       for (const e of n.on) { const f = e.get(scope); if (typeof f === 'function') { v.on[e.ev] = f; v.src[e.ev] = e.src; } }
       if (n.ref) v.ref = n.ref(scope);
       build(n.kids, scope, sfx, v.kids);
@@ -224,6 +274,10 @@ function update(node, v, host, first) {
   const had = node.__on || {};
   for (const ev in v.on) if (!had[ev]) node.addEventListener(ev, dispatch);
   for (const ev in had) if (!v.on[ev]) node.removeEventListener(ev, dispatch);
+  // A node you press (a click or pointer handler) carries data-press, so the app's one style
+  // rule keeps a held press from selecting its text or opening the phone's callout.
+  const press = !!(v.on.click || v.on.pointerdown || v.on.mousedown || v.on.touchstart);
+  if (press !== !!node.__press) { node.__press = press; if (press) node.setAttribute('data-press', ''); else node.removeAttribute('data-press'); }
   node.__on = v.on;
   node.__src = v.src;
   if (v.ref !== node.__ref) {
@@ -285,10 +339,12 @@ export function mount(container, template, component, opts = {}) {
     for (const n of host.refs) if (!n.isConnected) { setRef(n.__ref, null); n.__ref = null; host.refs.delete(n); }
   };
   component.__schedule = () => {
+    if (holds > 0) { waiting.add(component.__schedule); return; }
     if (host.frame || host.dead) return;
     host.frame = requestAnimationFrame(render);
     host.timer = setTimeout(render, 100); // a hidden tab gets no frames
   };
+  mounted.add(render);
   render();
   component.componentDidMount();
   return {
@@ -296,7 +352,7 @@ export function mount(container, template, component, opts = {}) {
     render,
     flush: () => { if (host.frame) render(); },
     unmount: () => {
-      host.dead = true; cancelAnimationFrame(host.frame); clearTimeout(host.timer);
+      host.dead = true; mounted.delete(render); cancelAnimationFrame(host.frame); clearTimeout(host.timer);
       container.textContent = '';
       for (const n of host.refs) setRef(n.__ref, null);
       host.refs.clear();

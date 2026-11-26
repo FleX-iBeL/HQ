@@ -15,6 +15,8 @@
 //   opened, for data that must be fresh then. Both only for a wired area outside demo mode.
 // - Talk to the server only through app.api (web/api.js): get(path), post(path, body, tag).
 
+import { typedIn } from '../engine.js';
+
 // The three designs one app carries.
 export const DESIGNS = [
   { id: 'spotlight', name: 'Spotlight', line: 'One of the three at a time, swipe between them' },
@@ -56,15 +58,20 @@ export const start = { screen: 'home', stack: [], space: 'donna', design: 'desk'
 
 // A text box with a draft in state: value="{{ drafts.NAME }}" onInput="{{ typed.NAME }}"
 // onKeyDown="{{ enter.NAME }}". Enter hands the text to the area's submit.NAME and clears it.
+// A keystroke keeps the draft in state without a render (the box already shows what he
+// typed). The draft is written into the drafts object in place, so a handler made by the last
+// render that reads st.drafts still sees what is in the box.
 function boxes(st, app, submit) {
   const typed = {}, enter = {};
   for (const name of Object.keys(submit)) {
-    typed[name] = (e) => app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { [name]: e.target.value }) }));
+    typed[name] = (e) => app.keepDraft(name, e.target);
     enter[name] = (e) => {
       if (e.key !== 'Enter' || e.isComposing) return;
       const text = (e.target.value || '').trim();
       if (!text) return;
       e.preventDefault();
+      e.target.value = '';
+      typedIn(e.target);
       app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { [name]: '' }) }));
       submit[name](text);
     };
@@ -74,6 +81,19 @@ function boxes(st, app, submit) {
 
 // Installed on the app.
 export const methods = {
+  // A text box's draft, kept without a render (see boxes).
+  keepDraft(name, node) {
+    if (!this.state.drafts) this.state = Object.assign({}, this.state, { drafts: {} });
+    this.state.drafts[name] = node.value;
+    typedIn(node);
+  },
+  // Change state without a render: for what a text box holds while he types. node is the box,
+  // so a later render neither writes the same text back nor misses a clear.
+  quietState(update, node) {
+    const p = typeof update === 'function' ? update(this.state, this.props) : update;
+    if (p) this.state = Object.assign({}, this.state, p);
+    if (node) typedIn(node);
+  },
   go(screen, extra) {
     this.setState((st) => Object.assign({ screen, stack: st.stack.concat([st.screen]) }, extra || {}));
     if (this.entered) this.entered(screen);

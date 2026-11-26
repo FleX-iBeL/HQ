@@ -411,13 +411,19 @@ class Call:
     def _goodbye_note(self, who: dict, words: str) -> list[str]:
         """H129: on a turn that may be his goodbye, what he's doing right now (his calendar, else his to-do list), so
         her goodbye comments on it. Not on Free (nothing of his here), not for an agent with her own goodbye."""
-        if self.free or who.get("own_goodbye") or not config.sounds_like_goodbye(words):
+        if not config.sounds_like_goodbye(words):
             return []
+        # The mark is easy to forget once the goodbye carries a comment (or on a three-way call, where the rules
+        # sit further back): every turn that sounds like his goodbye says it again, for every agent and on Free.
+        mark = [f"[Call system: if {config.USER} is closing the call now, end your goodbye with {config.HANGUP_MARK} "
+                "as the very last thing, so the call hangs up; if he isn't, don't write it.]"]
+        if self.free or who.get("own_goodbye"):
+            return mark
         try:
-            return [agenda.goodbye_note(config.USER)]
+            return [agenda.goodbye_note(config.USER)] + mark
         except Exception as e:
             logger.warning(f"H129: what he's doing now couldn't be read: {e!r}")
-            return []
+            return mark
 
     def helper_name(self) -> str:
         """F106: the name a helper of this call goes by: its transcript's."""

@@ -61,6 +61,46 @@ function when(s, withTime) {
 }
 const short = (t, n) => (t.length > n ? t.slice(0, n - 1).trimEnd() + '…' : t);
 
+// ---- a nudge, opened ----------------------------------------------------------------------
+// A nudge tied to a to-do item opens that item: by its name as the nudge has it, else an open item that was
+// renamed from that name (the to-do list keeps "Renamed from: …" in its notes), else the one open item whose
+// name holds all its words. Anything else opens the nudge's own sheet: what it is, why, how often, the next one.
+const norm = (t) => String(t || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const OPEN = (it) => !it.status || /open|scheduled|waiting|on hold/i.test(it.status);
+function itemFor(app, name) {
+  const lists = (app.state.data.todo && app.state.data.todo.lists) || [];
+  const want = norm(name);
+  if (!want) return null;
+  const all = [];
+  for (const l of lists) if (!/done|letgo|groc|wish/.test(l.kind || '')) for (const it of l.items || []) all.push([l, it]);
+  let hit = all.filter(([, it]) => norm(it.title) === want);
+  if (hit.length !== 1) hit = all.filter(([, it]) => OPEN(it) && norm(it.notes).includes('renamed from: ' + want + '.'));
+  if (hit.length !== 1) { const words = want.split(' ').filter((w) => w.length > 2); hit = all.filter(([, it]) => OPEN(it) && words.length && words.every((w) => norm(it.title).includes(w))); }
+  return hit.length === 1 ? hit[0] : null;
+}
+const HOW_OFTEN = { little: 'About once a day', normal: 'About twice a day', much: 'About every three hours' };
+function dayWords(s) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(s || '');
+  if (!m) return '';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]), now = new Date();
+  const ahead = Math.round((d - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  const t = /[ T](\d\d:\d\d)/.exec(s);
+  if (ahead === 1) return 'Tomorrow' + (t ? ', ' + t[1] : '');
+  return when(s, true);
+}
+function openNudge(app, x, done) {
+  const hit = x.item ? itemFor(app, x.item) : null;
+  if (hit) { app.go('todoItem', { tdItem: hit[1].id, tdList: hit[0].key }); return; }
+  const rows = [];
+  if (x.reason) rows.push({ a: 'Why it matters', b: x.reason, pick: () => {} });
+  rows.push({ a: 'How often', b: (x.paused ? 'Paused for now' : (HOW_OFTEN[x.matters] || HOW_OFTEN.normal)) + (x.added ? ', since ' + dayWords(x.added).toLowerCase() : ''), pick: () => {} });
+  if (x.next && !x.paused) rows.push({ a: 'The next nudge', b: dayWords(x.next), pick: () => {} });
+  if (x.deadline) rows.push({ a: 'Deadline', b: dayWords(x.deadline), pick: () => {} });
+  if (x.item) rows.push({ a: 'On your to-do list', b: x.item, pick: () => {} });
+  rows.push({ a: 'Done', b: 'It’s done: she stops nudging', pick: () => { app.setState({ sheet: null }); done(); } });
+  app.setState({ sheet: 'nudge', nudgeOpen: { title: x.text, rows } });
+}
+
 // ---- shaping ----------------------------------------------------------------------------
 
 export function vals(st, ctx, D) {
@@ -74,10 +114,14 @@ export function vals(st, ctx, D) {
   const nudgeDone = (x) => () => notesChange(app, { nudge_done: x.n },
     (n) => Object.assign({}, n, { hers: Object.assign({}, n.hers, { nudges: (n.hers.nudges || []).filter((y) => y.n !== x.n) }) }), 'Couldn’t stop that nudge. Try again.')
     .then((ok) => { if (ok) app.say('Done. She stopped nudging'); });
-  const nudges = nudging.map((x) => ({ title: x.text, sub: x.paused ? 'Paused for now' : 'She’s nudging you until it’s done', label: 'Done', deco: 'none', fc: '#0f172a', toggle: nudgeDone(x) }));
+  // A button inside a tappable row does only its own thing.
+  const keyOpen = (fn) => (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fn(); } };
+  const own = (fn) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); fn(); };
+  const nudges = nudging.map((x) => ({ title: x.text, sub: x.paused ? 'Paused for now' : 'She’s nudging you until it’s done', label: 'Done', deco: 'none', fc: '#0f172a',
+    toggle: own(nudgeDone(x)), open: () => openNudge(app, x, nudgeDone(x)), key: keyOpen(() => openNudge(app, x, nudgeDone(x))) }));
   const nudgeRows = nudging.map((x) => ({ t: x.text, when: x.paused ? 'Paused for now' : 'Nudging you until it’s done',
-    bell: () => app.say('HQ can’t pause one nudge yet. Tap Done when it’s done, or ask Donna.'), bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9', bellAria: x.paused ? 'Paused for now' : 'Nudging you',
-    done: nudgeDone(x), doneLabel: 'Done' }));
+    bell: own(() => app.say('HQ can’t pause one nudge yet. Tap Done when it’s done, or ask Donna.')), bellBg: x.paused ? '#f1f5f9' : '#f5f3ff', bellFg: x.paused ? '#94a3b8' : '#6d28d9', bellAria: x.paused ? 'Paused for now' : 'Nudging you',
+    done: own(nudgeDone(x)), doneLabel: 'Done', open: () => openNudge(app, x, nudgeDone(x)), key: keyOpen(() => openNudge(app, x, nudgeDone(x))) }));
 
   // Newest first, as the design lists them.
   const myNotes = ready ? notes.items.slice().reverse().map((it) => ({ id: it.id, t: it.text, when: when(it.when, true),
@@ -100,6 +144,7 @@ export function vals(st, ctx, D) {
   const retry = (what) => () => { put(app, { [what + 'Failed']: '' }); (what === 'notes' ? fetchNotes : fetchMail)(app); };
 
   return {
+    sheets: { nudge: st.nudgeOpen || { title: '', rows: [] } },
     agent: { donna: { rows: {
       mail: ['Mail', mail ? (nMail ? nMail + ' very important' : 'Nothing important') : (D && D.mailFailed ? 'Didn’t load' : ''), 'mail', nMail ? '#b42318' : '#475569', nMail ? '600' : '400'],
       notes: ['Notes', ready ? (mine ? mine + ' of yours' : 'None of yours') + (herCount ? ', ' + herCount + ' of hers' : '') : '', 'notes']

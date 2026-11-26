@@ -13,6 +13,7 @@ import * as inbox from './logic/inbox.js';
 import * as pepper from './logic/pepper.js';
 import * as mp from './logic/mp.js';
 import * as settings from './logic/settings.js';
+import * as gestures from './logic/gestures.js';
 
 export const AREAS = { call, texts, agenda, todo, lists, inbox, pepper, mp, settings };
 // Whose card text each agent shows (kicker, headline, sub, line).
@@ -41,8 +42,29 @@ function mergeInto(out, add) {
   return out;
 }
 
+// Whether two pieces of data hold the same (JSON-like data; anything else counts as changed).
+function sameData(a, b) {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; }
+}
+
+// Holding a button never selects its text, opens the phone's callout or its magnifier, and a
+// double tap never zooms; text in boxes and in the reading screens stays selectable.
+function pressStyle() {
+  if (document.getElementById('hq-press')) return;
+  const el = document.createElement('style');
+  el.id = 'hq-press';
+  el.textContent = 'html,body{touch-action:manipulation}'
+    + 'button,a,label,summary,[role=button],[data-press],[data-press] *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}'
+    + 'input,textarea,select,[contenteditable],[contenteditable] *{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}';
+  document.head.appendChild(el);
+  // a long touch on something you press opens no menu (a right click with a mouse still does)
+  let touch = false;
+  document.addEventListener('pointerdown', (e) => { touch = e.pointerType === 'touch' || e.pointerType === 'pen'; }, true);
+  document.addEventListener('contextmenu', (e) => { if (touch && e.target.closest && e.target.closest('button,a,[data-press]')) e.preventDefault(); }, true);
+}
+
 export function startState(design) {
-  const st = Object.assign({}, core.start, { data: {} });
+  const st = Object.assign({}, core.start, { data: {}, drafts: {} });
   for (const a of Object.values(AREAS)) Object.assign(st, JSON.parse(JSON.stringify(a.start)));
   if (design) st.design = design;
   return st;
@@ -61,8 +83,13 @@ export class Component extends DCLogic {
   // The data an area renders from: its demo module, or state.data[area] (null while loading).
   source(a) { return this.isReal(a) ? (this.state.data[a.NAME] ?? null) : a.demo; }
   // An area keeps its data with app.setData('todo', {...}); it lands in state.data.todo.
+  // An answer that brings nothing new (a poll) changes nothing and causes no render: the old
+  // value stays, with its identity.
   setData(name, patch) {
-    this.setState((x) => ({ data: Object.assign({}, x.data, { [name]: typeof patch === 'function' ? patch(x.data[name]) : patch }) }));
+    const old = this.state.data[name];
+    const next = typeof patch === 'function' ? patch(old) : patch;
+    if (next === old || (old != null && next != null && sameData(old, next))) return;
+    this.setState((x) => ({ data: Object.assign({}, x.data, { [name]: next }) }));
   }
   // load(app) for every wired area: at mount, and when the app comes back (visible, online).
   // One load per area at a time: a load asked while that area's load still runs is dropped, and
@@ -94,6 +121,19 @@ export class Component extends DCLogic {
     this._mountedOnce = true;
     this.loadAll(true);
     if (typeof document !== 'undefined') {
+      pressStyle();
+      gestures.install(this);
+      // the agent he had open last, as the old page remembered hers (hq-agent); not in demo mode
+      if (!this.demoMode) {
+        let k = null; try { k = { donna: 'donna', pepper: 'pepper', moneypenny: 'mp' }[localStorage.getItem('hq-agent')]; } catch (e) { /* none */ }
+        if (k && k !== this.state.space && this.state.screen === 'home') this.setState({ space: k });
+      }
+      // Escape closes what's open on top: a sheet, then the "End the call?" question
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        if (this.state.sheet) { e.preventDefault(); this.setState({ sheet: null }); }
+        else if (this.state.confirmHang) { e.preventDefault(); this.setState({ confirmHang: false }); }
+      });
       document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.setState({ clockNow: Date.now() }); this.loadAll(false); } });
       // Outside demo mode the offline state is the real one; the review switch is demo only.
       api.onOffline((off) => { if (!this.demoMode) { this.setState({ offline: off }); if (!off) this.loadAll(true); } });
@@ -116,6 +156,10 @@ export class Component extends DCLogic {
   }
   renderVals() {
     const st = this.state;
+    if (this._mountedOnce && !this.demoMode && st.space !== this._keptSpace && typeof localStorage !== 'undefined') {
+      this._keptSpace = st.space;
+      try { localStorage.setItem('hq-agent', { donna: 'donna', pepper: 'pepper', mp: 'moneypenny' }[st.space] || 'donna'); } catch (e) { /* private mode */ }
+    }
     const cards = {};
     for (const k in CARDS) { const D = this.source(CARDS[k]); cards[k] = D ? CARDS[k].card(st, D) : {}; }
     const ctx = core.context(st, this, cards);

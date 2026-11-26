@@ -54,7 +54,7 @@ const clock = (ms) => { const d = new Date(ms); return two(d.getHours()) + ':' +
 // Everything of the live call that isn't render state. One call at a time.
 const rt = { pc: null, dc: null, stream: null, audio: null, ping: null, tickT: null, audioCtx: null, wake: null,
   secT: null, holdT: null, pressId: null, holding: false, wasMuted: false, tapUsed: false, linger: null, cancellable: false,
-  retryT: null, turn: 0, hooked: false, opts: null, startedOnce: false };
+  retryT: null, talkGate: null, turn: 0, hooked: false, opts: null, startedOnce: false };
 
 function audioEl() {
   if (!rt.audio) {
@@ -96,6 +96,53 @@ function applySink() {
   a.setSinkId(p.id).catch(() => {});
 }
 function micOpen(on) { if (rt.stream) rt.stream.getAudioTracks().forEach((t) => { t.enabled = on; }); }
+// The moment a hold turns into talking: a short buzz (Android's vibrate; on an iPhone from iOS 18 a hidden
+// switch flipped, which ticks; before that a soft click), and a short low sound so he hears it without looking.
+// The mic sends silence while that sound plays, so it isn't heard as his words. Both silent with her voice off.
+function oldIos() { const m = navigator.userAgent.match(/(?:iPhone|iPad|iPod).* OS (\d+)_/); return !!m && +m[1] < 18; }
+function beep(type, f0, f1, peak, len) {
+  const c = rt.audioCtx; if (!c) return;
+  if (c.state === 'suspended') { try { c.resume(); } catch (e) { /* later */ } }
+  const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + len * 0.8);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(g).connect(c.destination); o.start(t); o.stop(t + len + 0.02);
+}
+function buzz(voiceOn) {
+  try { if (navigator.vibrate && navigator.vibrate(25)) return; } catch (e) { /* none */ }
+  if (oldIos()) { if (voiceOn) beep('sine', 1500, 0, 0.12, 0.04); return; }
+  try {
+    const label = document.createElement('label'), input = document.createElement('input');
+    label.setAttribute('aria-hidden', 'true'); label.style.display = 'none';
+    input.type = 'checkbox'; input.setAttribute('switch', '');
+    label.appendChild(input); document.head.appendChild(label);
+    label.click(); label.remove();
+  } catch (e) { /* no tick */ }
+}
+const TALK_SOUND_MS = 180;
+function talkSound(app) {
+  if (!rt.audioCtx || !app.state.voiceOn) return;
+  beep('triangle', 330, 210, 0.22, 0.13);
+  micOpen(false);
+  clearTimeout(rt.talkGate);
+  rt.talkGate = setTimeout(() => { rt.talkGate = null; if (rt.holding) micOpen(true); }, TALK_SOUND_MS);
+}
+// Where the phone is, for travel advice, as the old page sends it: only when he allows his location in the
+// app (Settings' weather place: hq-wx-gps), else only when the browser already allows it and he didn't pick his
+// home place. When a call starts, when the page shows again, and every ten minutes while it shows.
+let hereAt = 0;
+async function sendHere(app, force) {
+  if (app.demoMode || typeof navigator === 'undefined' || !navigator.geolocation) return;
+  if (!force && Date.now() - hereAt < 10 * 60 * 1000) return;
+  const want = ls.get('hq-wx-gps');
+  let ok = want === '1';
+  if (want !== '0' && want !== '1') { try { ok = (await navigator.permissions.query({ name: 'geolocation' })).state === 'granted'; } catch (e) { ok = false; } }
+  if (!ok) return;
+  navigator.geolocation.getCurrentPosition((p) => {
+    hereAt = Date.now();
+    app.api.post('api/here', { lat: p.coords.latitude.toFixed(4), lon: p.coords.longitude.toFixed(4) }, 'here').catch(() => {});
+  }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 2 * 60 * 1000 });
+}
 function send(obj) {
   try { if (rt.dc && rt.dc.readyState === 'open') { rt.dc.send(JSON.stringify(obj)); return true; } } catch (e) { /* closed */ }
   return false;
@@ -162,6 +209,8 @@ function ended(app, words) {
   app.setState((x) => Object.assign({ onCall: false, confirmHang: false, cs: 'idle', cHold: false, cTrans: false, cCancel: false, cUntapped: false,
     cMsg: '', cAgain: false, cLineDown: false, cRing: null, demo: false, second: null, sheet: x.sheet === 'add' ? null : x.sheet }, leaveCall(x)));
   if (words) app.say(words);
+  // the call is saved after its end (the after-call work): past calls read again, as the old page showed the last call
+  if (!app.demoMode && app.entered) for (const ms of [3000, 20000]) setTimeout(() => app.entered('pastCalls'), ms);
 }
 // Hang up: the server first (so the after-call work starts at once), then close.
 function hangup(app, words) {
@@ -315,7 +364,8 @@ function pressStart(app, id) {
   micOpen(true);
   rt.holdT = setTimeout(() => {
     rt.holdT = null; rt.holding = true; hideCancel(app);
-    try { if (navigator.vibrate) navigator.vibrate(25); } catch (e) { /* no buzz */ }
+    buzz(app.state.voiceOn);
+    talkSound(app);
     app.setState({ muted: false, cHold: true, cTrans: false });
     send({ type: 'ptt', held: true });
   }, HOLD_MS);
@@ -328,7 +378,7 @@ function letGo(app, id) {
   clearTimeout(rt.holdT); rt.holdT = null;
   if (app.state.cs !== 'live') { rt.holding = false; return; }
   if (rt.holding) {
-    rt.holding = false; micOpen(false);
+    rt.holding = false; clearTimeout(rt.talkGate); rt.talkGate = null; micOpen(false);
     app.setState({ muted: true, cHold: false, cTrans: true });
     send({ type: 'ptt', held: false });
     setTimeout(() => { if (app.state.cTrans) app.setState({ cTrans: false }); }, 8000);
@@ -359,8 +409,11 @@ function hook(app) {
   // Closing the page counts as hanging up.
   window.addEventListener('pagehide', (ev) => { if (!ev.persisted) send({ type: 'hangup' }); });
   document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') sendHere(app, false);
     if (document.visibilityState === 'visible' && app.state.cs === 'live') { try { rt.wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not here */ } }
   });
+  setInterval(() => { if (!document.hidden) sendHere(app, false); }, 10 * 60 * 1000);
+  sendHere(app, true);
 }
 
 // Installed on the app: start a call with an agent, from wherever you are.
@@ -397,6 +450,7 @@ export const methods = {
       screen: 'call', stack: x.screen === 'call' ? x.stack : x.stack.concat([x.screen])
     }));
     const go = () => connect(this);
+    if (!plain) sendHere(this, true);
     if (o.continue && !plain) {
       // a continued call starts with the earlier call's lines, then a line where this one begins
       this.api.get('api/calls/' + encodeURIComponent(o.continue)).then((data) => {
@@ -554,7 +608,7 @@ function realVals(st, ctx, D) {
   const muteOn = st.muted && !st.cHold;
   const msg = st.cUntapped ? 'Tap anywhere to hear her.' : st.cMsg;
   const hangNow = () => { app.setState({ confirmHang: false }); if (st.cs === 'live' || st.cs === 'connecting') hangup(app); else ended(app); };
-  const sendBox = () => { const t = ((st.drafts || {}).callTyped || '').trim(); if (typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: '' }) })); };
+  const sendBox = () => { const t = ((app.state.drafts || {}).callTyped || '').trim(); if (typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: '' }) })); };
   return {
     sheets,
     submit: { callTyped: (t) => { if (!typedNow(t)) app.setState((x) => ({ drafts: Object.assign({}, x.drafts, { callTyped: t }) })); } },

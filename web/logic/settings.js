@@ -10,6 +10,8 @@
 // show from real data is under one value, `setv`; the prototypes' own values are still
 // given for the demo and its equivalence check.
 import * as demo from './demo/settings.js';
+// Look: theme.apply keeps the pick as hq-theme (as the old page did) and shows it at once.
+import * as theme from '../theme.js';
 
 export const NAME = 'settings';
 export const WIRED = true;
@@ -249,7 +251,7 @@ export function vals(st, ctx, D) {
       .concat(list.map((d, i) => ({ key: d.id, name: d.label || word + ' ' + (i + 1), on: !!(picked && picked.id === d.id), pick: pickDev(storeKey, d) })))
       .map((r) => Object.assign(r, { use: r.on ? 'In use' : '' }));
     const looks = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([id, name]) => ({ key: id, name, bg: st.look === id ? '#ffffff' : 'transparent',
-      pick: () => { store.set('hq-theme', id === 'system' ? null : id); app.setState({ look: id }); } }));
+      pick: () => { theme.apply(id); app.setState({ look: id }); } }));
     const W = weatherView(R.weather, err.weather, st);
     const wxPick = (here) => async () => {
       if (here) {
