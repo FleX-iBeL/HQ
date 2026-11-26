@@ -28,6 +28,8 @@ function parseRoadmap(text) {
 }
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+// Beside the current HQ (HQ_BESIDE=1) this HQ's own routine doesn't run: health is read, never written, from the HQ whose routine does.
+const healthRoot = (process.env.HQ_BESIDE === '1' && process.env.HQ_HEALTH_ROOT) || root;
 const port = Number(process.env.HQ_STATUS_PORT ?? 4758);
 const PY = existsSync(join(root, '.venv/bin/python')) ? join(root, '.venv/bin/python') : (process.env.HQ_PYTHON || '/usr/bin/python3');
 const FILES = {
@@ -321,17 +323,17 @@ async function routines() {
     return r.data;
   };
   const ROUTINES_MISSING = "The routine hasn't written its lines: nothing here says whether anything runs";
-  const data = (await read('routines', join(root, '.status/routines.json'), { shape: isObject, fresh, missing: ROUTINES_MISSING })) ?? {};
+  const data = (await read('routines', join(healthRoot, '.status/routines.json'), { shape: isObject, fresh, missing: ROUTINES_MISSING })) ?? {};
   if (!fresh && !broken.some((b) => b.store === 'routines') && Object.keys(data).length === 0 && !missing.has('routines')) {
-    broken.push(brokenStore('routines', join(root, '.status/routines.json'), 'it holds no lines', ROUTINES_MISSING));
+    broken.push(brokenStore('routines', join(healthRoot, '.status/routines.json'), 'it holds no lines', ROUTINES_MISSING));
   }
   const dog = await read('watchdog', join(SUPPORT, 'watchdog.json'), { shape: isObject });
   if (dog) data.watchdog = dog;
-  const inc = (await read('incidents', join(root, '.status/incidents.json'), { shape: (d) => isObject(d) && Array.isArray(d.incidents ?? []), fresh, missing: "There's no incident log: what went down isn't known from here" }))?.incidents ?? [];
-  const temperature = await read('temperature', join(root, '.status/temperature.json'));
-  const battery = await read('battery', join(root, '.status/battery.json'));
-  const stats = await read('stats', join(root, '.status/stats.json'));
-  const lidsleep = await read('lidsleep', join(root, '.status/lidsleep.json'));
+  const inc = (await read('incidents', join(healthRoot, '.status/incidents.json'), { shape: (d) => isObject(d) && Array.isArray(d.incidents ?? []), fresh, missing: "There's no incident log: what went down isn't known from here" }))?.incidents ?? [];
+  const temperature = await read('temperature', join(healthRoot, '.status/temperature.json'));
+  const battery = await read('battery', join(healthRoot, '.status/battery.json'));
+  const stats = await read('stats', join(healthRoot, '.status/stats.json'));
+  const lidsleep = await read('lidsleep', join(healthRoot, '.status/lidsleep.json'));
   const forYou = await forYouNow();  // the helpers beside a call, looking something up for him right now
   const noLog = missing.has('incidents') && fresh;
   return { broken, noLog, forYou, laptop: LAPTOP, where: WHERE, now: Date.now() / 1000, routines: data, incidents: inc.slice(-30).reverse(), temperature, battery, stats, lidsleep };

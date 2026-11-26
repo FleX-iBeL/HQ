@@ -38,6 +38,10 @@ fi
 # by itself into the live workspace or the other HQ's folders (the texts' phone list, the page's reports, the weather it
 # reads for the page stay in this HQ's own scratch). HQ_BESIDE=0 once this HQ takes over.
 BESIDE="${HQ_BESIDE:-1}"
+# Beside the current HQ, health (routines, incidents, the laptop) is read from that HQ: its routine is the one running.
+if [[ "$BESIDE" == 1 && -z "$HQ_WORKSPACE" && -z "$HQ_HEALTH_ROOT" && -d "$ROOT/../HQ/.status" ]]; then
+  HQ_HEALTH_ROOT="$(cd "$ROOT/../HQ" && pwd)"
+fi
 PY="$ROOT/.venv/bin/python"
 [[ -x "$PY" ]] || PY=/usr/bin/python3
 OWN_ENV=(HQ_HOST=127.0.0.1 HQ_PORT="$PORT" HQ_STATUS_PORT="$SPORT" HQ_SUPPORT="$SUPPORT" HQ_UPDATE_LOOK="${HQ_UPDATE_LOOK:-0}"
@@ -49,7 +53,7 @@ OWN_ENV=(HQ_HOST=127.0.0.1 HQ_PORT="$PORT" HQ_STATUS_PORT="$SPORT" HQ_SUPPORT="$
          ${HQ_NO_OUTSIDE:+HQ_NO_OUTSIDE="$HQ_NO_OUTSIDE"} ${HQ_STATUS_TRIAL:+HQ_STATUS_TRIAL="$HQ_STATUS_TRIAL"}
          ${HQ_TODO_UNDO:+HQ_TODO_UNDO="$HQ_TODO_UNDO"} ${HQ_LISTS_UNDO:+HQ_LISTS_UNDO="$HQ_LISTS_UNDO"}
          ${HQ_GAMES_UNDO:+HQ_GAMES_UNDO="$HQ_GAMES_UNDO"} ${HQ_MAPS_KEY_FILE:+HQ_MAPS_KEY_FILE="$HQ_MAPS_KEY_FILE"}
-         ${HQ_FIX_DRY:+HQ_FIX_DRY="$HQ_FIX_DRY"} HQ_BESIDE="$BESIDE")
+         ${HQ_FIX_DRY:+HQ_FIX_DRY="$HQ_FIX_DRY"} ${HQ_HEALTH_ROOT:+HQ_HEALTH_ROOT="$HQ_HEALTH_ROOT"} HQ_BESIDE="$BESIDE")
 
 # The status server first (status/phone.sh starts it when nothing listens on its port, and keeps its own pid).
 env -i HOME="$HOME" USER="$USER" PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" LANG=en_US.UTF-8 \

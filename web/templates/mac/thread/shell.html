@@ -7,7 +7,7 @@
 <sc-for list="{{ chatList }}" as="c">
 <button onClick="{{ c.open }}" aria-current="{{ c.current }}" style="display: flex; gap: 12px; padding: 12px; border: none; border-radius: 14px; background: {{ c.bg }}; color: {{ c.fg }}; text-align: left; font: inherit; cursor: pointer">
 <span class="face" style="width: 44px; height: 44px; background: {{ c.faceBg }}; color: {{ c.faceFg }}; font-size: 18px">{{ c.initial }}</span>
-<span class="grow col" style="gap: 2px"><span style="display: flex; justify-content: space-between"><span style="font-size: 15px; font-weight: 600">{{ c.name }}</span><span style="font-size: 12px; font-weight: 600">{{ c.time }}</span></span><span style="font-size: 13px; line-height: 18px; opacity: 0.85">{{ c.preview }}</span></span>
+<span class="grow col" style="gap: 2px"><span style="display: flex; justify-content: space-between"><span style="font-size: 15px; font-weight: 600">{{ c.name }}</span><span style="font-size: 12px; font-weight: 600">{{ c.time }}</span></span><span style="font-size: 13px; line-height: 18px; opacity: 0.85; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden">{{ c.preview }}</span></span>
 </button>
 </sc-for>
 <div style="flex-grow: 1"></div>

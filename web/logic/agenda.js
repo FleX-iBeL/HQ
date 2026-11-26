@@ -151,7 +151,7 @@ export const card = (st, D) => {
   const day = midnight(a).getTime() === midnight(now).getTime() ? '' : dayName(a, now).toLowerCase() + ' ';
   const kicker = a <= now ? 'Now · until ' + hm(z || a) : 'Next · ' + (day ? day + 'at ' + hm(a) : inText(mins));
   const tv = e.travel || {};
-  const sub = tv.on && tv.drive ? tv.drive : tv.on && tv.train ? tv.train : (e.where || (viewOf(e) !== 'Main' ? viewOf(e) + ' calendar' : ''));
+  const sub = tv.on && tv.drive ? tv.drive : tv.on && tv.train ? tv.train : ((e.where && !/^https?:\/\//i.test(e.where) ? e.where : '') || (/^https?:\/\//i.test(e.where || '') ? 'Online' : '') || (viewOf(e) !== 'Main' ? viewOf(e) + ' calendar' : ''));
   return { kicker, headline: e.title + ' at ' + hm(a), sub, line: '' };
 };
 
