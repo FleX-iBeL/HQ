@@ -2,6 +2,7 @@
 
 <div style="height: 60px; flex-shrink: 0; padding: 0 32px; display: flex; align-items: center; gap: 18px">
 
+<sc-if value="{{ inApp }}"><div aria-hidden="true" data-window-buttons="1" style="width: 52px; height: 12px; flex-shrink: 0"></div></sc-if>
 <button onClick="{{ home }}" style="border: none; background: transparent; padding: 6px 0; font: 700 18px Sora, Inter, sans-serif; letter-spacing: -0.02em; color: #0f172a; cursor: pointer">HQ</button>
 <span class="muted" style="font-size: 14px">{{ hv.dayLong }}</span>
 <sc-if value="{{ showMini }}">

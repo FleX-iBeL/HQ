@@ -803,7 +803,7 @@ class Installer:
             S("lidsleep", "Lid closed, keep working (optional)", "setup", self.lidsleep, asks=True, optional=True),
             S("status_page", "The status page", "setup", self.status_page),
             S("call_line", "The call line", "setup", self.call_line),
-            S("desktop", "The Mac app: status, calling and the watchdog dog in one (optional)", "setup", self.desktop, optional=True),
+            S("desktop", "The Mac app: HQ in a window of its own (optional)", "setup", self.desktop, optional=True),
             S("tailscale", "Calling from the phone: Tailscale (optional)", "setup", self.tailscale, optional=True),
             S("connectors", "Mail and calendar: the Gmail and Google Calendar connectors", "setup", self.connectors),
         ]

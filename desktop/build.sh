@@ -1,8 +1,8 @@
 #!/bin/zsh
-# H27: build HQ, the Mac desktop app, from desktop/HQ.swift with swiftc (the Command Line Tools are enough).
+# Build HQ, the Mac desktop app, from desktop/HQ.swift with swiftc (the Command Line Tools are enough).
 #   desktop/build.sh            builds scratch/desktop/HQ.app and checks it (HQ.app --check)
 #   desktop/build.sh --install  also puts it in ~/Applications/HQ.app (replacing an older one)
-# The app gets this HQ's folder in its Info.plist (HQPath), so it finds shell.html and hq_control.py.
+# The app gets this HQ's folder in its Info.plist (HQPath), so it finds hq_control.py.
 # Signed ad hoc on this Mac. The first time it reads the Documents folder macOS asks once (Allow), and
 # the first call asks for the microphone once.
 set -e

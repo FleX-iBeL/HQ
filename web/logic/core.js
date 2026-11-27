@@ -17,6 +17,10 @@
 
 import { typedIn } from '../engine.js';
 
+// Inside the Mac app (?app): the window's own close, minimise and zoom buttons sit over the page's top left corner,
+// where the design drew them, so the three Mac shells keep that spot free.
+const IN_APP = typeof location !== 'undefined' && new URLSearchParams(location.search).has('app');
+
 // The three designs one app carries.
 export const DESIGNS = [
   { id: 'spotlight', name: 'Spotlight', line: 'One of the three at a time, swipe between them' },
@@ -305,7 +309,7 @@ export function vals(st, ctx, parts, V) {
   const sh = st.sheet ? parts.sheets[st.sheet] : null;
 
   return Object.assign(boxes(st, app, parts.submit), {
-    s, nav, open, back: () => app.back(), sa,
+    s, nav, open, back: () => app.back(), sa, inApp: IN_APP,
     owner: (sc === 'layer' || sc === 'games') ? { label: AG.pepper.name, accent: AG.pepper.accent } : (['features', 'sound', 'voices'].indexOf(sc) >= 0 ? { label: 'Settings', accent: '#475569' } : ownerOut),
     title: titles[sc] || '',
     spaceRows, home: () => app.setState({ screen: 'home', stack: [] }), homeCards, rail,

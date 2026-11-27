@@ -4,6 +4,8 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+- The Mac app is only HQ now. The old bar across the top (the watchdog dog, the Call, Status and texts tabs, the zoom buttons) is gone: everything it led to lives inside HQ itself. You move the window by its top edge like any Mac app, a new text still gives a Mac notification and a number on the Dock icon, and Turn everything on is in the View menu. An update rebuilds the Mac app by itself.
+
 ## 1.2.0 · 27 November 2026
 
 - HQ is built new from the ground up, with a new look. In Settings you choose one of three designs: Spotlight (one agent at a time, swipe between them), Thread (each agent as a conversation) or Desk (all three side by side, with today underneath). Each one comes in light and dark, on the phone and on the Mac.

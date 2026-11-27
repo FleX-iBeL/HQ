@@ -170,7 +170,7 @@ Only the main commits the workspace and pushes it to its private GitHub repo. Th
 | Lid closed, keep working | `pmset disablesleep`, allowed once through `sudoers` | `powercfg` (lid close action), set once as administrator |
 | Temperature, battery, laptop stats | IOKit, `pmset`, `vm_stat` (`routine/*.py`, `*.m`) | WMI or `psutil` |
 | Paths and shells | zsh scripts, Homebrew paths | PowerShell, the Windows paths |
-| The desktop app | `desktop/HQ.swift` (Swift, WebKit), built by `desktop/build.sh` | A WebView2 window around the same strip (`desktop/shell.html`) and `desktop/hq_control.py`, or just the browser |
+| The desktop app | `desktop/HQ.swift` (Swift, WebKit), built by `desktop/build.sh` | A WebView2 window on the same page (the call line's address with `?app=1`), or just the browser |
 
 Not tried yet, so say so if you go this way: running HQ inside WSL (Ubuntu on Windows) as if it were a Linux server, with the installer's Linux path; the call page then opens in the Windows browser on `http://127.0.0.1:7860`.
 

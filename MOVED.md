@@ -69,7 +69,7 @@ and running work by itself), the agents running themselves, news and feedback st
 
 | | Decision | Why |
 |---|---|---|
-| desktop/ | whole | the Mac app, copied, not reworked (it still points at 4748 and 7860) |
+| desktop/ | reworked | the Mac app: one window that is the HQ page, the old strip above it (the dog, the Call, Status and texts tabs) gone; `hq_control.py` and the icons as they were |
 | install/ | trimmed | its test step runs tests/run.py instead of the old flows |
 | template/ | trimmed | no cycles.json or handbook; the backend switches HQ2 has; no team in its texts |
 | workflows/ | whole | the map's guide and blank |
