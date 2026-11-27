@@ -4,6 +4,13 @@ What was added and changed in each version of HQ, newest first. The small grey v
 
 ## Coming next
 
+## 1.2.0 · 27 November 2026
+
+- HQ is built new from the ground up, with a new look. In Settings you choose one of three designs: Spotlight (one agent at a time, swipe between them), Thread (each agent as a conversation) or Desk (all three side by side, with today underneath). Each one comes in light and dark, on the phone and on the Mac.
+- Everything now sits with one of your three agents. Donna has your day: texts, reminders, the calendar, the to-do list and the groceries. Pepper has the coaching. Moneypenny has the status of HQ itself.
+- Gestures: swipe between the agents, pull up for everything Donna holds, and drag to-do items up or down.
+- After you update, reload the Mac app (Cmd+R) and close and reopen the HQ app on your phone, so they load the new page. Your data, your phone's sign-up for texts and the addresses all stay the same.
+- What's gone: the team and its job queue, the agents working by themselves (their check-ins during the day and their night shifts), the news, the feedback box and the old status page. Your agents now answer when you call or text them, and they still send the reminders you asked for. Files you have from those parts stay in your workspace and are left alone.
 - A bucketlist: things you want to live, get or do. Each one can have a kind (an experience, a product, a service), a price that is once, a month or a year, links, a time goal, the hours it takes, a score for how much it brings your vision closer, and notes. Break it down into sub-items as deep as you like; each sub-item has all of the same, and the one above adds up the money, the hours and how many are done. It's in To-do, next to your groceries, and your agents keep it when you ask on a call or in a text.
 - The wishlist works the same way now: a price, links, notes and sub-items on every wish. It replaces the old wishlist in your to-do file: your wishes move over by themselves, with everything each one had, and the old table is taken out of the file.
 
