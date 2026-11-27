@@ -1044,9 +1044,22 @@ def gone_lines():
             routines.drop(key, keep=tuple(k for k in have if k != key))
         try:
             if incidents.is_down(key):
+                inc = incidents._open(incidents.read(), key) or {}
                 incidents.up(key, what="That part is no longer in HQ")
+                quiet_close(str(inc.get("id")))
         except Exception as e:
             log(f"gone lines: {key}: {e!r}")
+
+
+def quiet_close(iid):
+    """A part that left HQ isn't 'back': Donna forgets she told him it was down, so its close sends no all-clear text."""
+    sys.path.insert(0, os.path.join(JV, "app"))
+    import direct_line
+    path = direct_line.local_state_file()
+    s = direct_line._read(path, {})
+    if iid in (s.get("told") or {}):
+        s["told"].pop(iid)
+        direct_line._write(path, s)
 
 
 def tick():
