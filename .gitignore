@@ -9,3 +9,8 @@ models/
 node_modules/
 .venv
 models
+# Kept from the old HQ's list, so an update and a stash never sweep these up
+/HQ
+/local/
+/updates/
+/samples/_check.wav
